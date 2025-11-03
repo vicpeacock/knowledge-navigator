@@ -1,0 +1,404 @@
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from uuid import UUID
+from typing import List
+import shutil
+from pathlib import Path
+
+from app.db.database import get_db
+from app.models.database import File as FileModel, Session as SessionModel
+from app.models.schemas import File as FileSchema
+from app.core.config import settings
+from app.services.file_processor import FileProcessor
+from app.services.embedding_service import EmbeddingService
+from app.core.dependencies import get_memory_manager
+from app.core.memory_manager import MemoryManager
+
+router = APIRouter()
+file_processor = FileProcessor()
+embedding_service = EmbeddingService()
+
+
+@router.post("/upload/{session_id}", response_model=FileSchema, status_code=201)
+async def upload_file(
+    session_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    memory: MemoryManager = Depends(get_memory_manager),
+):
+    """Upload and process a file for a session"""
+    # Verify session exists
+    result = await db.execute(
+        select(SessionModel).where(SessionModel.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Check file size
+    file_content = await file.read()
+    if len(file_content) > settings.max_file_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max size: {settings.max_file_size} bytes",
+        )
+    
+    # Save file
+    session_dir = settings.upload_dir / str(session_id)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    
+    filepath = session_dir / file.filename
+    with open(filepath, "wb") as f:
+        f.write(file_content)
+    
+    # Process file
+    file_data = file_processor.extract_text(str(filepath), file.content_type)
+    
+    # Create file record
+    file_record = FileModel(
+        session_id=session_id,
+        filename=file.filename,
+        filepath=str(filepath),
+        mime_type=file.content_type,
+        metadata=file_data["metadata"],
+    )
+    db.add(file_record)
+    await db.commit()
+    await db.refresh(file_record)
+    
+    # Generate embeddings and store in ChromaDB if text was extracted
+    if file_data["text"]:
+        try:
+            embedding = embedding_service.generate_embedding(file_data["text"])
+            embedding_id = f"file_{file_record.id}"
+            
+            # Truncate text if too long (ChromaDB has limits)
+            text_content = file_data["text"]
+            if len(text_content) > 20000:  # ChromaDB document limit
+                text_content = text_content[:20000] + "... [truncated]"
+            
+            memory.file_embeddings_collection.add(
+                ids=[embedding_id],
+                embeddings=[embedding],
+                documents=[text_content],
+                metadatas=[
+                    {
+                        "session_id": str(session_id),
+                        "file_id": str(file_record.id),
+                        "filename": file.filename,
+                    }
+                ],
+            )
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"File embedding stored: {file.filename}, session: {session_id}, text length: {len(file_data['text'])}")
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error storing file embedding: {e}")
+            # Continue even if embedding fails
+    else:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"No text extracted from file: {file.filename}")
+    
+    return file_record
+
+
+@router.get("/session/{session_id}", response_model=List[FileSchema])
+async def get_session_files(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all files for a session"""
+    result = await db.execute(
+        select(FileModel)
+        .where(FileModel.session_id == session_id)
+        .order_by(FileModel.uploaded_at.desc())
+    )
+    files = result.scalars().all()
+    # Map session_metadata to metadata for response
+    return [
+        FileSchema(
+            id=f.id,
+            session_id=f.session_id,
+            filename=f.filename,
+            filepath=f.filepath,
+            mime_type=f.mime_type,
+            uploaded_at=f.uploaded_at,
+            metadata=f.session_metadata or {},
+        )
+        for f in files
+    ]
+
+
+@router.get("/id/{file_id}", response_model=FileSchema)
+async def get_file(
+    file_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a file by ID"""
+    result = await db.execute(
+        select(FileModel).where(FileModel.id == file_id)
+    )
+    file = result.scalar_one_or_none()
+    
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Map session_metadata to metadata for response
+    return FileSchema(
+        id=file.id,
+        session_id=file.session_id,
+        filename=file.filename,
+        filepath=file.filepath,
+        mime_type=file.mime_type,
+        uploaded_at=file.uploaded_at,
+        metadata=file.session_metadata or {},
+    )
+
+
+@router.delete("/id/{file_id}", status_code=204)
+async def delete_file(
+    file_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    memory: MemoryManager = Depends(get_memory_manager),
+):
+    """Delete a file"""
+    result = await db.execute(
+        select(FileModel).where(FileModel.id == file_id)
+    )
+    file = result.scalar_one_or_none()
+    
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Delete from ChromaDB - remove all embeddings for this file
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    embedding_id = f"file_{file_id}"
+    deleted_from_chroma = False
+    
+    # First, check what embeddings exist for this file and delete them all
+    embedding_ids_to_delete = []
+    try:
+        # Try to find embeddings by file_id in metadata
+        existing_embeddings = memory.file_embeddings_collection.get(
+            where={"file_id": str(file_id)}
+        )
+        embedding_ids_to_delete = existing_embeddings.get('ids', [])
+        logger.info(f"Found {len(embedding_ids_to_delete)} embeddings for file_id {file_id}")
+        if embedding_ids_to_delete:
+            logger.info(f"Embedding IDs to delete: {embedding_ids_to_delete}")
+    except Exception as e:
+        logger.warning(f"Could not check existing embeddings by file_id: {e}")
+        # Try alternative method
+        try:
+            existing_embeddings = memory.file_embeddings_collection.get(
+                where={"session_id": str(file.session_id)}
+            )
+            # Filter by file_id in metadata manually
+            all_ids = existing_embeddings.get('ids', [])
+            all_metadatas = existing_embeddings.get('metadatas', [])
+            for i, meta in enumerate(all_metadatas):
+                if isinstance(meta, dict) and meta.get("file_id") == str(file_id):
+                    if i < len(all_ids):
+                        embedding_ids_to_delete.append(all_ids[i])
+            logger.info(f"Found {len(embedding_ids_to_delete)} embeddings for file_id {file_id} (alternative method)")
+        except Exception as e2:
+            logger.warning(f"Could not check existing embeddings (alternative): {e2}")
+    
+    # Always add the standard embedding_id format
+    embedding_ids_to_delete.append(embedding_id)
+    # Remove duplicates
+    embedding_ids_to_delete = list(set(embedding_ids_to_delete))
+    
+    deleted_from_chroma = False
+    try:
+        # Strategy 1: Delete all found IDs
+        if embedding_ids_to_delete:
+            try:
+                result = memory.file_embeddings_collection.delete(ids=embedding_ids_to_delete)
+                logger.info(f"Deleted {len(embedding_ids_to_delete)} file embeddings by IDs: {embedding_ids_to_delete}")
+                deleted_from_chroma = True
+            except Exception as e:
+                logger.debug(f"Could not delete by IDs {embedding_ids_to_delete}: {e}")
+        
+        # Strategy 2: Delete by ID (standard format) - fallback if batch delete failed
+        if not deleted_from_chroma:
+            try:
+                result = memory.file_embeddings_collection.delete(ids=[embedding_id])
+                logger.info(f"Deleted file embedding by ID: {embedding_id}, result: {result}")
+                deleted_from_chroma = True
+            except Exception as e:
+                logger.debug(f"Could not delete by ID {embedding_id}: {e}")
+        
+        # Strategy 3: Delete by file_id in metadata (more reliable - try all syntax variants)
+        if not deleted_from_chroma:
+            try:
+                # ChromaDB where clause needs $eq operator for equality
+                memory.file_embeddings_collection.delete(
+                    where={"file_id": {"$eq": str(file_id)}}
+                )
+                logger.info(f"Deleted file embeddings by file_id metadata ($eq): {file_id}")
+                deleted_from_chroma = True
+            except Exception as e1:
+                # Try with simple equality (older ChromaDB versions)
+                try:
+                    memory.file_embeddings_collection.delete(
+                        where={"file_id": str(file_id)}
+                    )
+                    logger.info(f"Deleted file embeddings by file_id metadata (simple): {file_id}")
+                    deleted_from_chroma = True
+                except Exception as e2:
+                    logger.debug(f"Could not delete by file_id metadata {file_id}: {e1}, {e2}")
+        
+        # Strategy 4: Delete by session_id and file_id combination
+        if not deleted_from_chroma:
+            try:
+                # ChromaDB where clause with multiple conditions
+                memory.file_embeddings_collection.delete(
+                    where={"$and": [{"session_id": {"$eq": str(file.session_id)}}, {"file_id": {"$eq": str(file_id)}}]}
+                )
+                logger.info(f"Deleted file embeddings by session_id and file_id ($and): {file.session_id}, {file_id}")
+                deleted_from_chroma = True
+            except Exception as e1:
+                # Try with simple equality
+                try:
+                    memory.file_embeddings_collection.delete(
+                        where={"session_id": str(file.session_id), "file_id": str(file_id)}
+                    )
+                    logger.info(f"Deleted file embeddings by session_id and file_id (simple): {file.session_id}, {file_id}")
+                    deleted_from_chroma = True
+                except Exception as e2:
+                    logger.debug(f"Could not delete by session_id and file_id: {e1}, {e2}")
+        
+        if not deleted_from_chroma:
+            logger.error(f"Failed to delete file embedding from ChromaDB for file {file_id}. Embedding may still exist in RAG.")
+    except Exception as e:
+        logger.error(f"Error deleting file embedding from ChromaDB: {e}", exc_info=True)
+        # Continue with file deletion even if ChromaDB deletion fails
+    
+    # Delete physical file
+    if Path(file.filepath).exists():
+        Path(file.filepath).unlink()
+    
+    # Delete from database
+    await db.delete(file)
+    await db.commit()
+    return None
+
+
+@router.post("/cleanup-orphans", status_code=200)
+async def cleanup_orphan_embeddings(
+    db: AsyncSession = Depends(get_db),
+    memory: MemoryManager = Depends(get_memory_manager),
+):
+    """Clean up orphaned embeddings (embeddings that point to files that no longer exist)"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Get all embeddings from ChromaDB
+        all_embeddings = memory.file_embeddings_collection.get()
+        embedding_ids = all_embeddings.get('ids', [])
+        metadatas = all_embeddings.get('metadatas', [])
+        
+        if not embedding_ids:
+            return {
+                "message": "No embeddings found in ChromaDB",
+                "total": 0,
+                "orphaned": 0,
+                "deleted": 0
+            }
+        
+        # Get all file IDs from database
+        result = await db.execute(select(FileModel.id))
+        existing_file_ids = {str(fid) for fid in result.scalars().all()}
+        
+        # Find orphaned embeddings
+        orphaned_ids = []
+        for i, embedding_id in enumerate(embedding_ids):
+            metadata = metadatas[i] if i < len(metadatas) else {}
+            file_id = None
+            if isinstance(metadata, dict):
+                file_id = metadata.get("file_id")
+            elif metadata is not None:
+                try:
+                    if hasattr(metadata, 'get'):
+                        file_id = metadata.get("file_id")
+                    elif hasattr(metadata, '__dict__'):
+                        file_id = getattr(metadata, 'file_id', None)
+                except:
+                    pass
+            
+            if file_id and str(file_id) not in existing_file_ids:
+                orphaned_ids.append(embedding_id)
+        
+        # Delete orphaned embeddings
+        deleted_count = 0
+        if orphaned_ids:
+            # Delete in batches
+            batch_size = 100
+            for i in range(0, len(orphaned_ids), batch_size):
+                batch = orphaned_ids[i:i + batch_size]
+                memory.file_embeddings_collection.delete(ids=batch)
+                deleted_count += len(batch)
+                logger.info(f"Deleted batch {i//batch_size + 1}: {len(batch)} orphaned embeddings")
+        
+        return {
+            "message": f"Cleanup complete",
+            "total": len(embedding_ids),
+            "orphaned": len(orphaned_ids),
+            "deleted": deleted_count,
+            "remaining": len(embedding_ids) - deleted_count
+        }
+    except Exception as e:
+        logger.error(f"Error cleaning up orphaned embeddings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error cleaning up orphaned embeddings: {str(e)}")
+
+
+@router.post("/{session_id}/search")
+async def search_files(
+    session_id: UUID,
+    query: str,
+    n_results: int = 5,
+    db: AsyncSession = Depends(get_db),
+    memory: MemoryManager = Depends(get_memory_manager),
+):
+    """Search files in a session using semantic search"""
+    query_embedding = embedding_service.generate_embedding(query)
+    
+    results = memory.file_embeddings_collection.query(
+        query_embeddings=[query_embedding],
+        n_results=n_results,
+        where={"session_id": str(session_id)},
+    )
+    
+    file_ids = [
+        metadata.get("file_id")
+        for metadata in results.get("metadatas", [[]])[0]
+    ]
+    
+    # Get file records
+    files = []
+    if file_ids:
+        result = await db.execute(
+            select(FileModel).where(FileModel.id.in_(file_ids))
+        )
+        files = result.scalars().all()
+    
+    return {
+        "query": query,
+        "results": [
+            {
+                "file": FileSchema.model_validate(f),
+                "relevance_score": 1.0,  # Could calculate actual similarity
+            }
+            for f in files
+        ],
+    }
+
