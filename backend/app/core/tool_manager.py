@@ -1057,26 +1057,26 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
         
         # Now check authentication status
         if whatsapp_service.driver:
-                try:
-                    auth_status = whatsapp_service._check_authentication_status()
-                    if auth_status.get("authenticated", False):
-                        whatsapp_service.is_authenticated = True
-                    else:
-                        return (None, {
-                            "error": f"WhatsApp non autenticato. Status: {auth_status.get('status')}. {auth_status.get('message', 'Per favore configura WhatsApp prima dalla pagina Integrations.')}"
-                        })
-                except Exception as e:
-                    logger.warning(f"Error checking WhatsApp auth status: {e}")
-                    # If check fails but driver exists, try anyway
-                    if not whatsapp_service.is_authenticated:
-                        return (None, {
-                            "error": f"WhatsApp non autenticato. Errore nel controllo: {str(e)}"
-                        })
-            else:
-                # Still no driver after reconnect attempt
-                return (None, {
-                    "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
-                })
+            try:
+                auth_status = whatsapp_service._check_authentication_status()
+                if auth_status.get("authenticated", False):
+                    whatsapp_service.is_authenticated = True
+                else:
+                    return (None, {
+                        "error": f"WhatsApp non autenticato. Status: {auth_status.get('status')}. {auth_status.get('message', 'Per favore configura WhatsApp prima dalla pagina Integrations.')}"
+                    })
+            except Exception as e:
+                logger.warning(f"Error checking WhatsApp auth status: {e}")
+                # If check fails but driver exists, try anyway
+                if not whatsapp_service.is_authenticated:
+                    return (None, {
+                        "error": f"WhatsApp non autenticato. Errore nel controllo: {str(e)}"
+                    })
+        else:
+            # Still no driver after reconnect attempt
+            return (None, {
+                "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
+            })
             
             return (whatsapp_service, None)
     
