@@ -134,6 +134,24 @@ class ToolManager:
                     }
                 }
             },
+            {
+                "name": "send_whatsapp_message",
+                "description": "Invia un messaggio WhatsApp a un contatto. Usa questo tool quando l'utente chiede di inviare un messaggio WhatsApp. Richiede che WhatsApp sia configurato e autenticato.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "phone_number": {
+                            "type": "string",
+                            "description": "Numero di telefono del destinatario (formato: +39XXXXXXXXXX o 39XXXXXXXXXX, senza spazi). REQUIRED."
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Il messaggio da inviare. REQUIRED."
+                        }
+                    },
+                    "required": ["phone_number", "message"]
+                }
+            },
         ]
     
     async def get_mcp_tools(self) -> List[Dict[str, Any]]:
@@ -260,6 +278,10 @@ class ToolManager:
                 return result
             elif tool_name == "get_whatsapp_messages":
                 result = await self._execute_get_whatsapp_messages(parameters)
+                logger.info(f"Tool {tool_name} completed")
+                return result
+            elif tool_name == "send_whatsapp_message":
+                result = await self._execute_send_whatsapp_message(parameters)
                 logger.info(f"Tool {tool_name} completed")
                 return result
             else:
