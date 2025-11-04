@@ -129,7 +129,11 @@ Il sistema può essere integrato con pre-commit hooks o chiamato manualmente pri
 
 ## Stato Corrente
 
-**Versione Attuale:** v0.1.1-working  
+**Versione Attuale:** v0.1.2-auto-versioning  
+**Data:** 2025-11-04  
+**Changelog:** Sistema di auto-versioning aggiunto
+
+**Versione Precedente:** v0.1.1-working  
 **Data:** 2025-11-04  
 **Funzionalità Verificate:**
 - ✅ Backend si avvia correttamente
