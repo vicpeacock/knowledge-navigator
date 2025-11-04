@@ -51,12 +51,12 @@ export function StatusProvider({ children }: { children: ReactNode }) {
     <StatusContext.Provider value={{ addStatusMessage, removeStatusMessage, clearAllStatusMessages, statusMessages }}>
       {children}
       
-      {/* Status Messages Panel - Collapsible, positioned top-right */}
-      <div className={`fixed top-4 right-4 w-96 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg transition-all duration-300 z-50 ${
-        statusPanelExpanded ? 'h-96' : 'h-12'
+      {/* Status Messages Panel - Collapsible, positioned at bottom */}
+      <div className={`fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shadow-lg transition-all duration-300 z-50 ${
+        statusPanelExpanded ? 'h-64' : 'h-12'
       }`}>
         <div 
-          className="flex items-center justify-between p-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-lg"
+          className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
           onClick={() => setStatusPanelExpanded(!statusPanelExpanded)}
         >
           <div className="flex items-center gap-2">
@@ -91,7 +91,7 @@ export function StatusProvider({ children }: { children: ReactNode }) {
         </div>
         
         {statusPanelExpanded && (
-          <div className="h-[calc(100%-3rem)] overflow-y-auto p-3 space-y-2 max-h-80">
+          <div className="h-[calc(100%-3rem)] overflow-y-auto p-3 space-y-2">
             {statusMessages.length === 0 ? (
               <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
                 Nessun messaggio di stato
