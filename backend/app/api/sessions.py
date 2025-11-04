@@ -559,6 +559,7 @@ async def chat(
     
     # Get current date/time and location for context
     from datetime import datetime
+    import os  # Import os here to use os.environ
     try:
         from zoneinfo import ZoneInfo
     except ImportError:

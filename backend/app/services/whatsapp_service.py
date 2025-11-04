@@ -254,30 +254,50 @@ class WhatsAppService:
                         raise Exception("ChromeDriver initialization timed out. Please close Chrome if it's already open and try again.")
                     except Exception as e:
                         error_msg = str(e)
-                        logger.warning(f"Failed with webdriver-manager: {error_msg}")
-                        
-                        # Check if error is about Chrome already running
-                        if "instance exited" in error_msg.lower() or "chrome instance" in error_msg.lower():
-                            raise Exception(
-                                "Chrome is already running with this profile. "
-                                "Please close all Chrome windows and try again, or use a different profile."
-                            )
-                        
-                        # Fallback: try without service
-                        try:
-                            logger.info("Trying fallback: ChromeDriver from PATH")
-                            self.driver = await asyncio.wait_for(
-                                loop.run_in_executor(executor, lambda: webdriver.Chrome(options=options)),
-                                timeout=15.0
-                            )
-                        except Exception as e2:
-                            error_msg2 = str(e2)
-                            if "instance exited" in error_msg2.lower():
-                                raise Exception(
-                                    "Chrome is already running. Please close all Chrome windows and try again."
+                        # Check if error is about wrong file (webdriver-manager bug)
+                        if "THIRD_PARTY_NOTICES" in error_msg or "Exec format error" in error_msg:
+                            logger.warning(f"webdriver-manager returned wrong file, trying fallback...")
+                            # Fallback: try without service (use ChromeDriver from PATH or system)
+                            try:
+                                logger.info("Trying fallback: ChromeDriver from PATH")
+                                self.driver = await asyncio.wait_for(
+                                    loop.run_in_executor(executor, lambda: webdriver.Chrome(options=options)),
+                                    timeout=15.0
                                 )
-                            logger.error(f"Fallback also failed: {e2}")
-                            raise Exception(f"ChromeDriver failed: {error_msg2}")
+                                logger.info("Chrome driver initialized successfully with fallback")
+                            except Exception as e2:
+                                error_msg2 = str(e2)
+                                if "instance exited" in error_msg2.lower():
+                                    raise Exception(
+                                        "Chrome is already running. Please close all Chrome windows and try again."
+                                    )
+                                logger.error(f"Fallback also failed: {e2}")
+                                raise Exception(f"ChromeDriver failed: {error_msg2}")
+                        else:
+                            logger.warning(f"Failed with webdriver-manager: {error_msg}")
+                            
+                            # Check if error is about Chrome already running
+                            if "instance exited" in error_msg.lower() or "chrome instance" in error_msg.lower():
+                                raise Exception(
+                                    "Chrome is already running with this profile. "
+                                    "Please close all Chrome windows and try again, or use a different profile."
+                                )
+                            
+                            # Fallback: try without service
+                            try:
+                                logger.info("Trying fallback: ChromeDriver from PATH")
+                                self.driver = await asyncio.wait_for(
+                                    loop.run_in_executor(executor, lambda: webdriver.Chrome(options=options)),
+                                    timeout=15.0
+                                )
+                            except Exception as e2:
+                                error_msg2 = str(e2)
+                                if "instance exited" in error_msg2.lower():
+                                    raise Exception(
+                                        "Chrome is already running. Please close all Chrome windows and try again."
+                                    )
+                                logger.error(f"Fallback also failed: {e2}")
+                                raise Exception(f"ChromeDriver failed: {error_msg2}")
                             
             except Exception as e:
                 logger.error(f"ChromeDriver initialization error: {e}")
@@ -526,32 +546,57 @@ class WhatsAppService:
                     logger.info("Waiting for chat list to be visible...")
                     time.sleep(2)  # Give WhatsApp time to render
                     
-                    # Try multiple selectors for chat items
+                    # Wait longer for chat list to fully render
+                    logger.info("Waiting for chat list to render...")
+                    time.sleep(3)  # Give WhatsApp more time to load chats
+                    
+                    # Try multiple selectors for chat items (more comprehensive)
                     chat_selectors = [
                         "[data-testid='chat-item']",
                         "div[role='listitem']",
-                        "div._8nE1Y",
+                        "div[role='row']",  # Chat rows
+                        "div._8nE1Y",  # WhatsApp internal class
                         "div[data-testid='list-item']",
+                        "#pane-side div[role='listitem']",  # More specific
+                        "#side div[role='listitem']",  # Alternative
                     ]
                     
                     first_chat = None
                     for selector in chat_selectors:
                         try:
                             # Wait for elements to be present and visible
-                            chats = WebDriverWait(self.driver, 10).until(
+                            chats = WebDriverWait(self.driver, 15).until(
                                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
                             )
                             # Filter for visible chats
-                            visible_chats = [c for c in chats if c.is_displayed()]
+                            visible_chats = [c for c in chats if c.is_displayed() and c.size['height'] > 0]
                             if visible_chats:
                                 first_chat = visible_chats[0]
                                 logger.info(f"Found {len(visible_chats)} visible chats using selector: {selector}")
                                 break
                         except TimeoutException:
+                            logger.debug(f"Timeout waiting for selector: {selector}")
                             continue
                         except Exception as e:
                             logger.debug(f"Error with selector {selector}: {e}")
                             continue
+                    
+                    # If still no chat, try JavaScript to find chats
+                    if not first_chat:
+                        logger.info("Trying JavaScript to find chats...")
+                        try:
+                            # Use JavaScript to find chat elements
+                            chats_js = self.driver.execute_script("""
+                                return Array.from(document.querySelectorAll('[data-testid*="chat"], [role="listitem"], [role="row"]'))
+                                    .filter(el => el.offsetHeight > 0 && window.getComputedStyle(el).display !== 'none')
+                                    .slice(0, 5);
+                            """)
+                            if chats_js:
+                                # Use the first element's WebElement reference
+                                first_chat = self.driver.find_element(By.CSS_SELECTOR, "[data-testid*='chat'], [role='listitem'], [role='row']")
+                                logger.info(f"Found chats using JavaScript, count: {len(chats_js)}")
+                        except Exception as e:
+                            logger.debug(f"JavaScript chat search failed: {e}")
                     
                     if first_chat:
                         # Scroll to make sure chat is visible
