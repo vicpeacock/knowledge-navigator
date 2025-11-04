@@ -26,6 +26,7 @@ export default function IntegrationsPage() {
   const [connectingEmail, setConnectingEmail] = useState(false)
   const [connectingWhatsApp, setConnectingWhatsApp] = useState(false)
   const [whatsappConnected, setWhatsappConnected] = useState(false)
+  const [whatsappCheckInterval, setWhatsappCheckInterval] = useState<NodeJS.Timeout | null>(null)
   const [connectingMCP, setConnectingMCP] = useState(false)
   const [mcpServerUrl, setMcpServerUrl] = useState('http://host.docker.internal:8080')
   const [mcpServerName, setMcpServerName] = useState('MCP Server')
@@ -44,6 +45,13 @@ export default function IntegrationsPage() {
       alert(`${integrationType === 'email' ? 'Gmail' : 'Calendario'} collegato con successo!`)
       // Clean URL
       window.history.replaceState({}, document.title, '/integrations')
+    }
+    
+    // Cleanup WhatsApp check interval on unmount
+    return () => {
+      if (whatsappCheckInterval) {
+        clearInterval(whatsappCheckInterval)
+      }
     }
   }, [])
 
@@ -265,10 +273,34 @@ export default function IntegrationsPage() {
         const message = response.data.message || 'WhatsApp Web si sta aprendo in una finestra Chrome separata.'
         alert(message)
         
-        // Auto-check status after a delay
-        setTimeout(async () => {
-          await checkWhatsAppStatus()
-        }, 3000)
+        // Auto-check status periodically until authenticated
+        let checkCount = 0
+        const maxChecks = 20 // Check for 60 seconds (20 * 3 seconds)
+        
+        const checkInterval = setInterval(async () => {
+          checkCount++
+          try {
+            const statusResponse = await integrationsApi.whatsapp.getStatus()
+            if (statusResponse.data?.authenticated) {
+              setWhatsappConnected(true)
+              clearInterval(checkInterval)
+              setWhatsappCheckInterval(null)
+              alert('✅ WhatsApp è connesso!')
+            } else if (checkCount >= maxChecks) {
+              clearInterval(checkInterval)
+              setWhatsappCheckInterval(null)
+              // Don't show alert, just stop checking silently
+            }
+          } catch (error) {
+            console.error('Error checking status:', error)
+            if (checkCount >= maxChecks) {
+              clearInterval(checkInterval)
+              setWhatsappCheckInterval(null)
+            }
+          }
+        }, 3000) // Check every 3 seconds
+        
+        setWhatsappCheckInterval(checkInterval)
       } else {
         alert('Setup completato ma con warning. Verifica lo stato manualmente.')
       }
