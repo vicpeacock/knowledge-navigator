@@ -118,7 +118,7 @@ class ToolManager:
             },
             {
                 "name": "get_whatsapp_messages",
-                "description": "Recupera messaggi WhatsApp. Usa questo tool quando l'utente chiede informazioni sui messaggi WhatsApp o vuole leggere messaggi recenti. Richiede che WhatsApp sia configurato e autenticato.",
+                "description": "Recupera messaggi WhatsApp. Usa questo tool quando l'utente chiede informazioni sui messaggi WhatsApp, vuole leggere messaggi recenti, o chiede messaggi di oggi/ieri. I messaggi includono testo, data/ora, e mittente. Richiede che WhatsApp sia configurato e autenticato.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -128,8 +128,12 @@ class ToolManager:
                         },
                         "max_results": {
                             "type": "integer",
-                            "description": "Numero massimo di messaggi da recuperare (default: 10)",
-                            "default": 10
+                            "description": "Numero massimo di messaggi da recuperare (default: 20 per avere più messaggi da filtrare per data)",
+                            "default": 20
+                        },
+                        "date_filter": {
+                            "type": "string",
+                            "description": "Filtro per data (opzionale). Valori: 'today' per messaggi di oggi, 'yesterday' per ieri, 'this_week' per questa settimana. Se non specificato, restituisce i messaggi più recenti."
                         }
                     }
                 }
@@ -1039,17 +1043,57 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                 }
             
             contact_name = parameters.get("contact_name")
-            max_results = parameters.get("max_results", 10)
+            max_results = parameters.get("max_results", 20)  # Increased default to have more to filter
+            date_filter = parameters.get("date_filter")
             
             messages = await whatsapp_service.get_recent_messages(
                 contact_name=contact_name,
                 max_results=max_results,
             )
             
+            # Filter messages by date if requested
+            if date_filter:
+                from datetime import datetime, timedelta
+                today = datetime.now().date()
+                
+                filtered_messages = []
+                for msg in messages:
+                    msg_date_str = msg.get("date")
+                    if not msg_date_str:
+                        # If no date, include it (better to show than hide)
+                        filtered_messages.append(msg)
+                        continue
+                    
+                    try:
+                        msg_date = datetime.fromisoformat(msg_date_str).date()
+                        
+                        if date_filter == "today":
+                            if msg_date == today:
+                                filtered_messages.append(msg)
+                        elif date_filter == "yesterday":
+                            yesterday = today - timedelta(days=1)
+                            if msg_date == yesterday:
+                                filtered_messages.append(msg)
+                        elif date_filter == "this_week":
+                            week_start = today - timedelta(days=today.weekday())
+                            if msg_date >= week_start:
+                                filtered_messages.append(msg)
+                        else:
+                            # Unknown filter, include all
+                            filtered_messages.append(msg)
+                    except Exception as e:
+                        logger.warning(f"Error parsing message date {msg_date_str}: {e}")
+                        # Include message if date parsing fails
+                        filtered_messages.append(msg)
+                
+                messages = filtered_messages
+            
             return {
                 "success": True,
                 "messages": messages,
                 "count": len(messages),
+                "date_filter": date_filter,
+                "note": "I messaggi includono testo, data/ora, e informazioni sul mittente (se disponibili)."
             }
         except Exception as e:
             return {"error": str(e)}

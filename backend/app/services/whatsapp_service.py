@@ -684,8 +684,11 @@ class WhatsAppService:
                     logger.warning("No message elements found")
                     return []
                 
-                # Extract text from messages
-                for elem in message_elements[-max_results:]:
+                # Extract text from messages with metadata
+                from datetime import datetime
+                today = datetime.now().date()
+                
+                for elem in message_elements[-max_results*2:]:  # Get more to filter by date
                     try:
                         # Try different selectors for message text
                         text = None
@@ -708,11 +711,86 @@ class WhatsAppService:
                         if not text:
                             text = elem.text.strip()
                         
-                        if text:
-                            messages.append({"text": text})
+                        if not text or len(text) < 3:  # Skip very short texts
+                            continue
+                        
+                        # Try to extract timestamp and sender info
+                        timestamp = None
+                        is_from_me = False
+                        sender = None
+                        
+                        # Try to find timestamp (WhatsApp shows relative times like "Oggi", "Ieri", or time)
+                        try:
+                            # Look for time element
+                            time_selectors = [
+                                "[data-testid='msg-time']",
+                                "span[title]",
+                                ".message-time",
+                            ]
+                            for time_selector in time_selectors:
+                                try:
+                                    time_elem = elem.find_element(By.CSS_SELECTOR, time_selector)
+                                    time_text = time_elem.text.strip() or time_elem.get_attribute("title") or ""
+                                    if time_text:
+                                        # Try to parse relative times
+                                        if "oggi" in time_text.lower() or "today" in time_text.lower():
+                                            timestamp = datetime.now()
+                                        elif "ieri" in time_text.lower() or "yesterday" in time_text.lower():
+                                            from datetime import timedelta
+                                            timestamp = datetime.now() - timedelta(days=1)
+                                        else:
+                                            # Try to parse time like "14:30"
+                                            try:
+                                                hour, minute = map(int, time_text.split(":"))
+                                                timestamp = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                            except:
+                                                pass
+                                        break
+                                except:
+                                    continue
+                        except:
+                            pass
+                        
+                        # Check if message is from me (sent) or received
+                        try:
+                            # Look for indicators of sent messages
+                            sent_indicators = elem.find_elements(By.CSS_SELECTOR, "[data-testid*='sent'], [data-icon='msg-dblcheck'], [data-icon='msg-check']")
+                            is_from_me = len(sent_indicators) > 0
+                        except:
+                            pass
+                        
+                        # Try to get sender name from contact name or chat title
+                        if not is_from_me:
+                            try:
+                                # Look for sender name in message element
+                                sender_elem = elem.find_element(By.CSS_SELECTOR, "[data-testid*='sender'], .message-sender")
+                                sender = sender_elem.text.strip()
+                            except:
+                                pass
+                        
+                        message_data = {
+                            "text": text,
+                            "timestamp": timestamp.isoformat() if timestamp else None,
+                            "date": timestamp.date().isoformat() if timestamp else None,
+                            "is_from_me": is_from_me,
+                            "sender": sender or ("Tu" if is_from_me else "Contatto"),
+                        }
+                        
+                        messages.append(message_data)
                     except Exception as e:
                         logger.debug(f"Error extracting message: {e}")
                         continue
+                
+                # Filter by date if needed (keep all if no date filter)
+                # Sort by timestamp (newest first) and limit to max_results
+                messages_with_timestamp = [m for m in messages if m.get("timestamp")]
+                messages_without_timestamp = [m for m in messages if not m.get("timestamp")]
+                
+                # Sort by timestamp descending
+                messages_with_timestamp.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+                
+                # Combine: first timestamped, then untimestamped
+                messages = messages_with_timestamp[:max_results] + messages_without_timestamp[:max_results-len(messages_with_timestamp)]
                 
                 logger.info(f"Successfully extracted {len(messages)} messages")
                         

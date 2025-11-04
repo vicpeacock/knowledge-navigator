@@ -6,6 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import json as json_lib
 import logging
+import os
 
 from app.db.database import get_db
 from app.models.database import Session as SessionModel, Message as MessageModel
@@ -556,6 +557,36 @@ async def chat(
     max_tool_iterations = 3  # Limit tool call iterations
     tool_iteration = 0
     
+    # Get current date/time and location for context
+    from datetime import datetime
+    import pytz
+    
+    try:
+        # Try to get timezone from environment or use UTC
+        tz_str = os.environ.get('TZ', 'Europe/Rome')  # Default to Italy
+        try:
+            tz = pytz.timezone(tz_str)
+        except:
+            tz = pytz.timezone('Europe/Rome')  # Fallback to Italy
+        
+        current_time = datetime.now(tz)
+        current_date = current_time.strftime('%A, %d %B %Y')  # e.g., "lunedì, 4 novembre 2024"
+        current_time_str = current_time.strftime('%H:%M:%S')  # e.g., "16:30:45"
+        timezone_name = tz_str.replace('_', ' ')
+        
+        # Get location info (can be configured via env)
+        location = os.environ.get('USER_LOCATION', 'Italia')  # Default to Italy
+        
+        time_context = f"""
+=== CONTESTO TEMPORALE E GEOGRAFICO ===
+Data e ora corrente: {current_date}, {current_time_str} ({timezone_name})
+Località: {location}
+Giorno della settimana: {current_time.strftime('%A')}
+"""
+    except Exception as e:
+        logger.warning(f"Error getting time context: {e}")
+        time_context = ""
+    
     # Tool calling loop: LLM can request tools, we execute them, then reinvoke LLM with results
     current_prompt = request.message
     response_text = ""
@@ -563,6 +594,7 @@ async def chat(
     response_data = None  # Initialize to avoid undefined variable
     
     import logging
+    import os
     logger = logging.getLogger(__name__)
     
     while tool_iteration < max_tool_iterations:
@@ -573,6 +605,9 @@ async def chat(
             # Use native tool calling if tools are available, otherwise fallback to prompt-based
             pass_tools = available_tools if tool_iteration == 0 else None
             pass_tools_description = tools_description if tool_iteration == 0 and not available_tools else None
+            
+            # Add time context to ollama client
+            ollama._time_context = time_context
             
             response_data = await ollama.generate_with_context(
                 prompt=current_prompt,

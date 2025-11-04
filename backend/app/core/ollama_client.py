@@ -74,6 +74,12 @@ class OllamaClient:
         """
         # Build system prompt with memory if available
         enhanced_system = system_prompt or "You are a helpful AI assistant."
+        
+        # Add time/location context if provided
+        time_context = getattr(self, '_time_context', None)
+        if time_context:
+            enhanced_system = time_context + "\n\n" + enhanced_system
+        
         if retrieved_memory:
             # Format memory context more clearly
             memory_context = "\n\n=== IMPORTANT: Context Information from Files and Memory ===\n"
