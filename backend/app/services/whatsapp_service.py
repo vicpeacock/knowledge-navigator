@@ -25,6 +25,8 @@ class WhatsAppService:
         # Use a completely isolated profile that won't interfere with user's Chrome
         # Store in a temp-like directory that's clearly separate
         self.default_profile_path = Path.home() / ".whatsapp_selenium_profile"
+        # Allow resetting profile if needed
+        self._profile_reset = False
     
     def _get_chrome_options(self, headless: bool = False, profile_path: Optional[str] = None):
         """Get Chrome options with proper configuration for macOS/Linux"""
@@ -197,6 +199,18 @@ class WhatsAppService:
                 self.driver = None
                 self.is_authenticated = False
             
+            # If profile reset is needed, clear the profile directory
+            if self._profile_reset:
+                import shutil
+                profile_path_to_clear = profile_path or str(self.default_profile_path)
+                if Path(profile_path_to_clear).exists():
+                    try:
+                        shutil.rmtree(profile_path_to_clear)
+                        logger.info(f"Cleared WhatsApp profile: {profile_path_to_clear}")
+                    except Exception as e:
+                        logger.warning(f"Could not clear profile: {e}")
+                self._profile_reset = False
+            
             # Note: If Chrome is already open manually with WhatsApp Web,
             # we'll use the same profile and Chrome should open already authenticated
             
@@ -297,6 +311,30 @@ class WhatsAppService:
             
             # Wait a bit more for page to fully load
             time.sleep(2)
+            
+            # Wait for WhatsApp Web to fully initialize - check for JavaScript errors
+            logger.info("Waiting for WhatsApp Web to fully initialize...")
+            try:
+                # Wait for the main app to be ready
+                WebDriverWait(self.driver, 20).until(
+                    lambda driver: driver.execute_script(
+                        "return window.Store && typeof window.Store !== 'undefined'"
+                    )
+                )
+                logger.info("WhatsApp Web Store is ready")
+            except TimeoutException:
+                logger.warning("WhatsApp Web Store not ready, but continuing...")
+                # Check for JavaScript errors
+                try:
+                    logs = self.driver.get_log('browser')
+                    errors = [log for log in logs if log['level'] == 'SEVERE']
+                    if errors:
+                        logger.warning(f"JavaScript errors found: {errors[:3]}")  # Log first 3 errors
+                except:
+                    pass
+            
+            # Additional wait for chats to load
+            time.sleep(5)  # Give WhatsApp time to load chats
             
             # Check initial status
             try:

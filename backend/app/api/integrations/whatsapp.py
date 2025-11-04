@@ -143,9 +143,14 @@ async def close_whatsapp(
 
 @router.post("/reset")
 async def reset_whatsapp(
+    clear_profile: bool = False,
     whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
 ):
-    """Force reset WhatsApp service - closes any hanging sessions"""
+    """Force reset WhatsApp service - closes any hanging sessions
+    
+    Args:
+        clear_profile: If True, clears the WhatsApp profile directory (requires re-authentication)
+    """
     try:
         # Force close driver if exists
         if whatsapp_service.driver:
@@ -155,10 +160,19 @@ async def reset_whatsapp(
                 pass
         whatsapp_service.driver = None
         whatsapp_service.is_authenticated = False
-        return {
-            "success": True,
-            "message": "WhatsApp service reset",
-        }
+        
+        # Clear profile if requested
+        if clear_profile:
+            whatsapp_service._profile_reset = True
+            return {
+                "success": True,
+                "message": "WhatsApp service reset and profile cleared. You will need to reconnect.",
+            }
+        else:
+            return {
+                "success": True,
+                "message": "WhatsApp service reset",
+            }
     except Exception as e:
         return {
             "success": True,
