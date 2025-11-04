@@ -614,11 +614,14 @@ Data e ora corrente: {date_italian}, {current_time_str} ({timezone_name})
 Località: {location}
 Giorno della settimana: {day_name}
 
-IMPORTANTE per richieste WhatsApp:
-- Se l'utente chiede messaggi WhatsApp, DEVI sempre chiamare il tool get_whatsapp_messages
-- NON assumere mai che WhatsApp non sia configurato senza aver chiamato il tool
-- Se l'utente chiede "messaggi di oggi" o "cosa ho ricevuto oggi", usa date_filter='today'
-- Se il tool restituisce un errore, allora puoi dire che WhatsApp non è configurato
+🔴 REGOLE CRITICHE per richieste WhatsApp:
+1. Se l'utente chiede QUALSIASI cosa su WhatsApp (messaggi, cosa ho ricevuto, messaggi di oggi, etc.), DEVI SEMPRE chiamare il tool get_whatsapp_messages PRIMA di rispondere
+2. NON assumere mai che WhatsApp non sia configurato senza aver chiamato il tool
+3. NON dire mai "non ho accesso" o "non posso" senza aver chiamato il tool
+4. Se l'utente chiede "messaggi di oggi", "cosa ho ricevuto oggi", "che messaggi ho ricevuto oggi", DEVI usare date_filter='today'
+5. Se l'utente chiede "ieri", usa date_filter='yesterday'
+6. Se il tool restituisce count=0, significa che non ci sono messaggi per quella data, NON che WhatsApp non è configurato
+7. Se il tool restituisce un errore esplicito, allora puoi dire che WhatsApp potrebbe non essere configurato
 """
     except Exception as e:
         logger.warning(f"Error getting time context: {e}")
@@ -646,8 +649,15 @@ IMPORTANTE per richieste WhatsApp:
             # Add time context to ollama client
             ollama._time_context = time_context
             
+            # Enhance prompt with explicit WhatsApp instructions if message mentions WhatsApp
+            enhanced_prompt = current_prompt
+            if "whatsapp" in current_prompt.lower() or "messaggi" in current_prompt.lower() or "oggi" in current_prompt.lower():
+                enhanced_prompt = f"""{current_prompt}
+
+🔴 IMPORTANTE: Se questa richiesta riguarda WhatsApp o messaggi, DEVI chiamare il tool get_whatsapp_messages. Non rispondere senza aver chiamato il tool."""
+            
             response_data = await ollama.generate_with_context(
-                prompt=current_prompt,
+                prompt=enhanced_prompt,
                 session_context=session_context,
                 retrieved_memory=retrieved_memory if retrieved_memory else None,
                 tools=pass_tools,

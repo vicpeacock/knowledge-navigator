@@ -118,7 +118,7 @@ class ToolManager:
             },
             {
                 "name": "get_whatsapp_messages",
-                "description": "Recupera messaggi WhatsApp. Usa questo tool quando l'utente chiede informazioni sui messaggi WhatsApp, vuole leggere messaggi recenti, o chiede messaggi di oggi/ieri. OBBLIGATORIO: Se l'utente chiede 'messaggi di oggi', 'messaggi ricevuti oggi', 'cosa ho ricevuto oggi', o qualsiasi richiesta che menziona 'oggi', DEVI sempre usare date_filter='today'. Se l'utente chiede 'ieri', usa date_filter='yesterday'. I messaggi includono testo, data/ora, e mittente. IMPORTANTE: Prima di dire che WhatsApp non è configurato, chiama sempre questo tool per verificare lo stato.",
+                "description": "🔴 OBBLIGATORIO per qualsiasi richiesta su WhatsApp! Usa questo tool quando l'utente: chiede messaggi WhatsApp, vuole vedere messaggi ricevuti, chiede 'cosa ho ricevuto oggi', 'messaggi di oggi', 'messaggi di ieri', o qualsiasi domanda relativa a WhatsApp. NON rispondere mai senza aver chiamato questo tool prima. OBBLIGATORIO: Se l'utente chiede 'messaggi di oggi', 'messaggi ricevuti oggi', 'cosa ho ricevuto oggi', 'che messaggi ho ricevuto oggi', o qualsiasi richiesta che menziona 'oggi', DEVI SEMPRE usare date_filter='today'. Se l'utente chiede 'ieri', usa date_filter='yesterday'. I messaggi includono testo, data/ora, e mittente. IMPORTANTE: Prima di dire che WhatsApp non è configurato o che non ci sono messaggi, DEVI chiamare questo tool per verificare.",
                 "parameters": {
                     "type": "object",
                     "properties": {
