@@ -1,20 +1,16 @@
 # Cursor Rules per Knowledge Navigator
 
-## Auto-Versioning
+## Auto-Versioning - IMPORTANTE
 
-PRIMA di modificare qualsiasi file di codice o configurazione, esegui SEMPRE:
+L'AI ASSISTANT DEVE SEMPRE chiamare automaticamente lo script di auto-versioning PRIMA di modificare qualsiasi file di codice o configurazione.
 
+Prima di ogni modifica, eseguire:
 ```bash
 python auto_version.py commit "Before [descrizione modifica]"
 ```
 
-Oppure:
-
-```bash
-./auto_version.sh commit "Before [descrizione modifica]"
-```
-
 Questo salva automaticamente lo stato corrente prima di ogni modifica, permettendo rollback facili.
+L'utente NON deve chiamarlo manualmente - è responsabilità dell'AI.
 
 ## Workflow Consigliato
 
