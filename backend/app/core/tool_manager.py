@@ -977,14 +977,37 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
         parameters: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Execute get_whatsapp_messages tool"""
-        from app.services.whatsapp_service import WhatsAppService
+        from app.api.integrations.whatsapp import get_whatsapp_service
+        import logging
+        
+        logger = logging.getLogger(__name__)
         
         try:
-            whatsapp_service = WhatsAppService()
+            # Use the same global instance as the API endpoint
+            whatsapp_service = get_whatsapp_service()
             
-            if not whatsapp_service.is_authenticated:
+            # Check authentication status
+            # If driver exists, check authentication status
+            if whatsapp_service.driver:
+                try:
+                    auth_status = whatsapp_service._check_authentication_status()
+                    if auth_status.get("authenticated", False):
+                        whatsapp_service.is_authenticated = True
+                    else:
+                        return {
+                            "error": "WhatsApp non autenticato. Per favore configura WhatsApp prima dalla pagina Integrations."
+                        }
+                except Exception as e:
+                    logger.warning(f"Error checking WhatsApp auth status: {e}")
+                    # If check fails but driver exists, try anyway
+                    if not whatsapp_service.is_authenticated:
+                        return {
+                            "error": "WhatsApp non autenticato. Per favore configura WhatsApp prima dalla pagina Integrations."
+                        }
+            else:
+                # No driver - need to setup first
                 return {
-                    "error": "WhatsApp non autenticato. Per favore configura WhatsApp prima usando l'endpoint /api/integrations/whatsapp/setup"
+                    "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
                 }
             
             contact_name = parameters.get("contact_name")
@@ -999,6 +1022,65 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                 "success": True,
                 "messages": messages,
                 "count": len(messages),
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def _execute_send_whatsapp_message(
+        self,
+        parameters: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Execute send_whatsapp_message tool"""
+        from app.api.integrations.whatsapp import get_whatsapp_service
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Use the same global instance as the API endpoint
+            whatsapp_service = get_whatsapp_service()
+            
+            # Check authentication status
+            # If driver exists, check authentication status
+            if whatsapp_service.driver:
+                try:
+                    auth_status = whatsapp_service._check_authentication_status()
+                    if auth_status.get("authenticated", False):
+                        whatsapp_service.is_authenticated = True
+                    else:
+                        return {
+                            "error": "WhatsApp non autenticato. Per favore configura WhatsApp prima dalla pagina Integrations."
+                        }
+                except Exception as e:
+                    logger.warning(f"Error checking WhatsApp auth status: {e}")
+                    # If check fails but driver exists, try anyway
+                    if not whatsapp_service.is_authenticated:
+                        return {
+                            "error": "WhatsApp non autenticato. Per favore configura WhatsApp prima dalla pagina Integrations."
+                        }
+            else:
+                # No driver - need to setup first
+                return {
+                    "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
+                }
+            
+            phone_number = parameters.get("phone_number")
+            message = parameters.get("message")
+            
+            if not phone_number:
+                return {"error": "Numero di telefono richiesto"}
+            if not message:
+                return {"error": "Messaggio richiesto"}
+            
+            await whatsapp_service.send_message_pywhatkit(
+                phone_number=phone_number,
+                message=message,
+            )
+            
+            return {
+                "success": True,
+                "message": f"Messaggio programmato per essere inviato a {phone_number}",
+                "note": "Il messaggio verrà inviato tra circa 1 minuto (tempo necessario per aprire WhatsApp Web)"
             }
         except Exception as e:
             return {"error": str(e)}
