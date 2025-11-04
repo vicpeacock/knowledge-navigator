@@ -688,7 +688,11 @@ class WhatsAppService:
                 from datetime import datetime
                 today = datetime.now().date()
                 
-                for elem in message_elements[-max_results*2:]:  # Get more to filter by date
+                # Get more messages to have better chance of finding today's messages
+                # WhatsApp Web loads messages dynamically, so we need to scroll and wait
+                messages_to_extract = max(max_results * 3, 50)  # Get at least 50 messages
+                
+                for elem in message_elements[-messages_to_extract:]:
                     try:
                         # Try different selectors for message text
                         text = None
@@ -769,11 +773,13 @@ class WhatsAppService:
                                         else:
                                             timestamp = datetime.now() - timedelta(days=1)
                                     else:
-                                        # Just time, assume today
+                                        # Just time, assume today (most common case in WhatsApp Web)
                                         time_match = re.search(r'(\d{1,2}):(\d{1,2})', timestamp_attr)
                                         if time_match:
                                             hour, minute = map(int, time_match.groups())
+                                            # Use today's date with the extracted time
                                             timestamp = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                            logger.debug(f"Parsed time-only timestamp: {timestamp} (assumed today)")
                             
                             # Fallback: try to find time element in the message
                             if not timestamp:
@@ -792,10 +798,12 @@ class WhatsAppService:
                                                 time_match = re.search(r'(\d{1,2}):(\d{1,2})', time_text)
                                                 if time_match:
                                                     hour, minute = map(int, time_match.groups())
-                                                    # Assume today if no date info
+                                                    # Assume today if no date info (common for recent messages)
                                                     timestamp = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                                    logger.debug(f"Parsed time from element: {timestamp} (assumed today)")
                                                     break
-                                            except:
+                                            except Exception as e:
+                                                logger.debug(f"Error parsing time from element: {e}")
                                                 pass
                                     except:
                                         continue

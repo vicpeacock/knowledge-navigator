@@ -612,6 +612,12 @@ async def chat(
 Data e ora corrente: {date_italian}, {current_time_str} ({timezone_name})
 Località: {location}
 Giorno della settimana: {day_name}
+
+IMPORTANTE per richieste WhatsApp:
+- Se l'utente chiede messaggi WhatsApp, DEVI sempre chiamare il tool get_whatsapp_messages
+- NON assumere mai che WhatsApp non sia configurato senza aver chiamato il tool
+- Se l'utente chiede "messaggi di oggi" o "cosa ho ricevuto oggi", usa date_filter='today'
+- Se il tool restituisce un errore, allora puoi dire che WhatsApp non è configurato
 """
     except Exception as e:
         logger.warning(f"Error getting time context: {e}")

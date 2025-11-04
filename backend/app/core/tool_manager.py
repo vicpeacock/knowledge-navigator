@@ -1057,10 +1057,16 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                 from datetime import datetime, timedelta
                 today = datetime.now().date()
                 
+                logger.info(f"Filtering messages by date: date_filter={date_filter}, today={today}, total messages={len(messages)}")
+                
                 filtered_messages = []
+                messages_without_date = 0
+                messages_with_different_date = 0
+                
                 for msg in messages:
                     msg_date_str = msg.get("date")
                     msg_timestamp_str = msg.get("timestamp")
+                    msg_text_preview = msg.get("text", "")[:50] if msg.get("text") else "no text"
                     
                     # Try to get date from timestamp first (more precise)
                     msg_date = None
@@ -1068,36 +1074,48 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                         try:
                             msg_datetime = datetime.fromisoformat(msg_timestamp_str)
                             msg_date = msg_datetime.date()
-                        except:
-                            pass
+                            logger.debug(f"Message date from timestamp: {msg_date} (text: {msg_text_preview}...)")
+                        except Exception as e:
+                            logger.debug(f"Error parsing timestamp {msg_timestamp_str}: {e}")
                     
                     # Fallback to date string
                     if not msg_date and msg_date_str:
                         try:
+                            # date_str is ISO format like "2024-11-04", parse it directly
                             msg_date = datetime.fromisoformat(msg_date_str).date()
-                        except:
-                            pass
+                            logger.debug(f"Message date from date string: {msg_date} (text: {msg_text_preview}...)")
+                        except Exception as e:
+                            logger.debug(f"Error parsing date string {msg_date_str}: {e}")
                     
-                    # If no date available, include message (better to show than hide)
+                    # Log if message has no date
                     if not msg_date:
-                        # For "today" filter, if message has no date, assume it's recent and include it
-                        # This helps when WhatsApp doesn't provide precise dates
-                        if date_filter == "today":
-                            filtered_messages.append(msg)
+                        messages_without_date += 1
+                        logger.warning(f"Message without date: {msg_text_preview}... (timestamp={msg_timestamp_str}, date_str={msg_date_str})")
                         continue
                     
+                    # Compare dates
                     try:
                         if date_filter == "today":
                             if msg_date == today:
                                 filtered_messages.append(msg)
+                                logger.debug(f"Including message from today: {msg_date} (text: {msg_text_preview}...)")
+                            else:
+                                messages_with_different_date += 1
+                                logger.debug(f"Excluding message: date={msg_date}, today={today} (text: {msg_text_preview}...)")
                         elif date_filter == "yesterday":
                             yesterday = today - timedelta(days=1)
                             if msg_date == yesterday:
                                 filtered_messages.append(msg)
+                                logger.debug(f"Including message from yesterday: {msg_date}")
+                            else:
+                                messages_with_different_date += 1
                         elif date_filter == "this_week":
                             week_start = today - timedelta(days=today.weekday())
                             if msg_date >= week_start:
                                 filtered_messages.append(msg)
+                                logger.debug(f"Including message from this week: {msg_date}")
+                            else:
+                                messages_with_different_date += 1
                         else:
                             # Unknown filter, include all
                             filtered_messages.append(msg)
@@ -1106,6 +1124,7 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                         # Include message if date filtering fails
                         filtered_messages.append(msg)
                 
+                logger.info(f"Date filter result: {len(filtered_messages)} messages after filtering, {messages_without_date} without date, {messages_with_different_date} with different date")
                 messages = filtered_messages
             
             result = {
