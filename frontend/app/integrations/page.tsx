@@ -251,10 +251,10 @@ export default function IntegrationsPage() {
   const connectWhatsApp = async () => {
     setConnectingWhatsApp(true)
     try {
-      // Simple, non-blocking call with immediate timeout
+      // Setup call with reasonable timeout
       const response = await Promise.race([
         integrationsApi.whatsapp.setup(false, undefined, false),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 25000))
       ]).catch((error) => {
         // On timeout or error, show the actual error
         console.error('WhatsApp setup error:', error)

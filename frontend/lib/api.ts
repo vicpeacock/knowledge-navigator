@@ -11,14 +11,14 @@ const api = axios.create({
   timeout: 120000, // 2 minutes - increased for longer responses (file summaries can take time)
 })
 
-// Separate API instance for WhatsApp with very short timeout to avoid blocking
+// Separate API instance for WhatsApp with reasonable timeout
 const whatsappApi = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
   withCredentials: false,
-  timeout: 5000, // 5 seconds max - fail fast to avoid blocking
+  timeout: 20000, // 20 seconds - enough for Chrome to start and navigate
 })
 
 // Sessions API
