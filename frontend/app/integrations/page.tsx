@@ -261,7 +261,9 @@ export default function IntegrationsPage() {
       })
       
       if (response?.data?.success) {
-        alert('WhatsApp Web si sta aprendo in una finestra Chrome separata. Dopo 3 secondi verrà verificato lo stato automaticamente.')
+        // Show the actual message from backend
+        const message = response.data.message || 'WhatsApp Web si sta aprendo in una finestra Chrome separata.'
+        alert(message)
         
         // Auto-check status after a delay
         setTimeout(async () => {
