@@ -246,21 +246,33 @@ export default function IntegrationsPage() {
       // Simple, non-blocking call with immediate timeout
       const response = await Promise.race([
         integrationsApi.whatsapp.setup(false, undefined, false),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
-      ]).catch(() => {
-        // On timeout, just show message and continue
-        return { data: { success: true, message: 'Setup in corso...' } }
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+      ]).catch((error) => {
+        // On timeout or error, show the actual error
+        console.error('WhatsApp setup error:', error)
+        if (error.response?.data?.detail) {
+          alert(`Errore: ${error.response.data.detail}`)
+        } else if (error.message) {
+          alert(`Errore: ${error.message}`)
+        } else {
+          alert('Timeout: Il setup sta richiedendo troppo tempo. Verifica i log del backend.')
+        }
+        throw error
       })
       
-      alert('WhatsApp Web si sta aprendo. Usa lo stesso profilo Chrome, quindi se era già autenticato dovrebbe rimanere autenticato. Dopo 3 secondi clicca "Verifica Stato".')
-      
-      // Auto-check status after a delay
-      setTimeout(async () => {
-        await checkWhatsAppStatus()
-      }, 3000)
+      if (response?.data?.success) {
+        alert('WhatsApp Web si sta aprendo in una finestra Chrome separata. Dopo 3 secondi verrà verificato lo stato automaticamente.')
+        
+        // Auto-check status after a delay
+        setTimeout(async () => {
+          await checkWhatsAppStatus()
+        }, 3000)
+      } else {
+        alert('Setup completato ma con warning. Verifica lo stato manualmente.')
+      }
     } catch (error: any) {
       console.error('Error:', error)
-      alert('WhatsApp Web si sta aprendo. Se non vedi la finestra, controlla i processi Chrome.')
+      // Error already shown in catch above
     } finally {
       setConnectingWhatsApp(false)
     }
