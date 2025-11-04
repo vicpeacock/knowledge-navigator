@@ -251,62 +251,63 @@ export default function IntegrationsPage() {
   const connectWhatsApp = async () => {
     setConnectingWhatsApp(true)
     try {
-      // Setup call with reasonable timeout
-      const response = await Promise.race([
-        integrationsApi.whatsapp.setup(false, undefined, false),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 25000))
-      ]).catch((error) => {
-        // On timeout or error, show the actual error
+      // Start setup in background - don't wait for it
+      const setupPromise = integrationsApi.whatsapp.setup(false, undefined, false).catch((error) => {
         console.error('WhatsApp setup error:', error)
+        // Show error but don't block
         if (error.response?.data?.detail) {
-          alert(`Errore: ${error.response.data.detail}`)
-        } else if (error.message) {
+          alert(`Errore durante il setup: ${error.response.data.detail}`)
+        } else if (error.message && !error.message.includes('timeout')) {
           alert(`Errore: ${error.message}`)
-        } else {
-          alert('Timeout: Il setup sta richiedendo troppo tempo. Verifica i log del backend.')
         }
-        throw error
+        return { data: { success: false } }
       })
       
-      if (response?.data?.success) {
-        // Show the actual message from backend
-        const message = response.data.message || 'WhatsApp Web si sta aprendo in una finestra Chrome separata.'
-        alert(message)
-        
-        // Auto-check status periodically until authenticated
-        let checkCount = 0
-        const maxChecks = 20 // Check for 60 seconds (20 * 3 seconds)
-        
-        const checkInterval = setInterval(async () => {
-          checkCount++
-          try {
-            const statusResponse = await integrationsApi.whatsapp.getStatus()
-            if (statusResponse.data?.authenticated) {
-              setWhatsappConnected(true)
-              clearInterval(checkInterval)
-              setWhatsappCheckInterval(null)
-              alert('✅ WhatsApp è connesso!')
-            } else if (checkCount >= maxChecks) {
-              clearInterval(checkInterval)
-              setWhatsappCheckInterval(null)
-              // Don't show alert, just stop checking silently
-            }
-          } catch (error) {
-            console.error('Error checking status:', error)
-            if (checkCount >= maxChecks) {
-              clearInterval(checkInterval)
-              setWhatsappCheckInterval(null)
-            }
+      // Show immediate feedback
+      alert('WhatsApp Web si sta aprendo in una finestra Chrome separata. Il controllo dello stato avverrà automaticamente.')
+      
+      // Wait for setup with timeout (but don't block UI)
+      const response = await Promise.race([
+        setupPromise,
+        new Promise((resolve) => setTimeout(() => resolve({ data: { success: true, message: 'Setup in corso...' } }), 8000))
+      ])
+      
+      // Start auto-check immediately (even if setup is still running)
+      let checkCount = 0
+      const maxChecks = 30 // Check for 90 seconds (30 * 3 seconds)
+      
+      const checkInterval = setInterval(async () => {
+        checkCount++
+        try {
+          const statusResponse = await integrationsApi.whatsapp.getStatus()
+          if (statusResponse.data?.authenticated) {
+            setWhatsappConnected(true)
+            clearInterval(checkInterval)
+            setWhatsappCheckInterval(null)
+            alert('✅ WhatsApp è connesso!')
+          } else if (checkCount >= maxChecks) {
+            clearInterval(checkInterval)
+            setWhatsappCheckInterval(null)
+            // Don't show alert, just stop checking silently
           }
-        }, 3000) // Check every 3 seconds
-        
-        setWhatsappCheckInterval(checkInterval)
-      } else {
-        alert('Setup completato ma con warning. Verifica lo stato manualmente.')
+        } catch (error) {
+          console.error('Error checking status:', error)
+          if (checkCount >= maxChecks) {
+            clearInterval(checkInterval)
+            setWhatsappCheckInterval(null)
+          }
+        }
+      }, 3000) // Check every 3 seconds
+      
+      setWhatsappCheckInterval(checkInterval)
+      
+      // Check response if available
+      if (response?.data?.success && response.data.message) {
+        console.log('Setup response:', response.data.message)
       }
     } catch (error: any) {
       console.error('Error:', error)
-      // Error already shown in catch above
+      // Don't show alert here - already handled above
     } finally {
       setConnectingWhatsApp(false)
     }
