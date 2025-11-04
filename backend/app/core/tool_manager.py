@@ -13,6 +13,8 @@ from app.core.config import settings
 from app.core.mcp_client import MCPClient
 import re
 import json
+import httpx
+import asyncio
 
 
 class ToolManager:
@@ -84,6 +86,34 @@ class ToolManager:
                             "default": 5
                         }
                     }
+                }
+            },
+            {
+                "name": "web_search",
+                "description": "Esegue una ricerca sul web usando l'API di ricerca web di Ollama. Usa questo tool quando l'utente chiede informazioni aggiornate dal web, notizie, o informazioni che potrebbero non essere nel tuo training data. Richiede OLLAMA_API_KEY configurata.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "La query di ricerca da eseguire sul web"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "web_fetch",
+                "description": "Recupera il contenuto di una pagina web specifica usando l'API di Ollama. Usa questo tool quando l'utente chiede di accedere a un URL specifico o di leggere il contenuto di una pagina web. Richiede OLLAMA_API_KEY configurata.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "L'URL della pagina web da recuperare"
+                        }
+                    },
+                    "required": ["url"]
                 }
             },
         ]
@@ -199,6 +229,14 @@ class ToolManager:
             elif tool_name == "summarize_emails":
                 result = await self._execute_summarize_emails(parameters, db)
                 logger.info(f"Tool {tool_name} completed, summary length: {len(result.get('summary', '')) if isinstance(result, dict) else 'unknown'}")
+                return result
+            elif tool_name == "web_search":
+                result = await self._execute_web_search(parameters)
+                logger.info(f"Tool {tool_name} completed")
+                return result
+            elif tool_name == "web_fetch":
+                result = await self._execute_web_fetch(parameters)
+                logger.info(f"Tool {tool_name} completed")
                 return result
             else:
                 logger.error(f"Unknown tool: {tool_name}")
@@ -380,6 +418,20 @@ class ToolManager:
                     logger.info(f"   Calling tool '{actual_tool_name}' on MCP server")
                     result = await client.call_tool(actual_tool_name, parameters, stream=False)
                     logger.info(f"   ✅ Tool call successful")
+                    
+                    # For browser tools, try to close the browser session after use to prevent orphaned containers
+                    # This is a best-effort cleanup - if it fails, it's not critical
+                    if actual_tool_name in ["browser_navigate", "browser_snapshot", "browser_click", "browser_evaluate", "browser_fill_form"]:
+                        try:
+                            # Try to close the browser session (if supported by the MCP server)
+                            # Note: This might not work if the MCP server doesn't support it or if the session is already closed
+                            await asyncio.sleep(0.1)  # Small delay to ensure the previous operation is complete
+                            await client.call_tool("browser_close", {})
+                            logger.debug(f"   🧹 Browser session closed after {actual_tool_name}")
+                        except Exception as close_error:
+                            # Ignore errors - browser_close might not be available or session might already be closed
+                            logger.debug(f"   Note: Could not close browser session (this is normal): {close_error}")
+                    
                     return {
                         "success": True,
                         "result": result,
@@ -549,4 +601,211 @@ Riassunto:"""
                 logger.debug(f"Pattern 3 (parameter inference) failed: {e}")
         
         return tool_calls
+    
+    async def _execute_web_search(
+        self,
+        parameters: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Execute web_search tool using Ollama's official library"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        query = parameters.get("query")
+        if not query:
+            return {"error": "Query parameter is required for web_search"}
+        
+        # Check if API key is configured
+        if not settings.ollama_api_key:
+            logger.error("OLLAMA_API_KEY not configured. Web search requires an API key from https://ollama.com")
+            return {
+                "error": "OLLAMA_API_KEY not configured. Please set it in your .env file or environment variables. Get an API key from https://ollama.com"
+            }
+        
+        try:
+            # Use official Ollama library
+            import os
+            
+            # IMPORTANT: Set API key BEFORE importing ollama functions
+            # The library reads OLLAMA_API_KEY from environment at import time
+            original_key = os.environ.get("OLLAMA_API_KEY")
+            os.environ["OLLAMA_API_KEY"] = settings.ollama_api_key
+            
+            try:
+                # Verify API key is set
+                if not os.environ.get("OLLAMA_API_KEY"):
+                    logger.error("OLLAMA_API_KEY not set in environment after assignment")
+                    return {"error": "Failed to set OLLAMA_API_KEY for Ollama library"}
+                
+                # Import AFTER setting the environment variable
+                # Use Client to ensure API key is properly configured
+                from ollama import Client
+                client = Client()
+                
+                # Call web_search from Ollama library via client
+                results = client.web_search(query)
+                
+                # Format results for LLM
+                # Results come as WebSearchResponse object with .results attribute
+                if results and hasattr(results, 'results'):
+                    results_list = results.results
+                elif isinstance(results, list):
+                    results_list = results
+                elif isinstance(results, dict) and 'results' in results:
+                    results_list = results['results']
+                else:
+                    results_list = []
+                
+                results_text = "\n\n=== Risultati Ricerca Web ===\n"
+                for i, r in enumerate(results_list[:5], 1):  # Limit to 5 results
+                    # Handle both WebSearchResult objects and dicts
+                    if hasattr(r, 'title'):
+                        # It's a WebSearchResult object
+                        title = r.title
+                        url = r.url
+                        content = r.content
+                    elif isinstance(r, dict):
+                        # It's a dict
+                        title = r.get('title', 'N/A')
+                        url = r.get('url', 'N/A')
+                        content = r.get('content', 'N/A')
+                    else:
+                        title = 'N/A'
+                        url = 'N/A'
+                        content = 'N/A'
+                    
+                    # Truncate content to avoid overwhelming the LLM
+                    content_preview = str(content)[:1000] if content else 'N/A'
+                    if content and len(str(content)) > 1000:
+                        content_preview += "..."
+                    
+                    results_text += f"\n{i}. {title}\n"
+                    results_text += f"   URL: {url}\n"
+                    results_text += f"   Contenuto: {content_preview}\n"
+                results_text += "\n=== Fine Risultati ===\n"
+                
+                # Convert results_list to a serializable format for storage
+                # WebSearchResult objects need to be converted to dicts
+                serializable_results = []
+                for r in results_list:
+                    if hasattr(r, 'title'):
+                        # It's a WebSearchResult object - convert to dict
+                        serializable_results.append({
+                            'title': r.title,
+                            'url': r.url,
+                            'content': r.content,
+                        })
+                    else:
+                        # Already a dict
+                        serializable_results.append(r)
+                
+                return {
+                    "success": True,
+                    "result": {
+                        "results": serializable_results,
+                        "formatted_text": results_text,
+                    }
+                }
+            finally:
+                # Restore original API key if it existed
+                if original_key:
+                    os.environ["OLLAMA_API_KEY"] = original_key
+                elif "OLLAMA_API_KEY" in os.environ:
+                    del os.environ["OLLAMA_API_KEY"]
+                    
+        except ImportError as e:
+            logger.error(f"Ollama library not installed or version too old: {e}")
+            return {
+                "error": f"Ollama library not installed or version too old. Please install with: pip install 'ollama>=0.6.0'"
+            }
+        except Exception as e:
+            logger.error(f"Error calling Ollama web_search: {e}", exc_info=True)
+            return {"error": str(e)}
+    
+    async def _execute_web_fetch(
+        self,
+        parameters: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Execute web_fetch tool using Ollama's official library"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        url = parameters.get("url")
+        if not url:
+            return {"error": "URL parameter is required for web_fetch"}
+        
+        # Ensure URL has protocol
+        if not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
+        
+        # Check if API key is configured
+        if not settings.ollama_api_key:
+            logger.error("OLLAMA_API_KEY not configured. Web fetch requires an API key from https://ollama.com")
+            return {
+                "error": "OLLAMA_API_KEY not configured. Please set it in your .env file or environment variables. Get an API key from https://ollama.com"
+            }
+        
+        try:
+            # Use official Ollama library
+            import os
+            
+            # IMPORTANT: Set API key BEFORE importing ollama functions
+            # The library reads OLLAMA_API_KEY from environment at import time
+            original_key = os.environ.get("OLLAMA_API_KEY")
+            os.environ["OLLAMA_API_KEY"] = settings.ollama_api_key
+            
+            try:
+                # Verify API key is set
+                if not os.environ.get("OLLAMA_API_KEY"):
+                    logger.error("OLLAMA_API_KEY not set in environment after assignment")
+                    return {"error": "Failed to set OLLAMA_API_KEY for Ollama library"}
+                
+                # Import AFTER setting the environment variable
+                # Use Client to ensure API key is properly configured
+                from ollama import Client
+                client = Client()
+                
+                # Call web_fetch from Ollama library via client
+                result = client.web_fetch(url)
+                
+                # Extract fields from result
+                title = result.title if hasattr(result, 'title') else result.get('title', 'N/A') if isinstance(result, dict) else 'N/A'
+                content = result.content if hasattr(result, 'content') else result.get('content', 'N/A') if isinstance(result, dict) else 'N/A'
+                links = result.links if hasattr(result, 'links') else result.get('links', []) if isinstance(result, dict) else []
+                
+                # Format result for LLM
+                formatted_text = f"""=== Contenuto Pagina Web ===
+Titolo: {title}
+URL: {url}
+
+Contenuto:
+{content}
+
+Link trovati: {', '.join(str(l) for l in links)[:200]}...
+=== Fine Contenuto ===
+"""
+                
+                return {
+                    "success": True,
+                    "result": {
+                        "title": title,
+                        "content": content,
+                        "links": links,
+                        "formatted_text": formatted_text,
+                    }
+                }
+            finally:
+                # Restore original API key if it existed
+                if original_key:
+                    os.environ["OLLAMA_API_KEY"] = original_key
+                elif "OLLAMA_API_KEY" in os.environ:
+                    del os.environ["OLLAMA_API_KEY"]
+                    
+        except ImportError as e:
+            logger.error(f"Ollama library not installed or version too old: {e}")
+            return {
+                "error": f"Ollama library not installed or version too old. Please install with: pip install 'ollama>=0.6.0'"
+            }
+        except Exception as e:
+            logger.error(f"Error calling Ollama web_fetch: {e}", exc_info=True)
+            return {"error": str(e)}
 

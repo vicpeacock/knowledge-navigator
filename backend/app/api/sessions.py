@@ -571,12 +571,15 @@ async def chat(
         # Generate response with tools available
         try:
             # Use native tool calling if tools are available, otherwise fallback to prompt-based
+            pass_tools = available_tools if tool_iteration == 0 else None
+            pass_tools_description = tools_description if tool_iteration == 0 and not available_tools else None
+            
             response_data = await ollama.generate_with_context(
                 prompt=current_prompt,
                 session_context=session_context,
                 retrieved_memory=retrieved_memory if retrieved_memory else None,
-                tools=available_tools if tool_iteration == 0 else None,  # Pass tools natively to Ollama
-                tools_description=tools_description if tool_iteration == 0 and not available_tools else None,  # Fallback to prompt if no native tools
+                tools=pass_tools,
+                tools_description=pass_tools_description,
                 return_raw=True,
             )
             
@@ -704,6 +707,7 @@ async def chat(
         
         # Execute tool calls
         iteration_tool_results = []
+        
         for tool_call in tool_calls:
             tool_name = tool_call.get("name")
             tool_params = tool_call.get("parameters", {})
@@ -711,6 +715,9 @@ async def chat(
             logger.info(f"Executing tool: {tool_name} with params: {tool_params}")
             
             if tool_name:
+                # Regular tool - execute it (including web_search and web_fetch)
+                # Note: web_search and web_fetch are NOT automatically executed by Ollama
+                # We must call the Ollama REST API ourselves when Ollama requests these tools
                 try:
                     result = await tool_manager.execute_tool(tool_name, tool_params, db)
                     logger.info(f"Tool {tool_name} executed successfully, result keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
@@ -749,19 +756,27 @@ async def chat(
             # Format tool results for LLM
             tool_results_text = "\n\n=== Risultati Tool Chiamati ===\n"
             for tr in iteration_tool_results:
-                tool_results_text += f"Tool: {tr['tool']}\n"
+                tool_name = tr['tool']
+                tool_results_text += f"Tool: {tool_name}\n"
+                
                 try:
                     # For browser results, extract content directly instead of JSON to preserve more information
                     # Note: tr['result'] has structure: {"success": True, "result": {...}, "tool": "..."}
                     wrapper_result = tr['result']
-                    logger.debug(f"Formatting tool result for {tr['tool']}, wrapper_result type: {type(wrapper_result)}, keys: {list(wrapper_result.keys()) if isinstance(wrapper_result, dict) else 'N/A'}")
+                    logger.debug(f"Formatting tool result for {tool_name}, wrapper_result type: {type(wrapper_result)}, keys: {list(wrapper_result.keys()) if isinstance(wrapper_result, dict) else 'N/A'}")
                     
                     if isinstance(wrapper_result, dict) and 'result' in wrapper_result:
                         # Unwrap the actual tool result
                         actual_result = wrapper_result.get('result', {})
                         logger.debug(f"actual_result type: {type(actual_result)}, keys: {list(actual_result.keys()) if isinstance(actual_result, dict) else 'N/A'}")
                         
-                        if isinstance(actual_result, dict) and 'content' in actual_result:
+                        # Check if we have formatted_text (for web_search/web_fetch) - use it directly
+                        if isinstance(actual_result, dict) and 'formatted_text' in actual_result:
+                            formatted_text = actual_result.get('formatted_text', '')
+                            logger.info(f"Using formatted_text from tool {tool_name}, length: {len(formatted_text)}")
+                            logger.debug(f"formatted_text preview (first 500 chars): {formatted_text[:500]}")
+                            tool_results_text += f"{formatted_text}\n\n"
+                        elif isinstance(actual_result, dict) and 'content' in actual_result:
                             # Browser tool returns content as string - use it directly instead of JSON
                             content = actual_result.get('content', '')
                             logger.info(f"Extracting content from browser tool result, content length: {len(content)}")
@@ -770,8 +785,8 @@ async def chat(
                                 content = content[:20000] + "\n... [contenuto troncato per limiti di dimensione]"
                             tool_results_text += f"Risultato (contenuto pagina web):\n{content}\n\n"
                         else:
-                            # Tool result doesn't have content field, use JSON format
-                            logger.debug(f"actual_result doesn't have content field, using JSON format")
+                            # Tool result doesn't have formatted_text or content field, use JSON format
+                            logger.debug(f"actual_result doesn't have formatted_text or content field, using JSON format")
                             result_str = json_lib.dumps(wrapper_result, indent=2, ensure_ascii=False, default=str)
                             if len(result_str) > 15000:
                                 result_str = result_str[:15000] + "\n... [risultato troncato]"
@@ -784,8 +799,9 @@ async def chat(
                             result_str = result_str[:15000] + "\n... [risultato troncato]"
                         tool_results_text += f"Risultato: {result_str}\n\n"
                 except Exception as e:
-                    logger.error(f"Error formatting tool result for {tr['tool']}: {e}", exc_info=True)
+                    logger.error(f"Error formatting tool result for {tool_name}: {e}", exc_info=True)
                     tool_results_text += f"Risultato: [Errore nella formattazione del risultato: {str(e)}]\n\n"
+            
             tool_results_text += "=== Fine Risultati Tool ===\n"
             tool_results_text += "IMPORTANTE: Usa SOLO i risultati dei tool sopra per rispondere. NON inventare informazioni.\n"
             tool_results_text += "Rispondi all'utente in modo naturale basandoti sui dati reali ottenuti.\n"
@@ -793,23 +809,27 @@ async def chat(
             # Update prompt with tool results and original question
             # Clear response_text since we'll regenerate with tool results
             response_text = ""
-            # More explicit prompt for final response
+            
+            # Regular tools - we have explicit results
             current_prompt = f"""L'utente ha chiesto: "{request.message}"
 
 {tool_results_text}
 
 === ISTRUZIONI CRITICHE ===
-1. Hai ricevuto i risultati di un tool che ha navigato su una pagina web
-2. Il contenuto della pagina è nel formato YAML/accessibility snapshot sopra
-3. DEVI analizzare attentamente il contenuto per trovare la risposta alla domanda dell'utente
-4. Se il contenuto contiene informazioni sulla pagina (titolo, link, testo, heading, etc.), usa quelle informazioni
-5. Se trovi informazioni rilevanti, rispondi con quelle informazioni
-6. Se NON trovi informazioni rilevanti nel contenuto, dillo chiaramente
-7. NON dire che non sei riuscito ad accedere - il tool HA funzionato e hai i dati sopra
-8. Rispondi in italiano, in modo naturale e diretto
-9. NON usare più tool - i tool sono già stati eseguiti
+1. Hai ricevuto i risultati dei tool chiamati sopra - questi sono DATI REALI ottenuti dal web
+2. Per tool web_search: i risultati contengono informazioni da ricerche web. Analizza attentamente TITOLI, URL e CONTENUTO di ciascun risultato
+3. Per tool web_fetch: il contenuto contiene il testo completo di una pagina web specifica
+4. Per tool browser: il contenuto della pagina è nel formato YAML/accessibility snapshot
+5. DEVI analizzare ATTENTAMENTE i risultati sopra - contengono informazioni REALI che rispondono alla domanda dell'utente
+6. Se i risultati contengono informazioni rilevanti (anche parziali), USA QUELLE INFORMAZIONI per rispondere
+7. NON dire "non ho trovato informazioni" se i risultati contengono dati - i tool hanno funzionato e hai informazioni reali sopra
+8. Se vedi risultati con titoli, URL e contenuto, significa che la ricerca ha trovato informazioni - usale!
+9. Rispondi in italiano, in modo naturale e diretto, basandoti SUI DATI REALI sopra
+10. NON usare più tool - i tool sono già stati eseguiti
 
-Ora analizza il contenuto sopra e rispondi all'utente:"""
+IMPORTANTE: Se vedi "=== Risultati Ricerca Web ===" con titoli e contenuti sopra, significa che hai informazioni reali. Usale per rispondere all'utente, non dire che non hai trovato nulla!
+
+Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:"""
             logger.info(f"Reinvoking LLM with tool results. Prompt length: {len(current_prompt)}")
             tool_results.extend(iteration_tool_results)
         else:
@@ -822,8 +842,15 @@ Ora analizza il contenuto sopra e rispondi all'utente:"""
     if not response_text or not response_text.strip():
         import logging
         logger = logging.getLogger(__name__)
-        logger.error("Response text is empty after tool calling loop")
-        response_text = "Mi scuso, ho riscontrato un problema nella generazione della risposta. Per favore riprova."
+        # Check if native Ollama tools were called
+        native_tools_called = [t for t in tools_used if t in ["web_search", "web_fetch"]]
+        if native_tools_called:
+            logger.warning(f"Response text is empty after native Ollama tools were called: {native_tools_called}")
+            logger.warning("This may mean Ollama is still processing the web search. Check if web search toggle is enabled in Ollama desktop app.")
+            response_text = "Ho chiamato la ricerca web, ma non ho ricevuto risultati. Assicurati che la ricerca web sia abilitata nell'app desktop di Ollama (toggle attivo). Se il problema persiste, prova a riavviare Ollama o usa i tool MCP browser come alternativa."
+        else:
+            logger.error("Response text is empty after tool calling loop")
+            response_text = "Mi scuso, ho riscontrato un problema nella generazione della risposta. Per favore riprova."
     
     # If we exhausted iterations and had tool calls, add note
     if tool_iteration >= max_tool_iterations and tool_calls and tool_results:
