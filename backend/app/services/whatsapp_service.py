@@ -397,67 +397,177 @@ class WhatsAppService:
         messages = []
         
         try:
+            # Ensure we're on WhatsApp Web
+            current_url = self.driver.current_url
+            if "web.whatsapp.com" not in current_url:
+                logger.info("Navigating to WhatsApp Web...")
+                self.driver.get("https://web.whatsapp.com")
+                time.sleep(3)  # Wait for page load
+            
+            # Wait for WhatsApp Web to fully load (wait for chat list to appear)
+            logger.info("Waiting for WhatsApp Web to fully load...")
+            try:
+                # Wait for the main chat list container to be visible
+                WebDriverWait(self.driver, 15).until(
+                    EC.any_of(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='chat-list']")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "#pane-side")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='chat-item']")),
+                    )
+                )
+                logger.info("WhatsApp Web loaded successfully")
+                time.sleep(2)  # Additional wait for animations
+            except TimeoutException:
+                logger.warning("Chat list not found, but continuing anyway...")
+            
             if contact_name:
                 # Search for contact
+                logger.info(f"Searching for contact: {contact_name}")
                 try:
-                    search_box = WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='chat-search-input']"))
-                    )
-                    search_box.clear()
-                    search_box.send_keys(contact_name)
-                    time.sleep(2)
+                    # Try multiple selectors for search box
+                    search_selectors = [
+                        "[data-testid='chat-search-input']",
+                        "div[contenteditable='true'][data-tab='3']",
+                        "div[contenteditable='true'][role='textbox']",
+                        "input[type='text']",
+                    ]
                     
-                    # Click on first result
-                    first_result = WebDriverWait(self.driver, 5).until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='chat-item']"))
-                    )
-                    first_result.click()
-                    time.sleep(2)
+                    search_box = None
+                    for selector in search_selectors:
+                        try:
+                            search_box = WebDriverWait(self.driver, 5).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                            )
+                            if search_box:
+                                break
+                        except TimeoutException:
+                            continue
+                    
+                    if not search_box:
+                        logger.warning("Could not find search box")
+                    else:
+                        # Click on search box to focus
+                        search_box.click()
+                        time.sleep(1)
+                        # Type contact name
+                        if search_box.tag_name == "div":
+                            # Contenteditable div
+                            search_box.send_keys(contact_name)
+                        else:
+                            # Input field
+                            search_box.clear()
+                            search_box.send_keys(contact_name)
+                        time.sleep(3)  # Wait for search results
+                        
+                        # Click on first result
+                        first_result = WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='chat-item']"))
+                        )
+                        first_result.click()
+                        time.sleep(3)  # Wait for chat to open
                 except (TimeoutException, NoSuchElementException) as e:
                     logger.warning(f"Could not find contact '{contact_name}': {e}")
                     # Continue to get messages from current chat
             else:
                 # Get messages from the first chat in the list (most recent)
+                logger.info("Opening first chat in list...")
                 try:
-                    first_chat = WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='chat-item']"))
-                    )
-                    first_chat.click()
-                    time.sleep(2)
-                except (TimeoutException, NoSuchElementException) as e:
+                    # Try multiple selectors for chat items
+                    chat_selectors = [
+                        "[data-testid='chat-item']",
+                        "div[role='listitem']",
+                        "div._8nE1Y",
+                    ]
+                    
+                    first_chat = None
+                    for selector in chat_selectors:
+                        try:
+                            chats = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                            if chats:
+                                first_chat = chats[0]
+                                break
+                        except:
+                            continue
+                    
+                    if first_chat:
+                        first_chat.click()
+                        logger.info("First chat clicked")
+                        time.sleep(3)  # Wait for chat to open
+                    else:
+                        logger.warning("Could not find any chat items")
+                        return []
+                except Exception as e:
                     logger.warning(f"Could not open chat: {e}")
                     return []
             
             # Get messages from active chat
+            logger.info("Extracting messages from active chat...")
             try:
-                message_elements = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[data-testid='message-container']"))
-                )
+                # Wait for message container to be visible
+                message_selectors = [
+                    "[data-testid='message-container']",
+                    "div.message",
+                    "div[data-id]",
+                    "span.selectable-text",
+                ]
                 
+                message_elements = []
+                for selector in message_selectors:
+                    try:
+                        elements = WebDriverWait(self.driver, 5).until(
+                            EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
+                        )
+                        if elements:
+                            message_elements = elements
+                            logger.info(f"Found {len(elements)} message elements using selector: {selector}")
+                            break
+                    except TimeoutException:
+                        continue
+                
+                if not message_elements:
+                    logger.warning("No message elements found")
+                    return []
+                
+                # Extract text from messages
                 for elem in message_elements[-max_results:]:
                     try:
                         # Try different selectors for message text
                         text = None
-                        for selector in [
+                        for text_selector in [
                             "[data-testid='message-text']",
                             "span.selectable-text",
                             ".message-text",
+                            "span._11JPr",
+                            "div.selectable-text",
                         ]:
                             try:
-                                text_elem = elem.find_element(By.CSS_SELECTOR, selector)
-                                text = text_elem.text
-                                break
+                                text_elem = elem.find_element(By.CSS_SELECTOR, text_selector)
+                                text = text_elem.text.strip()
+                                if text:
+                                    break
                             except NoSuchElementException:
                                 continue
+                        
+                        # If no text found, try getting text directly from element
+                        if not text:
+                            text = elem.text.strip()
                         
                         if text:
                             messages.append({"text": text})
                     except Exception as e:
                         logger.debug(f"Error extracting message: {e}")
                         continue
+                
+                logger.info(f"Successfully extracted {len(messages)} messages")
                         
             except TimeoutException:
                 logger.warning("No messages found or timeout waiting for messages")
+                # Try to get page source for debugging
+                try:
+                    page_source_snippet = self.driver.page_source[:500]
+                    logger.debug(f"Page source snippet: {page_source_snippet}")
+                except:
+                    pass
                 return []
                 
         except Exception as e:
