@@ -472,27 +472,63 @@ class WhatsAppService:
                 # Get messages from the first chat in the list (most recent)
                 logger.info("Opening first chat in list...")
                 try:
+                    # Wait longer for chat list to be fully loaded and visible
+                    logger.info("Waiting for chat list to be visible...")
+                    time.sleep(2)  # Give WhatsApp time to render
+                    
                     # Try multiple selectors for chat items
                     chat_selectors = [
                         "[data-testid='chat-item']",
                         "div[role='listitem']",
                         "div._8nE1Y",
+                        "div[data-testid='list-item']",
                     ]
                     
                     first_chat = None
                     for selector in chat_selectors:
                         try:
-                            chats = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                            if chats:
-                                first_chat = chats[0]
+                            # Wait for elements to be present and visible
+                            chats = WebDriverWait(self.driver, 10).until(
+                                EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
+                            )
+                            # Filter for visible chats
+                            visible_chats = [c for c in chats if c.is_displayed()]
+                            if visible_chats:
+                                first_chat = visible_chats[0]
+                                logger.info(f"Found {len(visible_chats)} visible chats using selector: {selector}")
                                 break
-                        except:
+                        except TimeoutException:
+                            continue
+                        except Exception as e:
+                            logger.debug(f"Error with selector {selector}: {e}")
                             continue
                     
                     if first_chat:
+                        # Scroll to make sure chat is visible
+                        try:
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_chat)
+                            time.sleep(1)
+                        except:
+                            pass
+                        
                         first_chat.click()
                         logger.info("First chat clicked")
-                        time.sleep(3)  # Wait for chat to open
+                        # Wait longer for chat to fully open and messages to be visible
+                        time.sleep(5)  # Increased wait time for messages to appear
+                        
+                        # Force a refresh/wait for message area to be ready
+                        try:
+                            # Try to find message area to confirm chat opened
+                            WebDriverWait(self.driver, 10).until(
+                                EC.any_of(
+                                    EC.presence_of_element_located((By.CSS_SELECTOR, "#main")),
+                                    EC.presence_of_element_located((By.CSS_SELECTOR, "[role='application']")),
+                                    EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='conversation-panel-messages']")),
+                                )
+                            )
+                            logger.info("Chat opened and message area is ready")
+                        except TimeoutException:
+                            logger.warning("Message area not found, but continuing...")
                     else:
                         logger.warning("Could not find any chat items")
                         return []
@@ -503,11 +539,59 @@ class WhatsAppService:
             # Get messages from active chat
             logger.info("Extracting messages from active chat...")
             try:
-                # Wait for message container to be visible
+                # Wait for message container/panel to be visible
+                # WhatsApp Web uses a scrollable container for messages
+                message_panel_selectors = [
+                    "#main",
+                    "[role='application']",
+                    "[data-testid='conversation-panel-messages']",
+                    "div[role='log']",
+                ]
+                
+                message_panel = None
+                for selector in message_panel_selectors:
+                    try:
+                        panel = WebDriverWait(self.driver, 5).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                        )
+                        if panel:
+                            message_panel = panel
+                            logger.info(f"Found message panel using selector: {selector}")
+                            break
+                    except TimeoutException:
+                        continue
+                
+                if not message_panel:
+                    logger.warning("Message panel not found, trying to find messages directly...")
+                else:
+                    # Scroll up to load more messages (WhatsApp loads messages dynamically)
+                    logger.info("Scrolling up to load more messages...")
+                    try:
+                        # Scroll up multiple times to load older messages
+                        for scroll_attempt in range(3):
+                            self.driver.execute_script(
+                                "arguments[0].scrollTop = 0;",
+                                message_panel
+                            )
+                            time.sleep(1)  # Wait for messages to load
+                            logger.info(f"Scroll attempt {scroll_attempt + 1}/3")
+                        
+                        # Scroll back down a bit to ensure we're in a good position
+                        time.sleep(1)
+                        self.driver.execute_script(
+                            "arguments[0].scrollTop = arguments[0].scrollHeight / 4;",
+                            message_panel
+                        )
+                        time.sleep(1)
+                    except Exception as e:
+                        logger.warning(f"Error scrolling message panel: {e}")
+                
+                # Now find all message elements
                 message_selectors = [
+                    "[data-testid='msg-container']",
                     "[data-testid='message-container']",
-                    "div.message",
                     "div[data-id]",
+                    "div.message",
                     "span.selectable-text",
                 ]
                 
@@ -523,6 +607,28 @@ class WhatsAppService:
                             break
                     except TimeoutException:
                         continue
+                
+                # If still no elements, try a more general approach
+                if not message_elements:
+                    logger.info("Trying alternative approach to find messages...")
+                    try:
+                        # Look for any div with text content in the message area
+                        all_divs = self.driver.find_elements(By.CSS_SELECTOR, "#main div, [role='application'] div")
+                        # Filter for divs that look like messages (have text, not just empty containers)
+                        for div in all_divs:
+                            try:
+                                text = div.text.strip()
+                                if text and len(text) > 5:  # Skip very short texts
+                                    # Check if it's not a UI element (has certain classes or attributes)
+                                    classes = div.get_attribute("class") or ""
+                                    if "message" in classes.lower() or "text" in classes.lower():
+                                        message_elements.append(div)
+                            except:
+                                continue
+                        if message_elements:
+                            logger.info(f"Found {len(message_elements)} messages using alternative approach")
+                    except Exception as e:
+                        logger.warning(f"Alternative approach failed: {e}")
                 
                 if not message_elements:
                     logger.warning("No message elements found")
