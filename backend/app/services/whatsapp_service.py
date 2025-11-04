@@ -241,16 +241,36 @@ class WhatsAppService:
             
             # Navigate to WhatsApp Web
             logger.info("Navigating to WhatsApp Web...")
-            self.driver.get("https://web.whatsapp.com")
+            try:
+                self.driver.get("https://web.whatsapp.com")
+                logger.info(f"Navigated to WhatsApp Web. Current URL: {self.driver.current_url}")
+                
+                # Wait a bit for page to load
+                time.sleep(3)
+                
+                # Verify we're actually on WhatsApp Web
+                current_url = self.driver.current_url
+                if "web.whatsapp.com" not in current_url:
+                    logger.warning(f"Not on WhatsApp Web! Current URL: {current_url}")
+                    # Try to navigate again
+                    self.driver.get("https://web.whatsapp.com")
+                    time.sleep(2)
+            except Exception as nav_error:
+                logger.error(f"Error navigating to WhatsApp Web: {nav_error}", exc_info=True)
+                raise Exception(f"Failed to navigate to WhatsApp Web: {str(nav_error)}")
             
-            # Wait a bit for page to load
-            time.sleep(3)
+            # Wait a bit more for page to fully load
+            time.sleep(2)
             
             # Check initial status
-            status = self._check_authentication_status()
-            logger.info(f"Initial authentication status: {status}")
+            try:
+                status = self._check_authentication_status()
+                logger.info(f"Initial authentication status: {status}")
+            except Exception as status_error:
+                logger.warning(f"Error checking initial status: {status_error}")
+                status = {"authenticated": False, "status": "checking"}
             
-            if status["authenticated"]:
+            if status.get("authenticated"):
                 logger.info("WhatsApp Web already authenticated (using existing session)")
                 self.is_authenticated = True
                 return {
@@ -265,9 +285,9 @@ class WhatsAppService:
                 # Don't block - return immediately
                 return {
                     "success": True,
-                    "message": "WhatsApp Web opened. Please scan the QR code with your phone. Use /status endpoint to check authentication.",
+                    "message": "WhatsApp Web opened. Please scan the QR code with your phone if needed. Use 'Verifica Stato' button to check authentication.",
                     "authenticated": False,
-                    "status": "waiting_for_qr_scan",
+                    "status": status.get("status", "waiting_for_qr_scan"),
                 }
             
             # Wait for authentication with polling (only if wait_for_auth is True)
