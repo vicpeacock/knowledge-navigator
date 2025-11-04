@@ -118,7 +118,7 @@ class ToolManager:
             },
             {
                 "name": "get_whatsapp_messages",
-                "description": "Recupera messaggi WhatsApp. Usa questo tool quando l'utente chiede informazioni sui messaggi WhatsApp, vuole leggere messaggi recenti, o chiede messaggi di oggi/ieri. IMPORTANTE: Se l'utente chiede 'messaggi di oggi' o 'messaggi ricevuti oggi', DEVI usare date_filter='today'. I messaggi includono testo, data/ora, e mittente. Richiede che WhatsApp sia configurato e autenticato.",
+                "description": "Recupera messaggi WhatsApp. Usa questo tool quando l'utente chiede informazioni sui messaggi WhatsApp, vuole leggere messaggi recenti, o chiede messaggi di oggi/ieri. OBBLIGATORIO: Se l'utente chiede 'messaggi di oggi', 'messaggi ricevuti oggi', 'cosa ho ricevuto oggi', o qualsiasi richiesta che menziona 'oggi', DEVI sempre usare date_filter='today'. Se l'utente chiede 'ieri', usa date_filter='yesterday'. I messaggi includono testo, data/ora, e mittente. IMPORTANTE: Prima di dire che WhatsApp non è configurato, chiama sempre questo tool per verificare lo stato.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -133,9 +133,10 @@ class ToolManager:
                         },
                         "date_filter": {
                             "type": "string",
-                            "description": "Filtro per data (opzionale). Valori: 'today' per messaggi di oggi, 'yesterday' per ieri, 'this_week' per questa settimana. Se non specificato, restituisce i messaggi più recenti."
+                            "description": "Filtro per data (opzionale ma IMPORTANTE). Valori: 'today' per messaggi di oggi, 'yesterday' per ieri, 'this_week' per questa settimana. DEVI usare 'today' quando l'utente chiede messaggi di oggi. Se non specificato, restituisce i messaggi più recenti."
                         }
-                    }
+                    },
+                    "required": []
                 }
             },
             {
@@ -1107,13 +1108,22 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                 
                 messages = filtered_messages
             
-            return {
+            result = {
                 "success": True,
                 "messages": messages,
                 "count": len(messages),
                 "date_filter": date_filter,
                 "note": "I messaggi includono testo, data/ora, e informazioni sul mittente (se disponibili)."
             }
+            
+            # Add helpful message if no messages found with date filter
+            if date_filter and len(messages) == 0:
+                if date_filter == "today":
+                    result["note"] += " Nessun messaggio trovato per oggi. Potrebbe essere che non ci siano messaggi ricevuti oggi, o che le date non siano state estratte correttamente."
+                elif date_filter == "yesterday":
+                    result["note"] += " Nessun messaggio trovato per ieri."
+            
+            return result
         except Exception as e:
             return {"error": str(e)}
     
