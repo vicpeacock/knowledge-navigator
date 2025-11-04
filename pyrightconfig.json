@@ -1,0 +1,29 @@
+{
+  "include": [
+    "backend"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "**/.venv",
+    "**/venv"
+  ],
+  "venvPath": "backend",
+  "venv": "venv",
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "off",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none",
+  "pythonPlatform": "Darwin",
+  "executionEnvironments": [
+    {
+      "root": "backend",
+      "pythonVersion": "3.13",
+      "python": "${workspaceFolder}/backend/venv/bin/python3",
+      "extraPaths": [
+        "backend"
+      ]
+    }
+  ]
+}
+

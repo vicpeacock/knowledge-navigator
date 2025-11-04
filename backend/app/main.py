@@ -2,11 +2,43 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import logging
 
 from app.core.config import settings
 from app.api import sessions, files, memory, tools, web
 from app.api.integrations import calendars, emails, whatsapp
 from app.core.dependencies import init_clients, get_ollama_client, get_mcp_client, get_memory_manager
+
+# Configure logging
+# Log to both console and file
+from pathlib import Path
+import sys
+
+log_dir = Path("./logs")
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / "backend.log"
+
+# Create handlers
+console_handler = logging.StreamHandler(sys.stdout)
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.INFO)
+console_handler.setLevel(logging.INFO)
+
+# Create formatter
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+console_handler.setFormatter(formatter)
+file_handler.setFormatter(formatter)
+
+# Configure root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(console_handler)
+root_logger.addHandler(file_handler)
+
+logging.info(f"Logging to file: {log_file.absolute()}")
 
 
 @asynccontextmanager
@@ -52,6 +84,8 @@ app.include_router(web.router, prefix="/api/web", tags=["web"])
 app.include_router(calendars.router, prefix="/api/integrations/calendars", tags=["integrations", "calendars"])
 app.include_router(emails.router, prefix="/api/integrations/emails", tags=["integrations", "emails"])
 app.include_router(whatsapp.router, prefix="/api/integrations/whatsapp", tags=["integrations", "whatsapp"])
+from app.api.integrations import mcp as mcp_integration
+app.include_router(mcp_integration.router, prefix="/api/integrations/mcp", tags=["integrations", "mcp"])
 
 
 @app.get("/")
