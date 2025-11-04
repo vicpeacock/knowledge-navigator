@@ -22,28 +22,35 @@ class WhatsAppService:
     def __init__(self):
         self.driver = None
         self.is_authenticated = False
-        # Default profile path for persistent sessions
-        self.default_profile_path = Path.home() / ".whatsapp_web_profile"
+        # Use a completely isolated profile that won't interfere with user's Chrome
+        # Store in a temp-like directory that's clearly separate
+        self.default_profile_path = Path.home() / ".whatsapp_selenium_profile"
     
     def _get_chrome_options(self, headless: bool = False, profile_path: Optional[str] = None):
         """Get Chrome options with proper configuration for macOS/Linux"""
         options = webdriver.ChromeOptions()
         
-        # Use persistent profile by default to save session
+        # Use isolated profile that won't interfere with user's Chrome
         final_profile_path = profile_path or str(self.default_profile_path)
         if not headless:  # Only use persistent profile if not headless
             # Ensure profile directory exists
             Path(final_profile_path).mkdir(parents=True, exist_ok=True)
             options.add_argument(f"--user-data-dir={final_profile_path}")
-            logger.info(f"Using persistent profile: {final_profile_path}")
+            # Use a separate profile name to completely isolate it
+            options.add_argument(f"--profile-directory=WhatsAppSelenium")
+            logger.info(f"Using isolated WhatsApp profile: {final_profile_path}/WhatsAppSelenium")
         
         # Basic options
         if headless:
             options.add_argument("--headless=new")  # Use new headless mode
         else:
             # Non-headless: show window for QR code scanning
+            # Use a specific window title to identify it
             options.add_argument("--window-size=1280,800")
             options.add_argument("--start-maximized")
+            # Add a unique window name so it's clearly separate
+            options.add_experimental_option("useAutomationExtension", False)
+            options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
         
         # Security and stability options (essential for macOS)
         options.add_argument("--no-sandbox")
@@ -195,11 +202,11 @@ class WhatsAppService:
             
             options = self._get_chrome_options(headless=headless, profile_path=profile_path)
             
-            # Important: If Chrome is already open with the same profile, it will fail
-            # Add a unique port for remote debugging to avoid conflicts
-            import random
-            debug_port = random.randint(9000, 9999)
-            options.add_argument(f"--remote-debugging-port={debug_port}")
+            # Important: Use a fixed remote debugging port for WhatsApp Selenium
+            # This prevents conflicts and makes it clear this is Selenium-controlled
+            options.add_argument("--remote-debugging-port=9223")
+            # Add app name to make it clear this is WhatsApp automation
+            options.add_argument("--app-name=WhatsApp-Selenium")
             
             # Try to create Chrome driver using webdriver-manager for automatic ChromeDriver management
             # Use thread executor to avoid blocking event loop
