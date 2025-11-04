@@ -42,11 +42,12 @@
 - ❌ Motore decisionale per priorità eventi
 - ❌ Notifiche push frontend
 
-**WhatsApp Integration (Fase 1 - ✅ Completa):**
-- ✅ Integrazione WhatsApp (Selenium + pywhatkit)
-- ✅ Lettura messaggi
-- ✅ Integrazione nelle risposte (tool get_whatsapp_messages)
-- ✅ Invio messaggi (opzionale)
+**WhatsApp Integration (Fase 1 - ⏸️ Temporaneamente Disabilitata):**
+- ⏸️ Integrazione WhatsApp (Selenium + pywhatkit) - DISABILITATA
+- ⏸️ Lettura messaggi - DISABILITATA
+- ⏸️ Integrazione nelle risposte (tool get_whatsapp_messages) - DISABILITATA
+- ⏸️ Invio messaggi - DISABILITATA
+- 📝 **Nota**: L'integrazione WhatsApp è stata temporaneamente disabilitata a causa di problemi con l'estrazione delle date. Sarà riabilitata in futuro utilizzando WhatsApp Business API invece di Selenium/Web scraping.
 
 **Miglioramenti Memoria (Fase 2):**
 - ✅ Indicizzazione email in memoria (completata in Fase 1)
@@ -75,10 +76,11 @@
 - [x] Integrazione ricerca web nelle risposte chatbot
 - [x] Indicizzazione contenuti web visitati in memoria (long-term)
 
-**WhatsApp** ✅
-- [x] Setup integrazione WhatsApp
-- [x] Lettura messaggi
-- [x] Integrazione nelle risposte (tool get_whatsapp_messages)
+**WhatsApp** ⏸️ Temporaneamente Disabilitata
+- [x] Setup integrazione WhatsApp (Selenium/Web scraping - problemi con date extraction)
+- [ ] **Pianificato**: Riimplementazione con WhatsApp Business API
+- [ ] **Pianificato**: Lettura messaggi con Business API
+- [ ] **Pianificato**: Integrazione nelle risposte (tool get_whatsapp_messages)
 
 ---
 
