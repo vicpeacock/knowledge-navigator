@@ -1,0 +1,54 @@
+# Cursor Rules per Knowledge Navigator
+
+## Auto-Versioning
+
+PRIMA di modificare qualsiasi file di codice o configurazione, esegui SEMPRE:
+
+```bash
+python auto_version.py commit "Before [descrizione modifica]"
+```
+
+Oppure:
+
+```bash
+./auto_version.sh commit "Before [descrizione modifica]"
+```
+
+Questo salva automaticamente lo stato corrente prima di ogni modifica, permettendo rollback facili.
+
+## Workflow Consigliato
+
+1. **Prima di modificare file:**
+   ```bash
+   python auto_version.py commit "Before editing [file_name]"
+   ```
+
+2. **Prima di modifiche importanti:**
+   ```bash
+   python auto_version.py snapshot "Before [major change]"
+   ```
+
+3. **Dopo modifiche funzionanti:**
+   ```bash
+   git tag -a v0.1.X-working -m "Working state: [descrizione]"
+   ```
+
+## File da Monitorare
+
+I seguenti file vengono sempre auto-committati:
+- `backend/app/**/*.py` - Tutti i file Python
+- `backend/app/**/*.yaml`, `backend/app/**/*.yml` - Configurazioni
+- `backend/requirements.txt` - Dipendenze
+- `frontend/**/*.tsx`, `frontend/**/*.ts` - File TypeScript/React
+- `frontend/**/*.json` - Configurazioni frontend
+- `docker-compose.yml` - Configurazione Docker
+- `.env.example` - Template environment
+- `ROADMAP.md`, `README.md` - Documentazione
+
+## Regole Importanti
+
+1. **MAI modificare senza auto-save**: Sempre chiamare `auto_version.py commit` prima
+2. **Testare dopo modifiche**: Verificare che il backend si avvii e gli endpoint funzionino
+3. **Creare tag dopo stati funzionanti**: Usare `git tag` per versioni stabili
+4. **Documentare nel ROLLBACK.md**: Aggiornare quando si crea una nuova versione funzionante
+
