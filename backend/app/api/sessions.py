@@ -719,7 +719,7 @@ async def chat(
                 # Note: web_search and web_fetch are NOT automatically executed by Ollama
                 # We must call the Ollama REST API ourselves when Ollama requests these tools
                 try:
-                    result = await tool_manager.execute_tool(tool_name, tool_params, db)
+                    result = await tool_manager.execute_tool(tool_name, tool_params, db, session_id=session_id)
                     logger.info(f"Tool {tool_name} executed successfully, result keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
                     # Log result preview safely - avoid str() on very large dicts which can block
                     if isinstance(result, dict):

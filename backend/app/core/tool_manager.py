@@ -116,6 +116,24 @@ class ToolManager:
                     "required": ["url"]
                 }
             },
+            {
+                "name": "get_whatsapp_messages",
+                "description": "Recupera messaggi WhatsApp. Usa questo tool quando l'utente chiede informazioni sui messaggi WhatsApp o vuole leggere messaggi recenti. Richiede che WhatsApp sia configurato e autenticato.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "contact_name": {
+                            "type": "string",
+                            "description": "Nome del contatto (opzionale). Se non specificato, recupera messaggi dalla chat attiva."
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Numero massimo di messaggi da recuperare (default: 10)",
+                            "default": 10
+                        }
+                    }
+                }
+            },
         ]
     
     async def get_mcp_tools(self) -> List[Dict[str, Any]]:
@@ -199,6 +217,8 @@ class ToolManager:
         tool_name: str,
         parameters: Dict[str, Any],
         db: Optional[AsyncSession] = None,
+        session_id: Optional[UUID] = None,
+        auto_index: bool = True,
     ) -> Dict[str, Any]:
         """Execute a tool by name"""
         import logging
@@ -215,7 +235,7 @@ class ToolManager:
         try:
             # Check if it's an MCP tool (prefixed with "mcp_")
             if tool_name.startswith("mcp_"):
-                result = await self._execute_mcp_tool(tool_name, parameters, db)
+                result = await self._execute_mcp_tool(tool_name, parameters, db, session_id, auto_index)
                 logger.info(f"MCP Tool {tool_name} completed")
                 return result
             elif tool_name == "get_calendar_events":
@@ -223,7 +243,7 @@ class ToolManager:
                 logger.info(f"Tool {tool_name} completed, result type: {type(result)}")
                 return result
             elif tool_name == "get_emails":
-                result = await self._execute_get_emails(parameters, db)
+                result = await self._execute_get_emails(parameters, db, session_id=session_id)
                 logger.info(f"Tool {tool_name} completed, emails count: {result.get('count', 0) if isinstance(result, dict) else 'unknown'}")
                 return result
             elif tool_name == "summarize_emails":
@@ -231,11 +251,15 @@ class ToolManager:
                 logger.info(f"Tool {tool_name} completed, summary length: {len(result.get('summary', '')) if isinstance(result, dict) else 'unknown'}")
                 return result
             elif tool_name == "web_search":
-                result = await self._execute_web_search(parameters)
+                result = await self._execute_web_search(parameters, db, session_id, auto_index)
                 logger.info(f"Tool {tool_name} completed")
                 return result
             elif tool_name == "web_fetch":
-                result = await self._execute_web_fetch(parameters)
+                result = await self._execute_web_fetch(parameters, db, session_id, auto_index)
+                logger.info(f"Tool {tool_name} completed")
+                return result
+            elif tool_name == "get_whatsapp_messages":
+                result = await self._execute_get_whatsapp_messages(parameters)
                 logger.info(f"Tool {tool_name} completed")
                 return result
             else:
@@ -314,6 +338,8 @@ class ToolManager:
         self,
         parameters: Dict[str, Any],
         db: AsyncSession,
+        session_id: Optional[UUID] = None,
+        auto_index: bool = True,
     ) -> Dict[str, Any]:
         """Execute get_emails tool"""
         from app.models.database import Integration
@@ -355,11 +381,42 @@ class ToolManager:
                 include_body=include_body,
             )
             
-            return {
+            # Auto-index emails if enabled and session_id provided
+            index_stats = None
+            if auto_index and session_id and emails:
+                try:
+                    from app.services.email_indexer import EmailIndexer
+                    from app.core.dependencies import get_memory_manager
+                    
+                    # Initialize memory manager if not already done
+                    from app.core.dependencies import init_clients
+                    init_clients()
+                    memory_manager = get_memory_manager()
+                    email_indexer = EmailIndexer(memory_manager)
+                    index_stats = await email_indexer.index_emails(
+                        db=db,
+                        emails=emails,
+                        session_id=session_id,
+                        auto_index=True,
+                    )
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"Auto-indexed {index_stats.get('indexed', 0)} emails from get_emails tool")
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to auto-index emails: {e}", exc_info=True)
+                    # Don't fail the tool call if indexing fails
+            
+            result = {
                 "success": True,
                 "emails": emails,
                 "count": len(emails),
             }
+            if index_stats:
+                result["indexing_stats"] = index_stats
+            
+            return result
         except Exception as e:
             return {"error": str(e)}
     
@@ -368,6 +425,8 @@ class ToolManager:
         tool_name: str,
         parameters: Dict[str, Any],
         db: AsyncSession,
+        session_id: Optional[UUID] = None,
+        auto_index: bool = True,
     ) -> Dict[str, Any]:
         """Execute an MCP tool"""
         import logging
@@ -432,11 +491,40 @@ class ToolManager:
                             # Ignore errors - browser_close might not be available or session might already be closed
                             logger.debug(f"   Note: Could not close browser session (this is normal): {close_error}")
                     
-                    return {
+                    tool_result = {
                         "success": True,
                         "result": result,
                         "tool": actual_tool_name,
                     }
+                    
+                    # Auto-index browser content if enabled
+                    if auto_index and session_id and actual_tool_name in ["browser_navigate", "browser_snapshot"]:
+                        try:
+                            from app.services.web_indexer import WebIndexer
+                            from app.core.dependencies import get_memory_manager
+                            
+                            memory_manager = get_memory_manager()
+                            web_indexer = WebIndexer(memory_manager)
+                            
+                            url = parameters.get("url", "")
+                            if actual_tool_name == "browser_snapshot" and isinstance(result, dict):
+                                snapshot_content = result.get("result", result).get("content", "")
+                                if snapshot_content:
+                                    await web_indexer.index_browser_snapshot(
+                                        db=db,
+                                        url=url or "unknown",
+                                        snapshot=str(snapshot_content),
+                                        session_id=session_id,
+                                    )
+                                    logger.info(f"Auto-indexed browser snapshot for URL: {url}")
+                            elif actual_tool_name == "browser_navigate":
+                                # For navigate, we might want to index after snapshot is taken
+                                # But navigate itself doesn't return content, so we skip for now
+                                pass
+                        except Exception as e:
+                            logger.warning(f"Failed to auto-index browser content: {e}", exc_info=True)
+                    
+                    return tool_result
                 except Exception as e:
                     logger.error(f"   ❌ Error calling MCP tool {actual_tool_name}: {e}", exc_info=True)
                     return {"error": f"Error calling MCP tool: {str(e)}"}
@@ -605,6 +693,9 @@ Riassunto:"""
     async def _execute_web_search(
         self,
         parameters: Dict[str, Any],
+        db: Optional[AsyncSession] = None,
+        session_id: Optional[UUID] = None,
+        auto_index: bool = True,
     ) -> Dict[str, Any]:
         """Execute web_search tool using Ollama's official library"""
         import logging
@@ -698,13 +789,36 @@ Riassunto:"""
                         # Already a dict
                         serializable_results.append(r)
                 
-                return {
+                result_dict = {
                     "success": True,
                     "result": {
                         "results": serializable_results,
                         "formatted_text": results_text,
                     }
                 }
+                
+                # Auto-index search results if enabled
+                if auto_index and session_id and db and serializable_results:
+                    try:
+                        from app.services.web_indexer import WebIndexer
+                        from app.core.dependencies import get_memory_manager, init_clients
+                        
+                        # Initialize memory manager if not already done
+                        init_clients()
+                        memory_manager = get_memory_manager()
+                        web_indexer = WebIndexer(memory_manager)
+                        index_stats = await web_indexer.index_web_search_results(
+                            db=db,
+                            search_query=query,
+                            results=serializable_results,
+                            session_id=session_id,
+                        )
+                        result_dict["indexing_stats"] = index_stats
+                        logger.info(f"Auto-indexed {index_stats.get('indexed', 0)} web search results")
+                    except Exception as e:
+                        logger.warning(f"Failed to auto-index web search results: {e}", exc_info=True)
+                
+                return result_dict
             finally:
                 # Restore original API key if it existed
                 if original_key:
@@ -724,6 +838,9 @@ Riassunto:"""
     async def _execute_web_fetch(
         self,
         parameters: Dict[str, Any],
+        db: Optional[AsyncSession] = None,
+        session_id: Optional[UUID] = None,
+        auto_index: bool = True,
     ) -> Dict[str, Any]:
         """Execute web_fetch tool using Ollama's official library"""
         import logging
@@ -784,7 +901,7 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
 === Fine Contenuto ===
 """
                 
-                return {
+                result_dict = {
                     "success": True,
                     "result": {
                         "title": title,
@@ -793,6 +910,30 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                         "formatted_text": formatted_text,
                     }
                 }
+                
+                # Auto-index web fetch result if enabled
+                if auto_index and session_id and db:
+                    try:
+                        from app.services.web_indexer import WebIndexer
+                        from app.core.dependencies import get_memory_manager, init_clients
+                        
+                        # Initialize memory manager if not already done
+                        init_clients()
+                        memory_manager = get_memory_manager()
+                        web_indexer = WebIndexer(memory_manager)
+                        indexed = await web_indexer.index_web_fetch_result(
+                            db=db,
+                            url=url,
+                            result=result_dict["result"],
+                            session_id=session_id,
+                        )
+                        if indexed:
+                            result_dict["indexing_stats"] = {"indexed": True}
+                            logger.info(f"Auto-indexed web fetch result for URL: {url}")
+                    except Exception as e:
+                        logger.warning(f"Failed to auto-index web fetch result: {e}", exc_info=True)
+                
+                return result_dict
             finally:
                 # Restore original API key if it existed
                 if original_key:
@@ -807,5 +948,36 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
             }
         except Exception as e:
             logger.error(f"Error calling Ollama web_fetch: {e}", exc_info=True)
+            return {"error": str(e)}
+    
+    async def _execute_get_whatsapp_messages(
+        self,
+        parameters: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Execute get_whatsapp_messages tool"""
+        from app.services.whatsapp_service import WhatsAppService
+        
+        try:
+            whatsapp_service = WhatsAppService()
+            
+            if not whatsapp_service.is_authenticated:
+                return {
+                    "error": "WhatsApp non autenticato. Per favore configura WhatsApp prima usando l'endpoint /api/integrations/whatsapp/setup"
+                }
+            
+            contact_name = parameters.get("contact_name")
+            max_results = parameters.get("max_results", 10)
+            
+            messages = await whatsapp_service.get_recent_messages(
+                contact_name=contact_name,
+                max_results=max_results,
+            )
+            
+            return {
+                "success": True,
+                "messages": messages,
+                "count": len(messages),
+            }
+        except Exception as e:
             return {"error": str(e)}
 
