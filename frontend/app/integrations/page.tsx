@@ -41,10 +41,11 @@ export default function IntegrationsPage() {
     // Check if we're returning from OAuth callback
     const urlParams = new URLSearchParams(window.location.search)
     if (urlParams.get('success') === 'true') {
-      const integrationType = urlParams.get('type') || 'calendario'
-      alert(`${integrationType === 'email' ? 'Gmail' : 'Calendario'} collegato con successo!`)
+      // Integration connected successfully - UI will update automatically
       // Clean URL
       window.history.replaceState({}, document.title, '/integrations')
+      // Reload integrations to show the new connection
+      loadIntegrations()
     }
     
     // Check WhatsApp status on page load (non-blocking)
@@ -115,7 +116,7 @@ export default function IntegrationsPage() {
       return { availableTools, selectedTools: validSelectedTools }
     } catch (error: any) {
       console.error('loadToolsForIntegration - Error loading tools:', error)
-      alert(`Error loading tools: ${error.response?.data?.detail || error.message}`)
+      console.error('Error loading tools:', error.response?.data?.detail || error.message)
       setSelectedMcpIntegration(null)
       setMcpTools([])
       setSelectedTools([])
@@ -176,7 +177,7 @@ export default function IntegrationsPage() {
       }
     } catch (error: any) {
       console.error('Error connecting Google Calendar:', error)
-      alert(`Errore nella connessione: ${error.response?.data?.detail || error.message}`)
+      console.error('Error connecting calendar:', error.response?.data?.detail || error.message)
       setConnectingCalendar(false)
     }
   }
@@ -192,7 +193,7 @@ export default function IntegrationsPage() {
       }
     } catch (error: any) {
       console.error('Error connecting Gmail:', error)
-      alert(`Errore nella connessione: ${error.response?.data?.detail || error.message}`)
+      console.error('Error connecting email:', error.response?.data?.detail || error.message)
       setConnectingEmail(false)
     }
   }
@@ -204,26 +205,21 @@ export default function IntegrationsPage() {
       )
       
       if (!gmailIntegration) {
-        alert('Nessuna integrazione Gmail trovata')
+        console.warn('Nessuna integrazione Gmail trovata')
         return
       }
 
       const response = await integrationsApi.email.summarize(gmailIntegration.id, 3)
       
-      if (response.data?.summary) {
-        alert(`Riepilogo email non lette:\n\n${response.data.summary.substring(0, 500)}...`)
-      } else {
-        alert('Connessione funzionante!')
-      }
+      // Test successful - result shown in console, no need to block user
+      console.log('Gmail connection test:', response.data?.summary ? 'Found emails' : 'Connection OK')
     } catch (error: any) {
-      console.error('Error testing Gmail:', error)
-      alert(`Errore nel test: ${error.response?.data?.detail || error.message}`)
+      console.error('Error testing Gmail:', error.response?.data?.detail || error.message)
     }
   }
 
   const disconnectCalendar = async (integrationId: string) => {
     if (!integrationId) {
-      alert('Nessuna integrazione trovata')
       return
     }
     
@@ -233,17 +229,16 @@ export default function IntegrationsPage() {
     
     try {
       await integrationsApi.calendar.deleteIntegration(integrationId)
-      alert('Integrazione rimossa con successo')
       loadIntegrations()
+      // UI updates automatically, no alert needed
     } catch (error: any) {
       console.error('Error disconnecting calendar:', error)
-      alert(`Errore nella rimozione: ${error.response?.data?.detail || error.message}`)
+      console.error('Errore nella rimozione:', error.response?.data?.detail || error.message)
     }
   }
 
   const disconnectEmail = async (integrationId: string) => {
     if (!integrationId) {
-      alert('Nessuna integrazione trovata')
       return
     }
     
@@ -253,11 +248,11 @@ export default function IntegrationsPage() {
     
     try {
       await integrationsApi.email.deleteIntegration(integrationId)
-      alert('Integrazione rimossa con successo')
       loadIntegrations()
+      // UI updates automatically, no alert needed
     } catch (error: any) {
       console.error('Error disconnecting email:', error)
-      alert(`Errore nella rimozione: ${error.response?.data?.detail || error.message}`)
+      console.error('Errore nella rimozione:', error.response?.data?.detail || error.message)
     }
   }
 
@@ -265,14 +260,14 @@ export default function IntegrationsPage() {
     setConnectingWhatsApp(true)
     try {
       // Show immediate feedback
-      alert('WhatsApp Web si sta aprendo in una finestra Chrome separata. Il controllo dello stato avverrà automaticamente.')
+      // WhatsApp Web si sta aprendo in background - UI si aggiorna automaticamente
       
       // Start setup in background - don't wait for it, ignore timeout errors
       const setupPromise = integrationsApi.whatsapp.setup(false, undefined, false).catch((error) => {
         console.error('WhatsApp setup error (non-blocking):', error)
         // Don't show timeout errors - Chrome is probably opening anyway
         if (error.response?.data?.detail && !error.response.data.detail.includes('timeout')) {
-          alert(`Errore durante il setup: ${error.response.data.detail}`)
+          console.error('Errore durante il setup:', error.response.data.detail)
         } else if (error.message && !error.message.includes('timeout') && !error.code?.includes('ECONNABORTED')) {
           console.error('Non-timeout error:', error.message)
         }
@@ -339,11 +334,11 @@ export default function IntegrationsPage() {
         setWhatsappConnected(true)
       } else {
         setWhatsappConnected(false)
-        alert(`WhatsApp non ancora autenticato. Stato: ${statusResponse.data?.status || 'unknown'}. ${statusResponse.data?.message || ''}`)
+        // Status updates automatically, no alert needed
       }
     } catch (error: any) {
       console.error('Error checking WhatsApp status:', error)
-      alert(`Errore nel controllo: ${error.response?.data?.detail || error.message}`)
+      // Error logged to console, no blocking alert
     }
   }
 
@@ -355,16 +350,11 @@ export default function IntegrationsPage() {
       // If authenticated, try to get messages
       if (whatsappConnected) {
         const response = await integrationsApi.whatsapp.getMessages(undefined, 3)
-        if (response.data?.success && response.data?.messages) {
-          const count = response.data.count || 0
-          alert(`Connessione funzionante! Trovati ${count} messaggi recenti.`)
-        } else {
-          alert('Connessione funzionante, ma nessun messaggio trovato.')
-        }
+        // Test successful - result logged to console
+        console.log('WhatsApp test:', response.data?.success ? `Found ${response.data.count || 0} messages` : 'Connection OK, no messages')
       }
     } catch (error: any) {
-      console.error('Error testing WhatsApp:', error)
-      alert(`Errore nel test: ${error.response?.data?.detail || error.message}`)
+      console.error('Error testing WhatsApp:', error.response?.data?.detail || error.message)
     }
   }
 
@@ -376,10 +366,10 @@ export default function IntegrationsPage() {
     try {
       await integrationsApi.whatsapp.close()
       setWhatsappConnected(false)
-      alert('Sessione WhatsApp chiusa con successo')
+      // UI updates automatically, no alert needed
     } catch (error: any) {
       console.error('Error disconnecting WhatsApp:', error)
-      alert(`Errore nella disconnessione: ${error.response?.data?.detail || error.message}`)
+      console.error('Errore nella disconnessione:', error.response?.data?.detail || error.message)
     }
   }
 
@@ -391,7 +381,7 @@ export default function IntegrationsPage() {
       )
       
       if (!googleIntegration) {
-        alert('Nessuna integrazione Google Calendar trovata')
+        console.warn('Nessuna integrazione Google Calendar trovata')
         return
       }
 
@@ -404,13 +394,12 @@ export default function IntegrationsPage() {
       
       if (response.data?.events) {
         const count = response.data.count || 0
-        alert(`Connessione funzionante! Trovati ${count} eventi oggi.`)
+        console.log(`Calendar test: Found ${count} events today`)
       } else {
-        alert('Connessione funzionante, ma nessun evento trovato.')
+        console.log('Calendar test: Connection OK, no events')
       }
     } catch (error: any) {
-      console.error('Error testing calendar:', error)
-      alert(`Errore nel test: ${error.response?.data?.detail || error.message}`)
+      console.error('Error testing calendar:', error.response?.data?.detail || error.message)
     }
   }
 
@@ -496,7 +485,7 @@ export default function IntegrationsPage() {
                       if (integration?.id) {
                         disconnectCalendar(integration.id)
                       } else {
-                        alert('Nessuna integrazione trovata')
+                        console.warn('Nessuna integrazione trovata')
                       }
                     }}
                     className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
@@ -594,7 +583,7 @@ export default function IntegrationsPage() {
                           if (integration?.id) {
                             disconnectEmail(integration.id)
                           } else {
-                            alert('Nessuna integrazione trovata')
+                            console.warn('Nessuna integrazione trovata')
                           }
                         }}
                         className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
@@ -792,9 +781,9 @@ export default function IntegrationsPage() {
                       onClick={async () => {
                         try {
                           const response = await integrationsApi.mcp.test(integration.id)
-                          alert(`Connection successful! Found ${response.data.tools_count || 0} tools.`)
+                          console.log(`MCP test: Found ${response.data.tools_count || 0} tools`)
                         } catch (error: any) {
-                          alert(`Test failed: ${error.response?.data?.detail || error.message}`)
+                          console.error('MCP test failed:', error.response?.data?.detail || error.message)
                         }
                       }}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
@@ -840,7 +829,7 @@ export default function IntegrationsPage() {
                             }
                             await loadIntegrations()
                           } catch (error: any) {
-                            alert(`Error: ${error.response?.data?.detail || error.message}`)
+                            console.error('Error:', error.response?.data?.detail || error.message)
                           }
                         }
                       }}
@@ -900,7 +889,7 @@ export default function IntegrationsPage() {
                                   console.log('Saving tools:', toolsToSave, 'count:', toolsToSave.length)
                                   
                                   if (toolsToSave.length === 0) {
-                                    alert('No tools selected!')
+                                    console.warn('No tools selected!')
                                     setIsSaving(false)
                                     return
                                   }
@@ -923,11 +912,11 @@ export default function IntegrationsPage() {
                                   setIsSaving(false)
                                   
                                   // Show success message
-                                  alert(`Selected ${toolsToSave.length} tools successfully!`)
+                                  console.log(`Selected ${toolsToSave.length} tools successfully!`)
                                 } catch (error: any) {
                                   console.error('Error saving tools:', error)
                                   setIsSaving(false) // Re-enable useEffect even on error
-                                  alert(`Error: ${error.response?.data?.detail || error.message}`)
+                                  console.error('Error:', error.response?.data?.detail || error.message)
                                 }
                               }}
                               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -996,15 +985,15 @@ export default function IntegrationsPage() {
                             setSelectedMcpIntegration(response.data.integration_id)
                             setMcpTools(response.data.available_tools || [])
                             setSelectedTools([])
-                            alert(`Connected successfully! Found ${toolCount} tools. Please select which tools to enable.`)
-                          }, 200)
-                        } else if (toolCount === 0) {
-                          alert(`Connected successfully to ${mcpServerUrl}, but no tools were found. Please check the server configuration and backend logs for details.`)
-                        } else {
-                          alert(`Connected! Found ${toolCount} tools.`)
-                        }
-                      } catch (error: any) {
-                        alert(`Error: ${error.response?.data?.detail || error.message}`)
+                          console.log(`Connected successfully! Found ${toolCount} tools. Please select which tools to enable.`)
+                        }, 200)
+                      } else if (toolCount === 0) {
+                        console.warn(`Connected successfully to ${mcpServerUrl}, but no tools were found. Please check the server configuration and backend logs for details.`)
+                      } else {
+                        console.log(`Connected! Found ${toolCount} tools.`)
+                      }
+                    } catch (error: any) {
+                      console.error('Error:', error.response?.data?.detail || error.message)
                       } finally {
                         setConnectingMCP(false)
                       }
@@ -1054,12 +1043,12 @@ export default function IntegrationsPage() {
                       
                       const toolCount = response.data.count || 0
                       if (toolCount > 0) {
-                        alert(`Connected successfully! Found ${toolCount} tools. Click "Manage Tools" to select which tools to enable.`)
+                        console.log(`Connected successfully! Found ${toolCount} tools. Click "Manage Tools" to select which tools to enable.`)
                       } else {
-                        alert(`Connected successfully to ${mcpServerUrl}, but no tools were found. Please check the server configuration and logs.`)
+                        console.warn(`Connected successfully to ${mcpServerUrl}, but no tools were found. Please check the server configuration and logs.`)
                       }
                     } catch (error: any) {
-                      alert(`Error: ${error.response?.data?.detail || error.message}`)
+                      console.error('Error:', error.response?.data?.detail || error.message)
                     } finally {
                       setConnectingMCP(false)
                     }
