@@ -1155,10 +1155,10 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                                 # For "today" filter, we typically want received messages (not sent)
                                 # But include all messages for now - can be filtered later if needed
                                 filtered_messages.append(msg)
-                                logger.debug(f"Including message from today: date={msg_date}, is_from_me={msg.get('is_from_me')}, text={msg_text_preview}...")
+                                logger.info(f"Including message from today: date={msg_date}, is_from_me={msg.get('is_from_me')}, text={msg_text_preview}...")
                             else:
                                 messages_with_different_date += 1
-                                logger.debug(f"Excluding message: date={msg_date}, today={today} (text: {msg_text_preview}...)")
+                                logger.info(f"Excluding message: date={msg_date}, today={today} (text: {msg_text_preview}...)")
                         elif date_filter == "yesterday":
                             yesterday = today - timedelta(days=1)
                             if msg_date == yesterday:
@@ -1182,11 +1182,12 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                         filtered_messages.append(msg)
                 
                 logger.info(f"Date filter result: {len(filtered_messages)} messages after filtering, {messages_without_date} without date, {messages_with_different_date} with different date")
+                
+                # Store messages BEFORE filtering for debug info
+                messages_before_filter = messages.copy()
                 messages = filtered_messages
-            
-            # Debug: show sample of messages with dates (before filtering)
-            # Store messages before filtering for debug info
-            messages_before_filter = messages.copy() if date_filter else []
+            else:
+                messages_before_filter = []
             
             # Debug info
             debug_info = None

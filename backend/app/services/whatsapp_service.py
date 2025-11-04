@@ -661,12 +661,19 @@ class WhatsAppService:
                                 }
                             }
                             
-                            // Method 2: Get from active chat list
+                            // Method 2: Get from active chat list (get currently selected chat)
                             if (!chat && window.Store && window.Store.Chat && window.Store.Chat.models) {
                                 try {
-                                    // Get the first chat (most recent)
+                                    // Find the active/selected chat
                                     const chats = window.Store.Chat.models;
-                                    if (chats && chats.length > 0) {
+                                    for (const c of chats) {
+                                        if (c && (c.active === true || c.isSelected === true)) {
+                                            chat = c;
+                                            break;
+                                        }
+                                    }
+                                    // If no active chat, use the first one
+                                    if (!chat && chats && chats.length > 0) {
                                         chat = chats[0];
                                     }
                                 } catch (e) {
@@ -674,21 +681,43 @@ class WhatsAppService:
                                 }
                             }
                             
-                            // Method 3: Get from current active chat
-                            if (!chat && window.Store && window.Store.Chat && window.Store.Chat.active) {
+                            // Method 3: Try to get from window.Store.Chat.active
+                            if (!chat && window.Store && window.Store.Chat) {
                                 try {
-                                    chat = window.Store.Chat.active;
+                                    if (window.Store.Chat.active) {
+                                        chat = window.Store.Chat.active;
+                                    }
+                                } catch (e) {
+                                    // Try alternative method
+                                }
+                            }
+                            
+                            // Method 4: Try to get from window.Store.Conn.selectedChat
+                            if (!chat && window.Store && window.Store.Conn) {
+                                try {
+                                    if (window.Store.Conn.selectedChat) {
+                                        chat = window.Store.Conn.selectedChat;
+                                    }
                                 } catch (e) {
                                     // Try alternative method
                                 }
                             }
                             
                             if (!chat) {
-                                return { error: 'No active chat found' };
+                                return { error: 'No active chat found. Available: ' + (window.Store && window.Store.Chat ? 'Store.Chat exists' : 'Store.Chat missing') };
                             }
                             
                             // Get messages from the chat
-                            const messages = chat.msgs ? (chat.msgs.models || chat.msgs || []) : [];
+                            let messages = [];
+                            if (chat.msgs) {
+                                if (chat.msgs.models) {
+                                    messages = chat.msgs.models;
+                                } else if (Array.isArray(chat.msgs)) {
+                                    messages = chat.msgs;
+                                } else if (chat.msgs.getAll && typeof chat.msgs.getAll === 'function') {
+                                    messages = chat.msgs.getAll();
+                                }
+                            }
                             const result = [];
                             const today = new Date();
                             today.setHours(0, 0, 0, 0);
@@ -831,17 +860,22 @@ class WhatsAppService:
                     "div[data-id]",
                     "div.message",
                     "span.selectable-text",
+                    "#main div[data-id]",  # More specific
+                    "#main span[data-testid*='msg']",  # Alternative
                 ]
                 
                 message_elements = []
                 for selector in message_selectors:
                     try:
-                        elements = WebDriverWait(self.driver, 5).until(
+                        # Wait longer for messages to be present
+                        elements = WebDriverWait(self.driver, 10).until(
                             EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
                         )
-                        if elements:
-                            message_elements = elements
-                            logger.info(f"Found {len(elements)} message elements using selector: {selector}")
+                        # Filter for visible elements only
+                        visible_elements = [e for e in elements if e.is_displayed() and e.size['height'] > 0]
+                        if visible_elements:
+                            message_elements = visible_elements
+                            logger.info(f"Found {len(visible_elements)} visible message elements using selector: {selector}")
                             break
                     except TimeoutException:
                         continue
