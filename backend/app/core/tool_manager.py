@@ -994,69 +994,69 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
         # Check authentication status
         # If driver doesn't exist, try to connect to existing Chrome instance first
         if not whatsapp_service.driver:
-                logger.info("WhatsApp driver not initialized, checking for existing Chrome instance...")
-                
-                # First, try to connect to existing Chrome with remote debugging port 9223
-                try:
-                    from selenium.webdriver.chrome.options import Options
-                    from selenium import webdriver
-                    import socket
-                    
-                    # Check if Chrome is already running on port 9223
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(1)
-                    result = sock.connect_ex(('127.0.0.1', 9223))
-                    sock.close()
-                    
-                    if result == 0:  # Port is open, Chrome is running
-                        logger.info("Found existing Chrome instance on port 9223, connecting...")
-                        try:
-                            options = Options()
-                            options.add_experimental_option("debuggerAddress", "127.0.0.1:9223")
-                            # Connect to existing Chrome (non-blocking)
-                            whatsapp_service.driver = webdriver.Chrome(options=options)
-                            logger.info("Successfully connected to existing Chrome instance")
-                            # Navigate to WhatsApp if not already there
-                            current_url = whatsapp_service.driver.current_url
-                            if "web.whatsapp.com" not in current_url:
-                                logger.info("Navigating to WhatsApp Web...")
-                                whatsapp_service.driver.get("https://web.whatsapp.com")
-                                import time
-                                time.sleep(3)
-                        except Exception as e:
-                            logger.warning(f"Could not connect to existing Chrome: {e}, will open new instance")
-                            whatsapp_service.driver = None
-                    else:
-                        logger.info("No existing Chrome instance found on port 9223")
-                except Exception as e:
-                    logger.debug(f"Error checking for existing Chrome: {e}")
-                
-                # If still no driver, open a new instance
-                if not whatsapp_service.driver:
-                    logger.info("Opening new Chrome instance...")
-                    try:
-                        # Use asyncio.wait_for to prevent long blocking
-                        await asyncio.wait_for(
-                            whatsapp_service.setup_whatsapp_web(
-                                headless=False,  # Keep visible so user can see
-                                wait_for_auth=False,  # Don't wait, just open
-                                timeout=5,  # Short timeout
-                            ),
-                            timeout=7.0  # Overall timeout for reconnect (7 seconds max)
-                        )
-                        logger.info("Successfully opened new Chrome instance")
-                        import time
-                        time.sleep(2)  # Wait for page to load
-                    except asyncio.TimeoutError:
-                        logger.warning("WhatsApp reconnect timed out, but continuing anyway...")
-                    except Exception as e:
-                        logger.error(f"Failed to reconnect WhatsApp driver: {e}")
-                        return (None, {
-                            "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
-                        })
+            logger.info("WhatsApp driver not initialized, checking for existing Chrome instance...")
             
-            # Now check authentication status
-            if whatsapp_service.driver:
+            # First, try to connect to existing Chrome with remote debugging port 9223
+            try:
+                from selenium.webdriver.chrome.options import Options
+                from selenium import webdriver
+                import socket
+                
+                # Check if Chrome is already running on port 9223
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('127.0.0.1', 9223))
+                sock.close()
+                
+                if result == 0:  # Port is open, Chrome is running
+                    logger.info("Found existing Chrome instance on port 9223, connecting...")
+                    try:
+                        options = Options()
+                        options.add_experimental_option("debuggerAddress", "127.0.0.1:9223")
+                        # Connect to existing Chrome (non-blocking)
+                        whatsapp_service.driver = webdriver.Chrome(options=options)
+                        logger.info("Successfully connected to existing Chrome instance")
+                        # Navigate to WhatsApp if not already there
+                        current_url = whatsapp_service.driver.current_url
+                        if "web.whatsapp.com" not in current_url:
+                            logger.info("Navigating to WhatsApp Web...")
+                            whatsapp_service.driver.get("https://web.whatsapp.com")
+                            import time
+                            time.sleep(3)
+                    except Exception as e:
+                        logger.warning(f"Could not connect to existing Chrome: {e}, will open new instance")
+                        whatsapp_service.driver = None
+                else:
+                    logger.info("No existing Chrome instance found on port 9223")
+            except Exception as e:
+                logger.debug(f"Error checking for existing Chrome: {e}")
+            
+            # If still no driver, open a new instance
+            if not whatsapp_service.driver:
+                logger.info("Opening new Chrome instance...")
+                try:
+                    # Use asyncio.wait_for to prevent long blocking
+                    await asyncio.wait_for(
+                        whatsapp_service.setup_whatsapp_web(
+                            headless=False,  # Keep visible so user can see
+                            wait_for_auth=False,  # Don't wait, just open
+                            timeout=5,  # Short timeout
+                        ),
+                        timeout=7.0  # Overall timeout for reconnect (7 seconds max)
+                    )
+                    logger.info("Successfully opened new Chrome instance")
+                    import time
+                    time.sleep(2)  # Wait for page to load
+                except asyncio.TimeoutError:
+                    logger.warning("WhatsApp reconnect timed out, but continuing anyway...")
+                except Exception as e:
+                    logger.error(f"Failed to reconnect WhatsApp driver: {e}")
+                    return (None, {
+                        "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
+                    })
+        
+        # Now check authentication status
+        if whatsapp_service.driver:
                 try:
                     auth_status = whatsapp_service._check_authentication_status()
                     if auth_status.get("authenticated", False):
