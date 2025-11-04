@@ -7,6 +7,9 @@ from uuid import UUID
 # Session Schemas
 class SessionBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
+    title: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = None
+    status: str = Field(default="active", pattern="^(active|archived|deleted)$")
     metadata: Dict[str, Any] = {}
 
 
@@ -16,6 +19,9 @@ class SessionCreate(SessionBase):
 
 class SessionUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    title: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = None
+    status: Optional[str] = Field(None, pattern="^(active|archived|deleted)$")
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -23,6 +29,7 @@ class Session(SessionBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    archived_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -117,7 +124,7 @@ class MemoryLong(MemoryLongBase):
 # Integration Schemas
 class IntegrationBase(BaseModel):
     provider: str
-    service_type: str = Field(..., pattern="^(calendar|email|whatsapp)$")
+    service_type: str = Field(..., pattern="^(calendar|email|whatsapp|mcp_server)$")
     enabled: bool = True
     metadata: Dict[str, Any] = {}
 
@@ -146,11 +153,21 @@ class ChatRequest(BaseModel):
     use_memory: bool = True
 
 
+class ToolExecutionDetail(BaseModel):
+    """Details about a tool execution"""
+    tool_name: str
+    parameters: Dict[str, Any] = {}
+    result: Dict[str, Any] = {}
+    success: bool = True
+    error: Optional[str] = None
+
+
 class ChatResponse(BaseModel):
     response: str
     session_id: UUID
     memory_used: Dict[str, Any] = {}
-    tools_used: List[str] = []
+    tools_used: List[str] = []  # Kept for backward compatibility
+    tool_details: List[ToolExecutionDetail] = []  # Detailed information about tool executions
 
 
 # Memory Info Schema

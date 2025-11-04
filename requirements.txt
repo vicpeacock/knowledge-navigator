@@ -27,6 +27,9 @@ pillow==10.1.0
 httpx==0.25.2
 aiohttp==3.9.1
 
+# MCP (Model Context Protocol) - Official library
+mcp>=1.20.0
+
 # Calendar integrations
 google-api-python-client==2.108.0
 google-auth-httplib2==0.1.1

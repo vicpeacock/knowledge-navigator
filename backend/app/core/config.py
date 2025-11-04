@@ -21,8 +21,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "gpt-oss:20b"
 
-    # MCP Gateway
-    mcp_gateway_url: str = "http://localhost:3002"  # Changed from 3000 to avoid conflict
+    # MCP Gateway (default, can be overridden per integration)
+    # Default: localhost:8080 (if backend runs on host)
+    # Use host.docker.internal:8080 if backend runs inside Docker
+    # Users can override this when connecting via the UI
+    mcp_gateway_url: str = "http://localhost:8080"  # Docker MCP Gateway default port
 
     # Security
     secret_key: str = "your-secret-key-change-in-production"

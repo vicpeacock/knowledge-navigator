@@ -59,6 +59,7 @@ class OllamaClient:
         system_prompt: Optional[str] = None,
         retrieved_memory: Optional[List[str]] = None,
         tools_description: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
         format: Optional[str] = None,
         return_raw: bool = False,
     ) -> str:
@@ -111,6 +112,25 @@ class OllamaClient:
             "stream": False,
         }
         
+        # Add tools if provided (native Ollama tool calling)
+        if tools:
+            # Convert our tool format to Ollama/OpenAI format
+            ollama_tools = []
+            for tool in tools:
+                ollama_tool = {
+                    "type": "function",
+                    "function": {
+                        "name": tool.get("name", ""),
+                        "description": tool.get("description", ""),
+                        "parameters": tool.get("parameters", {}),
+                    }
+                }
+                ollama_tools.append(ollama_tool)
+            payload["tools"] = ollama_tools
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Passing {len(ollama_tools)} tools to Ollama in native format")
+        
         # Add format if specified (for JSON mode)
         if format:
             payload["format"] = format
@@ -153,61 +173,34 @@ class OllamaClient:
             # Try to extract text from any field
             content = str(result).replace("{", "").replace("}", "").replace("'", "")
         
-        # Store tool_calls in a custom attribute if present (we'll check this in sessions.py)
+        # Parse tool_calls from Ollama's native format (OpenAI-compatible)
+        # Standard format: message.tool_calls[] with {"function": {"name": "tool_name", "arguments": {...}}}
         converted_tool_calls = []
         if tool_calls_from_api:
-            # Convert Ollama tool_calls format to our format
             for tc in tool_calls_from_api:
                 if "function" in tc:
                     func = tc["function"]
                     func_name = func.get("name", "")
                     func_args = func.get("arguments", {})
                     
-                    # Format 1: Direct tool call - func.name is the tool name (e.g., "tool.get_emails")
-                    # Remove "tool." prefix if present
-                    if func_name:
-                        actual_tool_name = func_name.replace("tool.", "").replace("tool_", "")
-                        if isinstance(func_args, dict):
-                            # Arguments are directly in func_args
-                            converted_tool_calls.append({
-                                "name": actual_tool_name,
-                                "parameters": func_args
-                            })
+                    # Parse arguments - Ollama may return string or dict
+                    if isinstance(func_args, str):
+                        try:
+                            func_args = json.loads(func_args)
+                        except json.JSONDecodeError:
+                            logger.warning(f"Could not parse tool arguments as JSON: {func_args}")
                             continue
                     
-                    # Format 2: Nested structure - function name can be "tool_call" or "commentary"
-                    # Format: {"name": "tool_call"/"commentary", "arguments": {"tool_call": {"name": "actual_tool", "parameters": {...}}}}
-                    if isinstance(func_args, dict):
-                        # Try format 2a: arguments.tool_call.name (old format)
-                        if "tool_call" in func_args:
-                            tool_call_dict = func_args["tool_call"]
-                            if isinstance(tool_call_dict, dict):
-                                actual_tool_name = tool_call_dict.get("name", "")
-                                actual_params = tool_call_dict.get("parameters", {})
-                                if actual_tool_name:
-                                    # Remove "tool." prefix if present
-                                    actual_tool_name = actual_tool_name.replace("tool.", "").replace("tool_", "")
-                                    converted_tool_calls.append({
-                                        "name": actual_tool_name,
-                                        "parameters": actual_params
-                                    })
-                                    continue
-                        
-                        # Try format 2b: arguments.name directly (old format)
-                        actual_tool_name = func_args.get("name", "")
-                        actual_params = func_args.get("parameters", {})
-                        if actual_tool_name:
-                            # Remove "tool." prefix if present
-                            actual_tool_name = actual_tool_name.replace("tool.", "").replace("tool_", "")
-                            converted_tool_calls.append({
-                                "name": actual_tool_name,
-                                "parameters": actual_params
-                            })
+                    if func_name and isinstance(func_args, dict):
+                        converted_tool_calls.append({
+                            "name": func_name,
+                            "parameters": func_args
+                        })
             
             if converted_tool_calls:
-                logger.info(f"Converted {len(converted_tool_calls)} tool calls from Ollama format: {[tc['name'] for tc in converted_tool_calls]}")
+                logger.info(f"Parsed {len(converted_tool_calls)} tool calls from Ollama: {[tc['name'] for tc in converted_tool_calls]}")
             else:
-                logger.warning(f"Could not convert tool_calls. Raw structure: {tool_calls_from_api}")
+                logger.warning(f"Could not parse tool_calls. Raw structure: {tool_calls_from_api}")
         
         if not content:
             logger.warning(f"Empty content from Ollama. Result keys: {list(result.keys())}")

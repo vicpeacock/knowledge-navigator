@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timedelta, timezone
-import json
+import json as json_lib
+import logging
 
 from app.db.database import get_db
 from app.models.database import Session as SessionModel, Message as MessageModel
@@ -26,17 +27,28 @@ router = APIRouter()
 
 
 @router.get("/", response_model=List[Session])
-async def list_sessions(db: AsyncSession = Depends(get_db)):
-    """List all sessions"""
-    result = await db.execute(select(SessionModel).order_by(SessionModel.updated_at.desc()))
+async def list_sessions(
+    status: Optional[str] = None,  # Filter by status: active, archived, deleted
+    db: AsyncSession = Depends(get_db),
+):
+    """List all sessions, optionally filtered by status"""
+    query = select(SessionModel)
+    if status:
+        query = query.where(SessionModel.status == status)
+    query = query.order_by(SessionModel.updated_at.desc())
+    result = await db.execute(query)
     sessions = result.scalars().all()
     # Map session_metadata to metadata for response
     return [
         Session(
             id=s.id,
             name=s.name,
+            title=s.title,
+            description=s.description,
+            status=s.status,
             created_at=s.created_at,
             updated_at=s.updated_at,
+            archived_at=s.archived_at,
             metadata=s.session_metadata or {},
         )
         for s in sessions
@@ -62,8 +74,12 @@ async def create_session(
     return Session(
         id=session.id,
         name=session.name,
+        title=session.title,
+        description=session.description,
+        status=session.status,
         created_at=session.created_at,
         updated_at=session.updated_at,
+        archived_at=session.archived_at,
         metadata=session.session_metadata or {},
     )
 
@@ -86,8 +102,12 @@ async def get_session(
     return Session(
         id=session.id,
         name=session.name,
+        title=session.title,
+        description=session.description,
+        status=session.status,
         created_at=session.created_at,
         updated_at=session.updated_at,
+        archived_at=session.archived_at,
         metadata=session.session_metadata or {},
     )
 
@@ -108,20 +128,39 @@ async def update_session(
         raise HTTPException(status_code=404, detail="Session not found")
     
     update_data = session_data.model_dump(exclude_unset=True)
+    # Map metadata to session_metadata if present
+    if 'metadata' in update_data:
+        metadata_value = update_data.pop('metadata')
+        update_data['session_metadata'] = metadata_value
+    
     for key, value in update_data.items():
         setattr(session, key, value)
     
     await db.commit()
     await db.refresh(session)
-    return session
+    
+    return Session(
+        id=session.id,
+        name=session.name,
+        title=session.title,
+        description=session.description,
+        status=session.status,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        archived_at=session.archived_at,
+        metadata=session.session_metadata or {},
+    )
 
 
-@router.delete("/{session_id}", status_code=204)
-async def delete_session(
+@router.post("/{session_id}/archive", response_model=Session)
+async def archive_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
+    memory: MemoryManager = Depends(get_memory_manager),
 ):
-    """Delete a session"""
+    """Archive a session and index it semantically in long-term memory"""
+    from datetime import datetime, timezone
+    
     result = await db.execute(
         select(SessionModel).where(SessionModel.id == session_id)
     )
@@ -130,7 +169,113 @@ async def delete_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    await db.delete(session)
+    if session.status == "archived":
+        raise HTTPException(status_code=400, detail="Session is already archived")
+    
+    # Update session status
+    session.status = "archived"
+    session.archived_at = datetime.now(timezone.utc)
+    await db.commit()
+    
+    # Index session content semantically in long-term memory
+    try:
+        # Get all messages from the session
+        messages_result = await db.execute(
+            select(MessageModel)
+            .where(MessageModel.session_id == session_id)
+            .order_by(MessageModel.timestamp)
+        )
+        messages = messages_result.scalars().all()
+        
+        # Create a summary of the session
+        session_content = f"Session: {session.title or session.name}\n"
+        if session.description:
+            session_content += f"Description: {session.description}\n"
+        session_content += "\nConversation:\n"
+        
+        for msg in messages:
+            session_content += f"{msg.role}: {msg.content}\n"
+        
+        # Store in long-term memory with high importance
+        await memory.add_long_term_memory(
+            db,
+            content=session_content,
+            learned_from_sessions=[session_id],
+            importance_score=0.8,  # High importance for archived sessions
+        )
+        
+        logger = logging.getLogger(__name__)
+        logger.info(f"Session {session_id} archived and indexed in long-term memory")
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error indexing archived session: {e}", exc_info=True)
+        # Don't fail the archive operation if indexing fails
+    
+    await db.refresh(session)
+    return Session(
+        id=session.id,
+        name=session.name,
+        title=session.title,
+        description=session.description,
+        status=session.status,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        archived_at=session.archived_at,
+        metadata=session.session_metadata or {},
+    )
+
+
+@router.post("/{session_id}/restore", response_model=Session)
+async def restore_session(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Restore an archived session back to active"""
+    result = await db.execute(
+        select(SessionModel).where(SessionModel.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if session.status != "archived":
+        raise HTTPException(status_code=400, detail="Session is not archived")
+    
+    session.status = "active"
+    session.archived_at = None
+    await db.commit()
+    await db.refresh(session)
+    
+    return Session(
+        id=session.id,
+        name=session.name,
+        title=session.title,
+        description=session.description,
+        status=session.status,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        archived_at=session.archived_at,
+        metadata=session.session_metadata or {},
+    )
+
+
+@router.delete("/{session_id}", status_code=204)
+async def delete_session(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a session (soft delete by setting status to deleted)"""
+    result = await db.execute(
+        select(SessionModel).where(SessionModel.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Soft delete: set status to deleted instead of actually deleting
+    session.status = "deleted"
     await db.commit()
     return None
 
@@ -221,10 +366,9 @@ async def get_session_messages(
                 # Strategy 3: JSON serialization (may convert to string representation)
                 if not converted:
                     try:
-                        import json
                         # Try with default=lambda o: o.__dict__ to preserve structure
-                        json_str = json.dumps(metadata, default=lambda o: vars(o) if hasattr(o, '__dict__') else str(o), ensure_ascii=False)
-                        parsed = json.loads(json_str)
+                        json_str = json_lib.dumps(metadata, default=lambda o: vars(o) if hasattr(o, '__dict__') else str(o), ensure_ascii=False)
+                        parsed = json_lib.loads(json_str)
                         if isinstance(parsed, dict):
                             metadata = parsed
                             converted = True
@@ -402,8 +546,11 @@ async def chat(
     from app.core.tool_manager import ToolManager
     tool_manager = ToolManager(db=db)
     
-    # Get tools description for LLM
-    tools_description = tool_manager.get_tools_system_prompt()
+    # Get tools for native Ollama tool calling
+    available_tools = await tool_manager.get_available_tools()
+    
+    # Also get tools description for fallback/prompt-based approach
+    tools_description = await tool_manager.get_tools_system_prompt()
     
     tools_used = []
     max_tool_iterations = 3  # Limit tool call iterations
@@ -423,11 +570,13 @@ async def chat(
         
         # Generate response with tools available
         try:
+            # Use native tool calling if tools are available, otherwise fallback to prompt-based
             response_data = await ollama.generate_with_context(
                 prompt=current_prompt,
                 session_context=session_context,
                 retrieved_memory=retrieved_memory if retrieved_memory else None,
-                tools_description=tools_description if tool_iteration == 0 else None,  # Only show tools on first iteration
+                tools=available_tools if tool_iteration == 0 else None,  # Pass tools natively to Ollama
+                tools_description=tools_description if tool_iteration == 0 and not available_tools else None,  # Fallback to prompt if no native tools
                 return_raw=True,
             )
             
@@ -496,50 +645,39 @@ async def chat(
                 tool_calls = parsed_tc
                 logger.info(f"✅ LLM automatically called {len(tool_calls)} tool(s): {[tc.get('name') for tc in tool_calls]}")
             else:
-                # Try to parse from raw tool_calls structure
+                # Fallback: try to parse from raw tool_calls structure (shouldn't be needed with native tool calling)
                 raw_result = response_data.get("raw_result", {})
                 if "message" in raw_result and isinstance(raw_result["message"], dict):
                     message = raw_result["message"]
                     if "tool_calls" in message:
                         ollama_tc = message["tool_calls"]
-                        # Convert Ollama format to our format
+                        # Standard Ollama format: {"function": {"name": "...", "arguments": {...}}}
                         for tc in ollama_tc:
                             if "function" in tc:
                                 func = tc["function"]
                                 func_name = func.get("name", "")
                                 func_args = func.get("arguments", {})
                                 
-                                # Format 1: Direct tool name (e.g., "tool.get_emails" or "get_emails")
-                                if func_name and func_name not in ["tool_call", "commentary"]:
-                                    # Remove "tool." prefix if present
-                                    actual_name = func_name.replace("tool.", "").replace("tool_", "")
-                                    if isinstance(func_args, dict):
-                                        tool_calls.append({
-                                            "name": actual_name,
-                                            "parameters": func_args
-                                        })
+                                # Parse arguments if string
+                                if isinstance(func_args, str):
+                                    try:
+                                        func_args = json_lib.loads(func_args)
+                                    except json_lib.JSONDecodeError:
+                                        logger.warning(f"Could not parse tool arguments: {func_args}")
                                         continue
                                 
-                                # Format 2: Nested structure (old format)
-                                if func_name == "tool_call" and isinstance(func_args, dict):
-                                    if "tool_call" in func_args:
-                                        tool_call_dict = func_args["tool_call"]
-                                        if isinstance(tool_call_dict, dict):
-                                            actual_name = tool_call_dict.get("name", "")
-                                            actual_params = tool_call_dict.get("parameters", {})
-                                            if actual_name:
-                                                # Remove "tool." prefix if present
-                                                actual_name = actual_name.replace("tool.", "").replace("tool_", "")
-                                                tool_calls.append({
-                                                    "name": actual_name,
-                                                    "parameters": actual_params
-                                                })
-                        logger.info(f"Extracted {len(tool_calls)} tool calls from Ollama response structure")
+                                if func_name and isinstance(func_args, dict):
+                                    tool_calls.append({
+                                        "name": func_name,
+                                        "parameters": func_args
+                                    })
+                        logger.info(f"Extracted {len(tool_calls)} tool calls from raw Ollama response")
         
-        # Fallback: try parsing from text
-        if not tool_calls:
-            tool_calls = tool_manager.parse_tool_calls(response_text)
-            logger.info(f"Parsed {len(tool_calls)} tool calls from response text")
+        # Log what tools are available for debugging
+        if tool_iteration == 0:
+            available_tools = await tool_manager.get_available_tools()
+            browser_tools = [t.get('name') for t in available_tools if 'browser' in t.get('name', '').lower()]
+            logger.info(f"Available browser tools: {browser_tools}")
         
         # If response contains only JSON tool call, remove it for next iteration
         if tool_calls and response_text.strip().startswith('{'):
@@ -576,8 +714,22 @@ async def chat(
                 try:
                     result = await tool_manager.execute_tool(tool_name, tool_params, db)
                     logger.info(f"Tool {tool_name} executed successfully, result keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
+                    # Log result preview safely - avoid str() on very large dicts which can block
+                    if isinstance(result, dict):
+                        # Check if result has large content field without serializing entire dict
+                        content_size = len(result.get('content', '')) if isinstance(result.get('content'), str) else 0
+                        if content_size > 10000:
+                            logger.info(f"Tool {tool_name} result preview: Large result with {content_size} chars in content field, keys: {list(result.keys())}")
+                        else:
+                            # Safe to serialize small dicts
+                            logger.info(f"Tool {tool_name} result preview: {str(result)[:500]}")
+                    elif isinstance(result, str):
+                        logger.info(f"Tool {tool_name} result preview: {result[:500]}")
+                    else:
+                        logger.info(f"Tool {tool_name} result type: {type(result)}")
                     iteration_tool_results.append({
                         "tool": tool_name,
+                        "parameters": tool_params,  # Store parameters for detailed response
                         "result": result,
                     })
                     tools_used.append(tool_name)
@@ -585,20 +737,55 @@ async def chat(
                     logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
                     iteration_tool_results.append({
                         "tool": tool_name,
+                        "parameters": tool_params,
                         "result": {"error": str(e)},
                     })
         
+        logger.info(f"Tool execution completed. iteration_tool_results count: {len(iteration_tool_results)}")
+        
         # If tools were called, reinvoke LLM with results
         if iteration_tool_results:
+            logger.info(f"Preparing to reinvoke LLM with {len(iteration_tool_results)} tool result(s)")
             # Format tool results for LLM
             tool_results_text = "\n\n=== Risultati Tool Chiamati ===\n"
             for tr in iteration_tool_results:
                 tool_results_text += f"Tool: {tr['tool']}\n"
-                result_str = json.dumps(tr['result'], indent=2, ensure_ascii=False, default=str)
-                # If result is very long, truncate it
-                if len(result_str) > 8000:
-                    result_str = result_str[:8000] + "\n... [risultato troncato]"
-                tool_results_text += f"Risultato: {result_str}\n\n"
+                try:
+                    # For browser results, extract content directly instead of JSON to preserve more information
+                    # Note: tr['result'] has structure: {"success": True, "result": {...}, "tool": "..."}
+                    wrapper_result = tr['result']
+                    logger.debug(f"Formatting tool result for {tr['tool']}, wrapper_result type: {type(wrapper_result)}, keys: {list(wrapper_result.keys()) if isinstance(wrapper_result, dict) else 'N/A'}")
+                    
+                    if isinstance(wrapper_result, dict) and 'result' in wrapper_result:
+                        # Unwrap the actual tool result
+                        actual_result = wrapper_result.get('result', {})
+                        logger.debug(f"actual_result type: {type(actual_result)}, keys: {list(actual_result.keys()) if isinstance(actual_result, dict) else 'N/A'}")
+                        
+                        if isinstance(actual_result, dict) and 'content' in actual_result:
+                            # Browser tool returns content as string - use it directly instead of JSON
+                            content = actual_result.get('content', '')
+                            logger.info(f"Extracting content from browser tool result, content length: {len(content)}")
+                            # Truncate to reasonable size but keep more than JSON would allow
+                            if len(content) > 20000:
+                                content = content[:20000] + "\n... [contenuto troncato per limiti di dimensione]"
+                            tool_results_text += f"Risultato (contenuto pagina web):\n{content}\n\n"
+                        else:
+                            # Tool result doesn't have content field, use JSON format
+                            logger.debug(f"actual_result doesn't have content field, using JSON format")
+                            result_str = json_lib.dumps(wrapper_result, indent=2, ensure_ascii=False, default=str)
+                            if len(result_str) > 15000:
+                                result_str = result_str[:15000] + "\n... [risultato troncato]"
+                            tool_results_text += f"Risultato: {result_str}\n\n"
+                    else:
+                        # For other tools or different structure, use JSON format
+                        logger.debug(f"wrapper_result doesn't have 'result' key, using JSON format")
+                        result_str = json_lib.dumps(wrapper_result, indent=2, ensure_ascii=False, default=str)
+                        if len(result_str) > 15000:
+                            result_str = result_str[:15000] + "\n... [risultato troncato]"
+                        tool_results_text += f"Risultato: {result_str}\n\n"
+                except Exception as e:
+                    logger.error(f"Error formatting tool result for {tr['tool']}: {e}", exc_info=True)
+                    tool_results_text += f"Risultato: [Errore nella formattazione del risultato: {str(e)}]\n\n"
             tool_results_text += "=== Fine Risultati Tool ===\n"
             tool_results_text += "IMPORTANTE: Usa SOLO i risultati dei tool sopra per rispondere. NON inventare informazioni.\n"
             tool_results_text += "Rispondi all'utente in modo naturale basandoti sui dati reali ottenuti.\n"
@@ -611,11 +798,18 @@ async def chat(
 
 {tool_results_text}
 
-IMMPORTANTE: Ora devi rispondere all'utente con un messaggio testuale chiaro e utile. 
-NON usare più tool - i tool sono già stati eseguiti e hai i risultati sopra.
-Rispondi in modo naturale in italiano, basandoti SOLO sui dati reali ottenuti dai tool.
-Non inventare informazioni che non sono nei risultati sopra.
-Inizia direttamente la tua risposta all'utente senza JSON o formattazione speciale."""
+=== ISTRUZIONI CRITICHE ===
+1. Hai ricevuto i risultati di un tool che ha navigato su una pagina web
+2. Il contenuto della pagina è nel formato YAML/accessibility snapshot sopra
+3. DEVI analizzare attentamente il contenuto per trovare la risposta alla domanda dell'utente
+4. Se il contenuto contiene informazioni sulla pagina (titolo, link, testo, heading, etc.), usa quelle informazioni
+5. Se trovi informazioni rilevanti, rispondi con quelle informazioni
+6. Se NON trovi informazioni rilevanti nel contenuto, dillo chiaramente
+7. NON dire che non sei riuscito ad accedere - il tool HA funzionato e hai i dati sopra
+8. Rispondi in italiano, in modo naturale e diretto
+9. NON usare più tool - i tool sono già stati eseguiti
+
+Ora analizza il contenuto sopra e rispondi all'utente:"""
             logger.info(f"Reinvoking LLM with tool results. Prompt length: {len(current_prompt)}")
             tool_results.extend(iteration_tool_results)
         else:
@@ -660,12 +854,48 @@ Inizia direttamente la tua risposta all'utente senza JSON o formattazione specia
         }
         await memory.update_short_term_memory(db, session_id, new_context)
 
+    # Build detailed tool execution information
+    tool_details = []
+    for tr in tool_results:
+        tool_result = tr.get("result", {})
+        
+        # Determine success: check if result has "success" field, or if it has "error" field
+        success = True
+        error = None
+        
+        if isinstance(tool_result, dict):
+            # Check for explicit success field (from tool_manager)
+            if "success" in tool_result:
+                success = tool_result.get("success", False)
+            # Check for error field
+            if "error" in tool_result:
+                success = False
+                error = tool_result.get("error")
+            # Check if result itself is an error dict
+            elif isinstance(tool_result.get("result"), dict) and "error" in tool_result.get("result", {}):
+                success = False
+                error = tool_result.get("result", {}).get("error")
+        elif isinstance(tool_result, str):
+            # If result is a string containing "error", it might be an error
+            if "error" in tool_result.lower() and "error calling" in tool_result.lower():
+                success = False
+                error = tool_result
+        
+        tool_details.append({
+            "tool_name": tr.get("tool", "unknown"),
+            "parameters": tr.get("parameters", {}),
+            "result": tool_result,
+            "success": success,
+            "error": error,
+        })
+    
     # Return response
     return ChatResponse(
         response=response_text,
         session_id=session_id,
         memory_used=memory_used,
         tools_used=tools_used,
+        tool_details=tool_details,
     )
 
 

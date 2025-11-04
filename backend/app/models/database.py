@@ -12,8 +12,12 @@ class Session(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False)
+    title = Column(String(255), nullable=True)  # Optional title for the session
+    description = Column(Text, nullable=True)  # Optional description
+    status = Column(String(20), nullable=False, default="active")  # active, archived, deleted
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    archived_at = Column(DateTime(timezone=True), nullable=True)  # When the session was archived
     session_metadata = Column("metadata", JSONB, default={})
 
     # Relationships
@@ -87,9 +91,9 @@ class Integration(Base):
     __tablename__ = "integrations"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    provider = Column(String(50), nullable=False)  # google, apple, microsoft
-    service_type = Column(String(50), nullable=False)  # calendar, email, whatsapp
-    credentials_encrypted = Column(Text)  # Encrypted credentials
+    provider = Column(String(50), nullable=False)  # google, apple, microsoft, mcp
+    service_type = Column(String(50), nullable=False)  # calendar, email, whatsapp, mcp_server
+    credentials_encrypted = Column(Text)  # Encrypted credentials (for OAuth services) or MCP server URL/config
     enabled = Column(Boolean, default=True)
-    session_metadata = Column("metadata", JSONB, default={})
+    session_metadata = Column("metadata", JSONB, default={})  # For MCP: selected_tools list, server_url, etc.
 
