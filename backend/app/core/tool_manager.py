@@ -116,9 +116,10 @@ class ToolManager:
                     "required": ["url"]
                 }
             },
-            {
-                "name": "get_whatsapp_messages",
-                "description": "🔴 OBBLIGATORIO per qualsiasi richiesta su WhatsApp! Usa questo tool quando l'utente: chiede messaggi WhatsApp, vuole vedere messaggi ricevuti, chiede 'cosa ho ricevuto oggi', 'messaggi di oggi', 'messaggi di ieri', o qualsiasi domanda relativa a WhatsApp. NON rispondere mai senza aver chiamato questo tool prima. OBBLIGATORIO: Se l'utente chiede 'messaggi di oggi', 'messaggi ricevuti oggi', 'cosa ho ricevuto oggi', 'che messaggi ho ricevuto oggi', o qualsiasi richiesta che menziona 'oggi', DEVI SEMPRE usare date_filter='today'. Se l'utente chiede 'ieri', usa date_filter='yesterday'. I messaggi includono testo, data/ora, e mittente. IMPORTANTE: Prima di dire che WhatsApp non è configurato o che non ci sono messaggi, DEVI chiamare questo tool per verificare.",
+            # WhatsApp integration temporarily disabled - will be re-enabled with Business API
+            # {
+            #     "name": "get_whatsapp_messages",
+            #     "description": "🔴 OBBLIGATORIO per qualsiasi richiesta su WhatsApp! Usa questo tool quando l'utente: chiede messaggi WhatsApp, vuole vedere messaggi ricevuti, chiede 'cosa ho ricevuto oggi', 'messaggi di oggi', 'messaggi di ieri', o qualsiasi domanda relativa a WhatsApp. NON rispondere mai senza aver chiamato questo tool prima. OBBLIGATORIO: Se l'utente chiede 'messaggi di oggi', 'messaggi ricevuti oggi', 'cosa ho ricevuto oggi', 'che messaggi ho ricevuto oggi', o qualsiasi richiesta che menziona 'oggi', DEVI SEMPRE usare date_filter='today'. Se l'utente chiede 'ieri', usa date_filter='yesterday'. I messaggi includono testo, data/ora, e mittente. IMPORTANTE: Prima di dire che WhatsApp non è configurato o che non ci sono messaggi, DEVI chiamare questo tool per verificare.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -138,25 +139,26 @@ class ToolManager:
                     },
                     "required": []
                 }
-            },
-            {
-                "name": "send_whatsapp_message",
-                "description": "Invia un messaggio WhatsApp a un contatto. Usa questo tool quando l'utente chiede di inviare un messaggio WhatsApp. Richiede che WhatsApp sia configurato e autenticato.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "phone_number": {
-                            "type": "string",
-                            "description": "Numero di telefono del destinatario (formato: +39XXXXXXXXXX o 39XXXXXXXXXX, senza spazi). REQUIRED."
-                        },
-                        "message": {
-                            "type": "string",
-                            "description": "Il messaggio da inviare. REQUIRED."
-                        }
-                    },
-                    "required": ["phone_number", "message"]
-                }
-            },
+            # },
+            # WhatsApp integration temporarily disabled - will be re-enabled with Business API
+            # {
+            #     "name": "send_whatsapp_message",
+            #     "description": "Invia un messaggio WhatsApp a un contatto. Usa questo tool quando l'utente chiede di inviare un messaggio WhatsApp. Richiede che WhatsApp sia configurato e autenticato.",
+            #     "parameters": {
+            #         "type": "object",
+            #         "properties": {
+            #             "phone_number": {
+            #                 "type": "string",
+            #                 "description": "Numero di telefono del destinatario (formato: +39XXXXXXXXXX o 39XXXXXXXXXX, senza spazi). REQUIRED."
+            #             },
+            #             "message": {
+            #                 "type": "string",
+            #                 "description": "Il messaggio da inviare. REQUIRED."
+            #             }
+            #         },
+            #         "required": ["phone_number", "message"]
+            #     }
+            # },
         ]
     
     async def get_mcp_tools(self) -> List[Dict[str, Any]]:
@@ -281,14 +283,15 @@ class ToolManager:
                 result = await self._execute_web_fetch(parameters, db, session_id, auto_index)
                 logger.info(f"Tool {tool_name} completed")
                 return result
-            elif tool_name == "get_whatsapp_messages":
-                result = await self._execute_get_whatsapp_messages(parameters)
-                logger.info(f"Tool {tool_name} completed")
-                return result
-            elif tool_name == "send_whatsapp_message":
-                result = await self._execute_send_whatsapp_message(parameters)
-                logger.info(f"Tool {tool_name} completed")
-                return result
+            # WhatsApp tools temporarily disabled - will be re-enabled with Business API
+            # elif tool_name == "get_whatsapp_messages":
+            #     result = await self._execute_get_whatsapp_messages(parameters)
+            #     logger.info(f"Tool {tool_name} completed")
+            #     return result
+            # elif tool_name == "send_whatsapp_message":
+            #     result = await self._execute_send_whatsapp_message(parameters)
+            #     logger.info(f"Tool {tool_name} completed")
+            #     return result
             else:
                 logger.error(f"Unknown tool: {tool_name}")
                 return {"error": f"Tool '{tool_name}' not found"}
