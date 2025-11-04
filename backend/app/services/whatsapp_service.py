@@ -56,17 +56,19 @@ class WhatsAppService:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--disable-extensions")
+        # Don't disable extensions - WhatsApp Web might need them
         
         # macOS specific options
         if platform.system() == "Darwin":  # macOS
-            options.add_argument("--disable-features=VizDisplayCompositor")
+            # REMOVED: --disable-features=VizDisplayCompositor - this was preventing rendering
             # Important: exclude automation flags to avoid detection
             options.add_experimental_option("excludeSwitches", ["enable-automation"])
             options.add_experimental_option('useAutomationExtension', False)
-            # Disable GPU in headless mode on macOS
-            if headless:
-                options.add_argument("--disable-gpu")
+            # Enable GPU acceleration for better rendering
+            # Don't disable GPU - needed for proper rendering
+            if not headless:
+                options.add_argument("--enable-gpu")
+                options.add_argument("--enable-accelerated-2d-canvas")
         
         # Windows/Linux options
         if platform.system() == "Windows":
@@ -281,8 +283,17 @@ class WhatsAppService:
                 self.driver.get("https://web.whatsapp.com")
                 logger.info(f"Navigated to WhatsApp Web. Current URL: {self.driver.current_url}")
                 
-                # Wait a bit for page to load
-                time.sleep(3)
+                # Wait longer for page to fully load and JavaScript to execute
+                time.sleep(5)  # Increased wait time
+                
+                # Wait for page to be ready (JavaScript loaded)
+                try:
+                    WebDriverWait(self.driver, 15).until(
+                        lambda driver: driver.execute_script("return document.readyState") == "complete"
+                    )
+                    logger.info("Page loaded completely")
+                except TimeoutException:
+                    logger.warning("Page ready state timeout, but continuing...")
                 
                 # Verify we're actually on WhatsApp Web
                 current_url = self.driver.current_url
@@ -290,13 +301,10 @@ class WhatsAppService:
                     logger.warning(f"Not on WhatsApp Web! Current URL: {current_url}")
                     # Try to navigate again
                     self.driver.get("https://web.whatsapp.com")
-                    time.sleep(2)
-            except Exception as nav_error:
-                logger.error(f"Error navigating to WhatsApp Web: {nav_error}", exc_info=True)
-                raise Exception(f"Failed to navigate to WhatsApp Web: {str(nav_error)}")
-            
-            # Wait a bit more for page to fully load
-            time.sleep(2)
+                    time.sleep(5)  # Increased wait time
+                
+                # Additional wait for WhatsApp Web JavaScript to initialize
+                time.sleep(3)
             
             # Check initial status
             try:
