@@ -134,6 +134,18 @@ export const integrationsApi = {
         deleteIntegration: (integrationId: string) =>
           api.delete(`/api/integrations/emails/integrations/${integrationId}`),
       },
+      whatsapp: {
+        setup: (headless: boolean = false, profilePath?: string) =>
+          api.post('/api/integrations/whatsapp/setup', { headless, profile_path: profilePath }),
+        getMessages: (contactName?: string, maxResults: number = 10) => {
+          const params: any = { max_results: maxResults }
+          if (contactName) params.contact_name = contactName
+          return api.get('/api/integrations/whatsapp/messages', { params })
+        },
+        sendMessage: (phoneNumber: string, message: string) =>
+          api.post('/api/integrations/whatsapp/send', { phone_number: phoneNumber, message }),
+        close: () => api.post('/api/integrations/whatsapp/close'),
+      },
 }
 
 export default api
