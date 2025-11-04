@@ -24,6 +24,8 @@ def get_whatsapp_service() -> WhatsAppService:
 class WhatsAppSetupRequest(BaseModel):
     headless: bool = False
     profile_path: Optional[str] = None
+    wait_for_auth: bool = False  # Don't wait by default to avoid blocking
+    timeout: int = 30  # Shorter timeout by default
 
 
 @router.post("/setup")
@@ -31,18 +33,47 @@ async def setup_whatsapp(
     request: WhatsAppSetupRequest,
     whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
 ):
-    """Setup WhatsApp integration"""
+    """Setup WhatsApp integration - non-blocking by default"""
     try:
-        await whatsapp_service.setup_whatsapp_web(
+        result = await whatsapp_service.setup_whatsapp_web(
             headless=request.headless,
             profile_path=request.profile_path,
+            wait_for_auth=request.wait_for_auth,
+            timeout=request.timeout,
         )
-        return {
-            "success": True,
-            "message": "WhatsApp Web setup completed. Please scan QR code if needed.",
-        }
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error setting up WhatsApp: {str(e)}")
+
+
+@router.get("/status")
+async def get_status(
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
+):
+    """Get WhatsApp connection status"""
+    try:
+        if not whatsapp_service.driver:
+            return {
+                "success": True,
+                "authenticated": False,
+                "status": "not_initialized",
+                "message": "WhatsApp Web not initialized",
+            }
+        
+        status = whatsapp_service._check_authentication_status()
+        return {
+            "success": True,
+            "authenticated": status.get("authenticated", False),
+            "status": status.get("status", "unknown"),
+            "message": status.get("message", ""),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "authenticated": False,
+            "status": "error",
+            "message": str(e),
+        }
 
 
 @router.get("/messages")
