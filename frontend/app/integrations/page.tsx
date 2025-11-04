@@ -799,16 +799,16 @@ export default function IntegrationsPage() {
                           // Show user-friendly message
                           if (debug.data.connection_test?.reachable === false) {
                             const suggestion = debug.data.connection_test.suggestion || ''
-                            alert(`❌ MCP Server not reachable!\n\n${debug.data.connection_test.error || 'Connection failed'}\n\n${suggestion}\n\nFull details in browser console (F12).`)
+                            console.error(`MCP Server not reachable: ${debug.data.connection_test.error || 'Connection failed'}\n${suggestion}`)
                           } else if (debug.data.tools_list?.response) {
                             const toolsResp = debug.data.tools_list.response
                             const toolsCount = toolsResp?.result?.tools?.length || 0
-                            alert(`✅ Connection successful!\n\nTools/list response received.\n\nFull response in browser console (F12).\n\nParsed tools count: ${toolsCount}`)
+                            console.log(`MCP Connection successful! Tools count: ${toolsCount}`)
                           } else {
-                            alert(`Debug info logged to console. Check browser DevTools (F12) > Console tab.\n\nConnection test: ${debug.data.connection_test?.reachable ? '✅ Reachable' : '❌ Not reachable'}`)
+                            console.log(`MCP Debug: Connection test ${debug.data.connection_test?.reachable ? '✅ Reachable' : '❌ Not reachable'}`)
                           }
                         } catch (error: any) {
-                          alert(`Debug failed: ${error.response?.data?.detail || error.message}`)
+                          console.error('MCP Debug failed:', error.response?.data?.detail || error.message)
                         }
                       }}
                       className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-xs"
