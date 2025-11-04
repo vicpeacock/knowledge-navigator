@@ -53,12 +53,32 @@ async def get_status(
     """Get WhatsApp connection status"""
     try:
         if not whatsapp_service.driver:
-            return {
-                "success": True,
-                "authenticated": False,
-                "status": "not_initialized",
-                "message": "WhatsApp Web not initialized",
-            }
+            # Try to reconnect to existing Chrome session using the same profile
+            try:
+                from selenium import webdriver
+                from selenium.webdriver.chrome.service import Service
+                from webdriver_manager.chrome import ChromeDriverManager
+                
+                # Use the same options as setup to reconnect to existing session
+                options = whatsapp_service._get_chrome_options(headless=False, profile_path=None)
+                options.add_experimental_option("detach", True)
+                
+                # Try to create a new driver connection to the same profile
+                service = Service(ChromeDriverManager().install())
+                whatsapp_service.driver = webdriver.Chrome(service=service, options=options)
+                whatsapp_service.driver.get("https://web.whatsapp.com")
+                # Wait a bit for page to load
+                import time
+                time.sleep(3)
+            except Exception as reconnect_error:
+                import logging
+                logging.getLogger(__name__).warning(f"Could not reconnect to WhatsApp: {reconnect_error}")
+                return {
+                    "success": True,
+                    "authenticated": False,
+                    "status": "not_initialized",
+                    "message": "WhatsApp Web not initialized. Please click 'Connetti WhatsApp' to setup.",
+                }
         
         status = whatsapp_service._check_authentication_status()
         return {
