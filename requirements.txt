@@ -46,6 +46,7 @@ imaplib2==3.6
 # WhatsApp
 pywhatkit==5.4
 selenium==4.15.2
+webdriver-manager==4.0.1
 
 # Security
 cryptography==41.0.7
