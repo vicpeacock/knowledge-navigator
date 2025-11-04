@@ -885,7 +885,7 @@ Giorno della settimana: {day_name}
 2. Per tool web_search: i risultati contengono informazioni da ricerche web. Analizza attentamente TITOLI, URL e CONTENUTO di ciascun risultato
 3. Per tool web_fetch: il contenuto contiene il testo completo di una pagina web specifica
 4. Per tool browser: il contenuto della pagina è nel formato YAML/accessibility snapshot
-5. Per tool get_whatsapp_messages: i risultati contengono messaggi WhatsApp con testo, data/ora, e mittente. Se l'utente chiede "messaggi di oggi", usa solo i messaggi con data corrispondente a oggi (controlla la data nei risultati)
+5. Per tool get_whatsapp_messages: i risultati contengono messaggi WhatsApp con testo, data/ora, e mittente. Se l'utente chiede "messaggi di oggi", il tool è già stato chiamato con date_filter='today' e i risultati mostrano SOLO i messaggi di oggi. Se vedi count=0, significa che non ci sono messaggi per quella data, NON che WhatsApp non è configurato. Se vedi un errore nel risultato del tool, allora WhatsApp potrebbe non essere configurato.
 6. DEVI analizzare ATTENTAMENTE i risultati sopra - contengono informazioni REALI che rispondono alla domanda dell'utente
 7. Se i risultati contengono informazioni rilevanti (anche parziali), USA QUELLE INFORMAZIONI per rispondere
 8. NON dire "non ho trovato informazioni" se i risultati contengono dati - i tool hanno funzionato e hai informazioni reali sopra
