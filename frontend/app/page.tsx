@@ -16,9 +16,10 @@ export default function Dashboard() {
   const loadSessions = async () => {
     try {
       console.log('Loading sessions from:', process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
-      const response = await sessionsApi.list()
+      const response = await sessionsApi.list('active')  // Only load active sessions
       console.log('Sessions loaded:', response.data)
-      setSessions(response.data)
+      // Filter to ensure only active sessions are shown
+      setSessions(response.data.filter((s: Session) => s.status === 'active'))
     } catch (error: any) {
       console.error('Error loading sessions:', error)
       console.error('Error details:', error.response?.data || error.message)
@@ -90,7 +91,10 @@ export default function Dashboard() {
               href={`/sessions/${session.id}`}
               className="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow hover:shadow-lg transition"
             >
-              <h2 className="text-xl font-semibold mb-2">{session.name}</h2>
+              <h2 className="text-xl font-semibold mb-2">{session.title || session.name}</h2>
+              {session.description && (
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">{session.description}</p>
+              )}
               <p className="text-sm text-gray-500">
                 Updated: {new Date(session.updated_at).toLocaleString()}
               </p>

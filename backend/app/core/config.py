@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "gpt-oss:20b"
+    ollama_api_key: Optional[str] = None  # API key for Ollama web search (from https://ollama.com)
 
     # MCP Gateway (default, can be overridden per integration)
     # Default: localhost:8080 (if backend runs on host)

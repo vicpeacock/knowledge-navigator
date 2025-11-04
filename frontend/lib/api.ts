@@ -13,13 +13,15 @@ const api = axios.create({
 
 // Sessions API
 export const sessionsApi = {
-  list: () => api.get('/api/sessions/'),
+  list: (status?: string) => api.get('/api/sessions/', { params: status ? { status } : {} }),
   get: (id: string) => api.get(`/api/sessions/${id}`),
-  create: (data: { name: string; metadata?: Record<string, any> }) =>
+  create: (data: { name: string; title?: string; description?: string; metadata?: Record<string, any> }) =>
     api.post('/api/sessions/', data),
-  update: (id: string, data: { name?: string; metadata?: Record<string, any> }) =>
+  update: (id: string, data: { name?: string; title?: string; description?: string; status?: string; metadata?: Record<string, any> }) =>
     api.put(`/api/sessions/${id}`, data),
   delete: (id: string) => api.delete(`/api/sessions/${id}`),
+  archive: (id: string) => api.post(`/api/sessions/${id}/archive`),
+  restore: (id: string) => api.post(`/api/sessions/${id}/restore`),
   getMessages: (id: string) => api.get(`/api/sessions/${id}/messages`),
   chat: (id: string, message: string, useMemory: boolean = true) =>
     api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: useMemory }),
@@ -99,7 +101,19 @@ export const integrationsApi = {
         deleteIntegration: (integrationId: string) =>
           api.delete(`/api/integrations/calendars/integrations/${integrationId}`),
       },
-      email: {
+      mcp: {
+    connect: (serverUrl: string, name?: string) =>
+      api.post('/api/integrations/mcp/connect', { server_url: serverUrl, name: name || 'MCP Server' }),
+    listIntegrations: () => api.get('/api/integrations/mcp/integrations'),
+    getTools: (integrationId: string) => api.get(`/api/integrations/mcp/${integrationId}/tools`, { timeout: 45000 }), // 45 seconds timeout
+    selectTools: (integrationId: string, toolNames: string[]) =>
+      api.post(`/api/integrations/mcp/${integrationId}/tools/select`, { tool_names: toolNames }),
+    deleteIntegration: (integrationId: string) =>
+      api.delete(`/api/integrations/mcp/integrations/${integrationId}`),
+    test: (integrationId: string) => api.post(`/api/integrations/mcp/${integrationId}/test`, { timeout: 45000 }),
+    debug: (integrationId: string) => api.get(`/api/integrations/mcp/${integrationId}/debug`),
+  },
+  email: {
         authorize: (integrationId?: string) => {
           const params = integrationId ? { integration_id: integrationId } : {}
           return api.get('/api/integrations/emails/oauth/authorize', { params })

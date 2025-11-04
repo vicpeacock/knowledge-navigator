@@ -1,8 +1,12 @@
 export interface Session {
   id: string
   name: string
+  title?: string
+  description?: string
+  status: 'active' | 'archived' | 'deleted'
   created_at: string
   updated_at: string
+  archived_at?: string
   metadata: Record<string, any>
 }
 
@@ -31,6 +35,14 @@ export interface ChatRequest {
   use_memory: boolean
 }
 
+export interface ToolExecutionDetail {
+  tool_name: string
+  parameters: Record<string, any>
+  result: Record<string, any>
+  success: boolean
+  error?: string
+}
+
 export interface ChatResponse {
   response: string
   session_id: string
@@ -41,5 +53,6 @@ export interface ChatResponse {
     files: string[]
   }
   tools_used: string[]
+  tool_details?: ToolExecutionDetail[]
 }
 
