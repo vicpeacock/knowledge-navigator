@@ -987,25 +987,32 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
             whatsapp_service = get_whatsapp_service()
             
             # Check authentication status
-            # If driver doesn't exist, try to reconnect using persistent profile
+            # If driver doesn't exist, try quick reconnect (with timeout to avoid blocking)
             if not whatsapp_service.driver:
-                logger.info("WhatsApp driver not initialized, attempting to reconnect with persistent profile...")
+                logger.info("WhatsApp driver not initialized, attempting quick reconnect...")
                 try:
-                    # Try to setup WhatsApp again using the same profile (non-blocking)
-                    # This should reuse the existing authenticated session
-                    await whatsapp_service.setup_whatsapp_web(
-                        headless=False,  # Keep visible so user can see
-                        wait_for_auth=False,  # Don't wait, just open
-                        timeout=10,
+                    # Try to setup WhatsApp again using the same profile (non-blocking, fast)
+                    # Use asyncio.wait_for to prevent long blocking
+                    await asyncio.wait_for(
+                        whatsapp_service.setup_whatsapp_web(
+                            headless=False,  # Keep visible so user can see
+                            wait_for_auth=False,  # Don't wait, just open
+                            timeout=5,  # Short timeout
+                        ),
+                        timeout=7.0  # Overall timeout for reconnect (7 seconds max)
                     )
                     logger.info("Successfully reconnected to WhatsApp Web")
-                    # Wait a bit for page to load
+                    # Minimal wait - page will load in background
                     import time
-                    time.sleep(3)
+                    time.sleep(1)  # Reduced wait time
+                except asyncio.TimeoutError:
+                    logger.warning("WhatsApp reconnect timed out, but continuing anyway...")
+                    # Continue - driver might still be initializing in background
+                    # User should connect manually if needed
                 except Exception as e:
                     logger.error(f"Failed to reconnect WhatsApp driver: {e}")
                     return {
-                        "error": f"WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione. Errore: {str(e)}"
+                        "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
                     }
             
             # Now check authentication status
@@ -1062,25 +1069,32 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
             whatsapp_service = get_whatsapp_service()
             
             # Check authentication status
-            # If driver doesn't exist, try to reconnect using persistent profile
+            # If driver doesn't exist, try quick reconnect (with timeout to avoid blocking)
             if not whatsapp_service.driver:
-                logger.info("WhatsApp driver not initialized, attempting to reconnect with persistent profile...")
+                logger.info("WhatsApp driver not initialized, attempting quick reconnect...")
                 try:
-                    # Try to setup WhatsApp again using the same profile (non-blocking)
-                    # This should reuse the existing authenticated session
-                    await whatsapp_service.setup_whatsapp_web(
-                        headless=False,  # Keep visible so user can see
-                        wait_for_auth=False,  # Don't wait, just open
-                        timeout=10,
+                    # Try to setup WhatsApp again using the same profile (non-blocking, fast)
+                    # Use asyncio.wait_for to prevent long blocking
+                    await asyncio.wait_for(
+                        whatsapp_service.setup_whatsapp_web(
+                            headless=False,  # Keep visible so user can see
+                            wait_for_auth=False,  # Don't wait, just open
+                            timeout=5,  # Short timeout
+                        ),
+                        timeout=7.0  # Overall timeout for reconnect (7 seconds max)
                     )
                     logger.info("Successfully reconnected to WhatsApp Web")
-                    # Wait a bit for page to load
+                    # Minimal wait - page will load in background
                     import time
-                    time.sleep(3)
+                    time.sleep(1)  # Reduced wait time
+                except asyncio.TimeoutError:
+                    logger.warning("WhatsApp reconnect timed out, but continuing anyway...")
+                    # Continue - driver might still be initializing in background
+                    # User should connect manually if needed
                 except Exception as e:
                     logger.error(f"Failed to reconnect WhatsApp driver: {e}")
                     return {
-                        "error": f"WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione. Errore: {str(e)}"
+                        "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
                     }
             
             # Now check authentication status
