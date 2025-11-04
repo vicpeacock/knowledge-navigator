@@ -162,7 +162,7 @@ export const integrationsApi = {
             throw error
           })
         },
-        getStatus: () => whatsappApi.get('/api/integrations/whatsapp/status', { timeout: 5000 }),
+        getStatus: () => whatsappApi.get('/api/integrations/whatsapp/status', { timeout: 15000 }),
         getMessages: (contactName?: string, maxResults: number = 10) => {
           const params: any = { max_results: maxResults }
           if (contactName) params.contact_name = contactName

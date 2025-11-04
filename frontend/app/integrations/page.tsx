@@ -678,13 +678,6 @@ export default function IntegrationsPage() {
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={checkWhatsAppStatus}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
-                >
-                  <RefreshCw size={18} />
-                  Verifica Stato
-                </button>
-                <button
                   onClick={testWhatsAppConnection}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
                 >
