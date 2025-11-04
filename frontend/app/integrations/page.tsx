@@ -47,6 +47,19 @@ export default function IntegrationsPage() {
       window.history.replaceState({}, document.title, '/integrations')
     }
     
+    // Check WhatsApp status on page load (non-blocking)
+    setTimeout(async () => {
+      try {
+        const statusResponse = await integrationsApi.whatsapp.getStatus()
+        if (statusResponse.data?.authenticated) {
+          setWhatsappConnected(true)
+        }
+      } catch (error) {
+        // Silently fail - WhatsApp might not be initialized
+        console.log('WhatsApp status check on load:', error)
+      }
+    }, 1000) // Wait 1 second after page load
+    
     // Cleanup WhatsApp check interval on unmount
     return () => {
       if (whatsappCheckInterval) {
@@ -696,32 +709,23 @@ export default function IntegrationsPage() {
                   Potresti dover autenticare scansionando il QR code la prima volta.
                 </p>
               </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={checkWhatsAppStatus}
-                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 flex items-center gap-2"
-                >
-                  <RefreshCw size={18} />
-                  Verifica Stato
-                </button>
-                <button
-                  onClick={connectWhatsApp}
-                  disabled={connectingWhatsApp}
-                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {connectingWhatsApp ? (
-                    <>
-                      <RefreshCw size={18} className="animate-spin" />
-                      Connessione in corso...
-                    </>
-                  ) : (
-                    <>
-                      <ExternalLink size={18} />
-                      Connetti WhatsApp
-                    </>
-                  )}
-                </button>
-              </div>
+              <button
+                onClick={connectWhatsApp}
+                disabled={connectingWhatsApp}
+                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {connectingWhatsApp ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    Connessione in corso...
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink size={18} />
+                    Connetti WhatsApp
+                  </>
+                )}
+              </button>
             </div>
           )}
         </div>
