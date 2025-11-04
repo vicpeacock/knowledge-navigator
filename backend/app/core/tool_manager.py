@@ -120,27 +120,26 @@ class ToolManager:
             # {
             #     "name": "get_whatsapp_messages",
             #     "description": "🔴 OBBLIGATORIO per qualsiasi richiesta su WhatsApp! Usa questo tool quando l'utente: chiede messaggi WhatsApp, vuole vedere messaggi ricevuti, chiede 'cosa ho ricevuto oggi', 'messaggi di oggi', 'messaggi di ieri', o qualsiasi domanda relativa a WhatsApp. NON rispondere mai senza aver chiamato questo tool prima. OBBLIGATORIO: Se l'utente chiede 'messaggi di oggi', 'messaggi ricevuti oggi', 'cosa ho ricevuto oggi', 'che messaggi ho ricevuto oggi', o qualsiasi richiesta che menziona 'oggi', DEVI SEMPRE usare date_filter='today'. Se l'utente chiede 'ieri', usa date_filter='yesterday'. I messaggi includono testo, data/ora, e mittente. IMPORTANTE: Prima di dire che WhatsApp non è configurato o che non ci sono messaggi, DEVI chiamare questo tool per verificare.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "contact_name": {
-                            "type": "string",
-                            "description": "Nome del contatto (opzionale). Se non specificato, recupera messaggi dalla chat attiva."
-                        },
-                        "max_results": {
-                            "type": "integer",
-                            "description": "Numero massimo di messaggi da recuperare (default: 20 per avere più messaggi da filtrare per data)",
-                            "default": 20
-                        },
-                        "date_filter": {
-                            "type": "string",
-                            "description": "Filtro per data (opzionale ma IMPORTANTE). Valori: 'today' per messaggi di oggi, 'yesterday' per ieri, 'this_week' per questa settimana. DEVI usare 'today' quando l'utente chiede messaggi di oggi. Se non specificato, restituisce i messaggi più recenti."
-                        }
-                    },
-                    "required": []
-                }
+            #     "parameters": {
+            #         "type": "object",
+            #         "properties": {
+            #             "contact_name": {
+            #                 "type": "string",
+            #                 "description": "Nome del contatto (opzionale). Se non specificato, recupera messaggi dalla chat attiva."
+            #             },
+            #             "max_results": {
+            #                 "type": "integer",
+            #                 "description": "Numero massimo di messaggi da recuperare (default: 20 per avere più messaggi da filtrare per data)",
+            #                 "default": 20
+            #             },
+            #             "date_filter": {
+            #                 "type": "string",
+            #                 "description": "Filtro per data (opzionale ma IMPORTANTE). Valori: 'today' per messaggi di oggi, 'yesterday' per ieri, 'this_week' per questa settimana. DEVI usare 'today' quando l'utente chiede messaggi di oggi. Se non specificato, restituisce i messaggi più recenti."
+            #             }
+            #         },
+            #         "required": []
+            #     }
             # },
-            # WhatsApp integration temporarily disabled - will be re-enabled with Business API
             # {
             #     "name": "send_whatsapp_message",
             #     "description": "Invia un messaggio WhatsApp a un contatto. Usa questo tool quando l'utente chiede di inviare un messaggio WhatsApp. Richiede che WhatsApp sia configurato e autenticato.",
