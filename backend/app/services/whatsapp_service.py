@@ -146,55 +146,46 @@ class WhatsAppService:
             options = self._get_chrome_options(headless=headless, profile_path=profile_path)
             
             # Try to create Chrome driver using webdriver-manager for automatic ChromeDriver management
-            # Wrap in try-catch with timeout to avoid blocking
+            # Use thread executor to avoid blocking event loop
+            import asyncio
+            import concurrent.futures
+            
             try:
                 logger.info("Initializing Chrome driver with webdriver-manager...")
                 
-                # Try to install ChromeDriver with timeout protection
-                import asyncio
-                try:
-                    # Run ChromeDriverManager.install() in executor to avoid blocking
-                    import concurrent.futures
-                    loop = asyncio.get_event_loop()
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                loop = asyncio.get_event_loop()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    # Run ChromeDriverManager.install() in thread
+                    try:
                         driver_path = await asyncio.wait_for(
                             loop.run_in_executor(executor, ChromeDriverManager().install),
-                            timeout=30.0
+                            timeout=10.0  # Short timeout
                         )
-                    service = Service(driver_path)
-                    self.driver = webdriver.Chrome(service=service, options=options)
-                except asyncio.TimeoutError:
-                    logger.warning("ChromeDriverManager.install() timed out, trying fallback...")
-                    raise Exception("ChromeDriver installation timed out")
-                except Exception as e:
-                    logger.warning(f"Failed to initialize Chrome driver with webdriver-manager: {e}")
-                    raise
-                    
-            except Exception as e:
-                logger.warning(f"Failed to initialize Chrome driver with webdriver-manager: {e}")
-                # Fallback: try without service (ChromeDriver in PATH)
-                try:
-                    logger.info("Trying fallback: ChromeDriver from PATH")
-                    # Also wrap fallback in executor to avoid blocking
-                    import asyncio
-                    import concurrent.futures
-                    loop = asyncio.get_event_loop()
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        service = Service(driver_path)
+                        # Run Chrome() in thread too
                         self.driver = await asyncio.wait_for(
-                            loop.run_in_executor(executor, lambda: webdriver.Chrome(options=options)),
+                            loop.run_in_executor(executor, lambda: webdriver.Chrome(service=service, options=options)),
                             timeout=10.0
                         )
-                except (WebDriverException, asyncio.TimeoutError) as e2:
-                    logger.error(f"Failed to initialize Chrome driver: {e2}")
-                    error_msg = (
-                        f"ChromeDriver initialization failed.\n\n"
-                        f"Please ensure:\n"
-                        f"1. Chrome browser is installed\n"
-                        f"2. Run: pip install webdriver-manager\n"
-                        f"3. webdriver-manager will download ChromeDriver automatically\n\n"
-                        f"Error: {str(e2)}"
-                    )
-                    raise Exception(error_msg)
+                    except asyncio.TimeoutError:
+                        logger.warning("ChromeDriver initialization timed out")
+                        raise Exception("ChromeDriver initialization timed out after 10 seconds")
+                    except Exception as e:
+                        logger.warning(f"Failed with webdriver-manager: {e}")
+                        # Fallback: try without service
+                        try:
+                            logger.info("Trying fallback: ChromeDriver from PATH")
+                            self.driver = await asyncio.wait_for(
+                                loop.run_in_executor(executor, lambda: webdriver.Chrome(options=options)),
+                                timeout=10.0
+                            )
+                        except Exception as e2:
+                            logger.error(f"Fallback also failed: {e2}")
+                            raise Exception(f"ChromeDriver failed: {str(e2)}")
+                            
+            except Exception as e:
+                logger.error(f"ChromeDriver initialization error: {e}")
+                raise Exception(f"ChromeDriver initialization failed: {str(e)}")
             
             logger.info("Chrome driver initialized successfully")
             

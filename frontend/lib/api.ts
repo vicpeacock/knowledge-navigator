@@ -11,6 +11,16 @@ const api = axios.create({
   timeout: 120000, // 2 minutes - increased for longer responses (file summaries can take time)
 })
 
+// Separate API instance for WhatsApp with very short timeout to avoid blocking
+const whatsappApi = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  withCredentials: false,
+  timeout: 5000, // 5 seconds max - fail fast to avoid blocking
+})
+
 // Sessions API
 export const sessionsApi = {
   list: (status?: string) => api.get('/api/sessions/', { params: status ? { status } : {} }),
@@ -136,21 +146,22 @@ export const integrationsApi = {
       },
       whatsapp: {
         setup: (headless: boolean = false, profilePath?: string, waitForAuth: boolean = false) =>
-          api.post('/api/integrations/whatsapp/setup', { 
+          whatsappApi.post('/api/integrations/whatsapp/setup', { 
             headless, 
             profile_path: profilePath,
             wait_for_auth: waitForAuth,
-            timeout: 30,
+            timeout: 10, // Short timeout on backend
           }),
-        getStatus: () => api.get('/api/integrations/whatsapp/status'),
+        getStatus: () => whatsappApi.get('/api/integrations/whatsapp/status', { timeout: 5000 }),
         getMessages: (contactName?: string, maxResults: number = 10) => {
           const params: any = { max_results: maxResults }
           if (contactName) params.contact_name = contactName
-          return api.get('/api/integrations/whatsapp/messages', { params })
+          return api.get('/api/integrations/whatsapp/messages', { params, timeout: 10000 })
         },
         sendMessage: (phoneNumber: string, message: string) =>
-          api.post('/api/integrations/whatsapp/send', { phone_number: phoneNumber, message }),
-        close: () => api.post('/api/integrations/whatsapp/close'),
+          api.post('/api/integrations/whatsapp/send', { phone_number: phoneNumber, message }, { timeout: 10000 }),
+        close: () => whatsappApi.post('/api/integrations/whatsapp/close', {}, { timeout: 5000 }),
+        reset: () => whatsappApi.post('/api/integrations/whatsapp/reset', {}, { timeout: 5000 }),
       },
 }
 
