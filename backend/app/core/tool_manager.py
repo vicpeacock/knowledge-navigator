@@ -1133,14 +1133,20 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                 messages = filtered_messages
             
             # Debug: show sample of messages with dates (before filtering)
-            # We already have messages before filtering, so use those
-            debug_info = {
-                "total_messages_before_filter": len(messages) if date_filter else None,
-                "today_date": datetime.now().date().isoformat() if date_filter else None,
-                "sample_dates": [m.get("date") for m in messages[:10]] if date_filter and messages else [],
-                "messages_with_dates": sum(1 for m in messages if m.get("date")) if date_filter else None,
-                "messages_without_dates": sum(1 for m in messages if not m.get("date")) if date_filter else None,
-            }
+            # Store messages before filtering for debug info
+            messages_before_filter = messages.copy() if date_filter else []
+            
+            # Debug info
+            debug_info = None
+            if date_filter:
+                from datetime import datetime
+                debug_info = {
+                    "total_messages_before_filter": len(messages_before_filter),
+                    "today_date": datetime.now().date().isoformat(),
+                    "sample_dates": [m.get("date") for m in messages_before_filter[:10]],
+                    "messages_with_dates": sum(1 for m in messages_before_filter if m.get("date")),
+                    "messages_without_dates": sum(1 for m in messages_before_filter if not m.get("date")),
+                }
             
             result = {
                 "success": True,
@@ -1148,13 +1154,13 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                 "count": len(messages),
                 "date_filter": date_filter,
                 "note": "I messaggi includono testo, data/ora, e informazioni sul mittente (se disponibili).",
-                "debug": debug_info if date_filter else None,
+                "debug": debug_info,
             }
             
             # Add helpful message if no messages found with date filter
-            if date_filter and len(messages) == 0:
+            if date_filter and len(messages) == 0 and debug_info:
                 if date_filter == "today":
-                    result["note"] += f" Nessun messaggio trovato per oggi. Debug: {len(raw_messages)} messaggi totali estratti, date di esempio: {debug_info['sample_dates']}, oggi={debug_info['today_date']}"
+                    result["note"] += f" Debug: {debug_info['total_messages_before_filter']} messaggi totali estratti, {debug_info['messages_with_dates']} con date, {debug_info['messages_without_dates']} senza date. Date di esempio: {debug_info['sample_dates'][:5]}, oggi={debug_info['today_date']}"
                 elif date_filter == "yesterday":
                     result["note"] += " Nessun messaggio trovato per ieri."
             
