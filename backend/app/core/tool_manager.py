@@ -1041,7 +1041,28 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
             whatsapp_service = get_whatsapp_service()
             
             # Check authentication status
-            # If driver exists, check authentication status
+            # If driver doesn't exist, try to reconnect using persistent profile
+            if not whatsapp_service.driver:
+                logger.info("WhatsApp driver not initialized, attempting to reconnect with persistent profile...")
+                try:
+                    # Try to setup WhatsApp again using the same profile (non-blocking)
+                    # This should reuse the existing authenticated session
+                    await whatsapp_service.setup_whatsapp_web(
+                        headless=False,  # Keep visible so user can see
+                        wait_for_auth=False,  # Don't wait, just open
+                        timeout=10,
+                    )
+                    logger.info("Successfully reconnected to WhatsApp Web")
+                    # Wait a bit for page to load
+                    import time
+                    time.sleep(3)
+                except Exception as e:
+                    logger.error(f"Failed to reconnect WhatsApp driver: {e}")
+                    return {
+                        "error": f"WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione. Errore: {str(e)}"
+                    }
+            
+            # Now check authentication status
             if whatsapp_service.driver:
                 try:
                     auth_status = whatsapp_service._check_authentication_status()
@@ -1049,17 +1070,17 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                         whatsapp_service.is_authenticated = True
                     else:
                         return {
-                            "error": "WhatsApp non autenticato. Per favore configura WhatsApp prima dalla pagina Integrations."
+                            "error": f"WhatsApp non autenticato. Status: {auth_status.get('status')}. {auth_status.get('message', 'Per favore configura WhatsApp prima dalla pagina Integrations.')}"
                         }
                 except Exception as e:
                     logger.warning(f"Error checking WhatsApp auth status: {e}")
                     # If check fails but driver exists, try anyway
                     if not whatsapp_service.is_authenticated:
                         return {
-                            "error": "WhatsApp non autenticato. Per favore configura WhatsApp prima dalla pagina Integrations."
+                            "error": f"WhatsApp non autenticato. Errore nel controllo: {str(e)}"
                         }
             else:
-                # No driver - need to setup first
+                # Still no driver after reconnect attempt
                 return {
                     "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
                 }
