@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { integrationsApi } from '@/lib/api'
-import { Calendar, CheckCircle, XCircle, RefreshCw, ExternalLink, Mail, ArrowLeft, Trash2, Server, Settings } from 'lucide-react'
+import { Calendar, CheckCircle, XCircle, RefreshCw, ExternalLink, Mail, ArrowLeft, Trash2, Server, Settings, MessageSquare } from 'lucide-react'
 
 interface Integration {
   id: string
@@ -24,6 +24,8 @@ export default function IntegrationsPage() {
   const [loading, setLoading] = useState(true)
   const [connectingCalendar, setConnectingCalendar] = useState(false)
   const [connectingEmail, setConnectingEmail] = useState(false)
+  const [connectingWhatsApp, setConnectingWhatsApp] = useState(false)
+  const [whatsappConnected, setWhatsappConnected] = useState(false)
   const [connectingMCP, setConnectingMCP] = useState(false)
   const [mcpServerUrl, setMcpServerUrl] = useState('http://host.docker.internal:8080')
   const [mcpServerName, setMcpServerName] = useState('MCP Server')
@@ -235,6 +237,54 @@ export default function IntegrationsPage() {
     } catch (error: any) {
       console.error('Error disconnecting email:', error)
       alert(`Errore nella rimozione: ${error.response?.data?.detail || error.message}`)
+    }
+  }
+
+  const connectWhatsApp = async () => {
+    setConnectingWhatsApp(true)
+    try {
+      const response = await integrationsApi.whatsapp.setup(false)
+      if (response.data?.success) {
+        setWhatsappConnected(true)
+        alert('WhatsApp Web setup completato! Scansiona il QR code se necessario.')
+      } else {
+        throw new Error('Setup fallito')
+      }
+    } catch (error: any) {
+      console.error('Error connecting WhatsApp:', error)
+      alert(`Errore nella connessione: ${error.response?.data?.detail || error.message}`)
+    } finally {
+      setConnectingWhatsApp(false)
+    }
+  }
+
+  const testWhatsAppConnection = async () => {
+    try {
+      const response = await integrationsApi.whatsapp.getMessages(undefined, 3)
+      if (response.data?.success && response.data?.messages) {
+        const count = response.data.count || 0
+        alert(`Connessione funzionante! Trovati ${count} messaggi recenti.`)
+      } else {
+        alert('Connessione funzionante, ma nessun messaggio trovato.')
+      }
+    } catch (error: any) {
+      console.error('Error testing WhatsApp:', error)
+      alert(`Errore nel test: ${error.response?.data?.detail || error.message}`)
+    }
+  }
+
+  const disconnectWhatsApp = async () => {
+    if (!confirm('Sei sicuro di voler chiudere la sessione WhatsApp?')) {
+      return
+    }
+    
+    try {
+      await integrationsApi.whatsapp.close()
+      setWhatsappConnected(false)
+      alert('Sessione WhatsApp chiusa con successo')
+    } catch (error: any) {
+      console.error('Error disconnecting WhatsApp:', error)
+      alert(`Errore nella disconnessione: ${error.response?.data?.detail || error.message}`)
     }
   }
 
@@ -488,6 +538,95 @@ export default function IntegrationsPage() {
                   <>
                     <ExternalLink size={18} />
                     Connetti Gmail
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* WhatsApp Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <MessageSquare size={32} className="text-green-600" />
+              <div>
+                <h2 className="text-2xl font-semibold">WhatsApp</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Leggi e invia messaggi WhatsApp
+                </p>
+              </div>
+            </div>
+            {whatsappConnected ? (
+              <div className="flex items-center gap-2 text-green-600">
+                <CheckCircle size={24} />
+                <span className="font-semibold">Collegato</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-gray-400">
+                <XCircle size={24} />
+                <span>Non collegato</span>
+              </div>
+            )}
+          </div>
+
+          {whatsappConnected ? (
+            <div className="space-y-4">
+              <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <p className="text-sm text-green-800 dark:text-green-200">
+                  ✓ WhatsApp è collegato e funzionante. Puoi chiedere al chatbot di:
+                </p>
+                <ul className="mt-2 ml-4 list-disc text-sm text-green-700 dark:text-green-300">
+                  <li>Leggere i messaggi recenti</li>
+                  <li>Inviare messaggi a contatti</li>
+                  <li>Cercare messaggi per contatto</li>
+                </ul>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={testWhatsAppConnection}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                >
+                  <RefreshCw size={18} />
+                  Test Connessione
+                </button>
+                <button
+                  onClick={disconnectWhatsApp}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+                >
+                  <Trash2 size={18} />
+                  Disconnetti
+                </button>
+                <button
+                  onClick={loadIntegrations}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
+                >
+                  Aggiorna
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                  Per collegare WhatsApp, clicca il pulsante qui sotto. Verrà aperta una sessione
+                  WhatsApp Web che potresti dover autenticare scansionando il QR code.
+                </p>
+              </div>
+              <button
+                onClick={connectWhatsApp}
+                disabled={connectingWhatsApp}
+                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {connectingWhatsApp ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    Connessione in corso...
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink size={18} />
+                    Connetti WhatsApp
                   </>
                 )}
               </button>
