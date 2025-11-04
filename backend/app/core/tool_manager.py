@@ -118,7 +118,7 @@ class ToolManager:
             },
             {
                 "name": "get_whatsapp_messages",
-                "description": "Recupera messaggi WhatsApp. Usa questo tool quando l'utente chiede informazioni sui messaggi WhatsApp, vuole leggere messaggi recenti, o chiede messaggi di oggi/ieri. I messaggi includono testo, data/ora, e mittente. Richiede che WhatsApp sia configurato e autenticato.",
+                "description": "Recupera messaggi WhatsApp. Usa questo tool quando l'utente chiede informazioni sui messaggi WhatsApp, vuole leggere messaggi recenti, o chiede messaggi di oggi/ieri. IMPORTANTE: Se l'utente chiede 'messaggi di oggi' o 'messaggi ricevuti oggi', DEVI usare date_filter='today'. I messaggi includono testo, data/ora, e mittente. Richiede che WhatsApp sia configurato e autenticato.",
                 "parameters": {
                     "type": "object",
                     "properties": {
