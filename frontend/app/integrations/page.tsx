@@ -243,10 +243,26 @@ export default function IntegrationsPage() {
   const connectWhatsApp = async () => {
     setConnectingWhatsApp(true)
     try {
-      const response = await integrationsApi.whatsapp.setup(false)
+      // Setup non-blocking - don't wait for auth
+      const response = await integrationsApi.whatsapp.setup(false, undefined, false)
       if (response.data?.success) {
-        setWhatsappConnected(true)
-        alert('WhatsApp Web setup completato! Scansiona il QR code se necessario.')
+        // Check status after a short delay
+        setTimeout(async () => {
+          try {
+            const statusResponse = await integrationsApi.whatsapp.getStatus()
+            if (statusResponse.data?.authenticated) {
+              setWhatsappConnected(true)
+              alert('WhatsApp Web è connesso!')
+            } else {
+              alert('WhatsApp Web aperto. Scansiona il QR code con il telefono. La finestra del browser dovrebbe essere visibile.')
+            }
+          } catch (e) {
+            console.error('Error checking status:', e)
+          }
+        }, 2000)
+        
+        // Show immediate feedback
+        alert('WhatsApp Web si sta aprendo. Controlla la finestra del browser per scansionare il QR code.')
       } else {
         throw new Error('Setup fallito')
       }
@@ -260,12 +276,22 @@ export default function IntegrationsPage() {
 
   const testWhatsAppConnection = async () => {
     try {
+      // First check status
+      const statusResponse = await integrationsApi.whatsapp.getStatus()
+      if (!statusResponse.data?.authenticated) {
+        alert(`WhatsApp non ancora autenticato. Stato: ${statusResponse.data?.status || 'unknown'}. Scansiona il QR code.`)
+        return
+      }
+      
+      // Then try to get messages
       const response = await integrationsApi.whatsapp.getMessages(undefined, 3)
       if (response.data?.success && response.data?.messages) {
         const count = response.data.count || 0
         alert(`Connessione funzionante! Trovati ${count} messaggi recenti.`)
+        setWhatsappConnected(true)
       } else {
         alert('Connessione funzionante, ma nessun messaggio trovato.')
+        setWhatsappConnected(true)
       }
     } catch (error: any) {
       console.error('Error testing WhatsApp:', error)

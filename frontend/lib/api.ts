@@ -135,8 +135,14 @@ export const integrationsApi = {
           api.delete(`/api/integrations/emails/integrations/${integrationId}`),
       },
       whatsapp: {
-        setup: (headless: boolean = false, profilePath?: string) =>
-          api.post('/api/integrations/whatsapp/setup', { headless, profile_path: profilePath }),
+        setup: (headless: boolean = false, profilePath?: string, waitForAuth: boolean = false) =>
+          api.post('/api/integrations/whatsapp/setup', { 
+            headless, 
+            profile_path: profilePath,
+            wait_for_auth: waitForAuth,
+            timeout: 30,
+          }),
+        getStatus: () => api.get('/api/integrations/whatsapp/status'),
         getMessages: (contactName?: string, maxResults: number = 10) => {
           const params: any = { max_results: maxResults }
           if (contactName) params.contact_name = contactName
