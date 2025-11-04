@@ -190,6 +190,9 @@ class WhatsAppService:
                 self.driver = None
                 self.is_authenticated = False
             
+            # Note: If Chrome is already open manually with WhatsApp Web,
+            # we'll use the same profile and Chrome should open already authenticated
+            
             options = self._get_chrome_options(headless=headless, profile_path=profile_path)
             
             # Try to create Chrome driver using webdriver-manager for automatic ChromeDriver management
