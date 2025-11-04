@@ -28,11 +28,13 @@
 
 ### 🚧 In Progress / Da Completare
 
-**Navigazione Web (Fase 1 - Incompleta):**
-- ⚠️ Integrazione MCP Gateway parziale
-- ❌ Ricerca web avanzata e indicizzazione
-- ❌ Navigazione autonoma web
-- ❌ Estrazione e indicizzazione contenuti web visitati
+**Navigazione Web (Fase 1 - ✅ Completa):**
+- ✅ Integrazione MCP Gateway (funzionante)
+- ✅ Tool browser Playwright (navigate, snapshot, click, evaluate, ecc.)
+- ✅ Ricerca web Ollama (web_search, web_fetch) con API ufficiale
+- ✅ Cleanup automatico container Playwright
+- ✅ Indicizzazione contenuti web visitati in memoria (long-term)
+- ❌ Navigazione autonoma web avanzata (Fase 3)
 
 **Proattività (Fase 2 - Non iniziata):**
 - ❌ Sistema eventi per monitorare email/calendario/WhatsApp
@@ -40,21 +42,22 @@
 - ❌ Motore decisionale per priorità eventi
 - ❌ Notifiche push frontend
 
-**WhatsApp Integration (Fase 1 - Non iniziata):**
-- ❌ Integrazione WhatsApp (whatsapp-web.py o alternativa)
-- ❌ Lettura messaggi
-- ❌ Invio messaggi (opzionale)
+**WhatsApp Integration (Fase 1 - ✅ Completa):**
+- ✅ Integrazione WhatsApp (Selenium + pywhatkit)
+- ✅ Lettura messaggi
+- ✅ Integrazione nelle risposte (tool get_whatsapp_messages)
+- ✅ Invio messaggi (opzionale)
 
 **Miglioramenti Memoria (Fase 2):**
-- ❌ Indicizzazione email in memoria
-- ❌ Indicizzazione contenuti web in memoria
+- ✅ Indicizzazione email in memoria (completata in Fase 1)
+- ✅ Indicizzazione contenuti web in memoria (completata in Fase 1)
 - ❌ Auto-apprendimento migliorato da interazioni
 
 ---
 
 ## 📋 Roadmap Dettagliata
 
-### Fase 1 - Core Integrations (2-3 settimane) - 70% Completa
+### Fase 1 - Core Integrations (2-3 settimane) - ✅ 100% Completa
 
 **Calendario** ✅
 - [x] Lettura eventi
@@ -64,17 +67,18 @@
 **Email** ✅
 - [x] Lettura email
 - [x] Riassunti automatici
-- [ ] Indicizzazione email in memoria
+- [x] Indicizzazione email in memoria (long-term)
 
-**Navigazione Web** ⚠️
-- [ ] Ricerca web avanzata con MCP gateway
-- [ ] Indicizzazione contenuti web visitati
-- [ ] Integrazione ricerca web nelle risposte chatbot
+**Navigazione Web** ✅
+- [x] Integrazione MCP Gateway e tool browser Playwright
+- [x] Ricerca web Ollama (web_search, web_fetch)
+- [x] Integrazione ricerca web nelle risposte chatbot
+- [x] Indicizzazione contenuti web visitati in memoria (long-term)
 
-**WhatsApp** ❌
-- [ ] Setup integrazione WhatsApp
-- [ ] Lettura messaggi
-- [ ] Integrazione nelle risposte
+**WhatsApp** ✅
+- [x] Setup integrazione WhatsApp
+- [x] Lettura messaggi
+- [x] Integrazione nelle risposte (tool get_whatsapp_messages)
 
 ---
 
