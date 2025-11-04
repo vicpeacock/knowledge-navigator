@@ -634,6 +634,90 @@ class WhatsAppService:
             # Get messages from active chat
             logger.info("Extracting messages from active chat...")
             try:
+                # First, try to use WhatsApp Web's internal Store API (more reliable)
+                logger.info("Attempting to extract messages using WhatsApp Web Store API...")
+                try:
+                    # Wait for WhatsApp Store to be available
+                    WebDriverWait(self.driver, 10).until(
+                        lambda driver: driver.execute_script("return typeof window.Store !== 'undefined' && window.Store.Msg !== undefined")
+                    )
+                    
+                    # Use JavaScript to get messages from WhatsApp's internal Store
+                    messages_js = self.driver.execute_script("""
+                        try {
+                            if (typeof window.Store === 'undefined' || !window.Store.Msg) {
+                                return { error: 'Store not available' };
+                            }
+                            
+                            // Get the active chat
+                            const chat = window.Store.Chat.find(window.Store.Conn.modelsByName['Chat'][0]);
+                            if (!chat) {
+                                return { error: 'No active chat found' };
+                            }
+                            
+                            // Get messages from the chat
+                            const messages = chat.msgs.models || [];
+                            const result = [];
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            
+                            // Get last N messages (more than requested to filter by date later)
+                            const maxMessages = arguments[0] || 100;
+                            const messagesToProcess = messages.slice(-maxMessages).reverse();
+                            
+                            for (const msg of messagesToProcess) {
+                                try {
+                                    if (!msg || !msg.body) continue;
+                                    
+                                    const timestamp = msg.t * 1000; // Convert from seconds to milliseconds
+                                    const msgDate = new Date(timestamp);
+                                    
+                                    // Check if message is from today
+                                    const msgDateOnly = new Date(msgDate);
+                                    msgDateOnly.setHours(0, 0, 0, 0);
+                                    
+                                    result.push({
+                                        text: msg.body,
+                                        timestamp: msgDate.toISOString(),
+                                        date: msgDate.toISOString().split('T')[0],
+                                        is_from_me: msg.isMe || false,
+                                        sender: msg.notifyName || msg._sender?.pushName || (msg.isMe ? 'Tu' : 'Contatto'),
+                                        raw: {
+                                            id: msg.id,
+                                            t: msg.t,
+                                            fromMe: msg.isMe
+                                        }
+                                    });
+                                } catch (e) {
+                                    console.error('Error processing message:', e);
+                                }
+                            }
+                            
+                            return { success: true, messages: result, count: result.length };
+                        } catch (e) {
+                            return { error: e.toString(), stack: e.stack };
+                        }
+                    """, max_results * 3)  # Get 3x more messages for filtering
+                    
+                    if messages_js.get("success") and messages_js.get("messages"):
+                        logger.info(f"Successfully extracted {len(messages_js['messages'])} messages using Store API")
+                        messages = messages_js["messages"]
+                        # Store API extraction successful, skip DOM extraction
+                        # But we still need to filter by date if needed
+                        if messages:
+                            logger.info(f"Using Store API messages: {len(messages)} total")
+                            # Filtering by date will be done in tool_manager
+                            return messages
+                    else:
+                        logger.warning(f"Store API extraction failed: {messages_js.get('error', 'Unknown error')}")
+                        # Fall back to DOM extraction
+                except Exception as e:
+                    logger.warning(f"Store API extraction failed, falling back to DOM: {e}")
+                    # Continue with DOM extraction
+                
+                # Fallback: Extract messages from DOM
+                logger.info("Extracting messages from DOM (fallback method)...")
+                
                 # Wait for message container/panel to be visible
                 # WhatsApp Web uses a scrollable container for messages
                 message_panel_selectors = [
@@ -773,14 +857,38 @@ class WhatsAppService:
                             # First, try to get the precise timestamp from data attributes
                             # WhatsApp stores timestamp in data-pre-plain-text or in span title attribute
                             timestamp_attr = elem.get_attribute("data-pre-plain-text")
+                            
+                            # Also try data-id which sometimes contains timestamp
+                            if not timestamp_attr:
+                                data_id = elem.get_attribute("data-id")
+                                if data_id:
+                                    # Try to extract timestamp from data-id (format: "true_1234567890@c.us")
+                                    import re
+                                    timestamp_match = re.search(r'(\d{10,13})', data_id)
+                                    if timestamp_match:
+                                        try:
+                                            timestamp_seconds = int(timestamp_match.group(1)) / 1000 if len(timestamp_match.group(1)) > 10 else int(timestamp_match.group(1))
+                                            timestamp = datetime.fromtimestamp(timestamp_seconds)
+                                            logger.debug(f"Extracted timestamp from data-id: {timestamp}")
+                                        except:
+                                            pass
+                            
                             if not timestamp_attr:
                                 # Try to find span with title that contains timestamp
                                 time_spans = elem.find_elements(By.CSS_SELECTOR, "span[title]")
                                 for span in time_spans:
                                     title = span.get_attribute("title")
-                                    if title and ("oggi" in title.lower() or "today" in title.lower() or ":" in title):
+                                    if title and (len(title) > 0):  # Accept any title, not just "oggi" or "today"
                                         timestamp_attr = title
+                                        logger.debug(f"Found timestamp_attr from span title: {timestamp_attr}")
                                         break
+                            
+                            # Also try to get timestamp from aria-label
+                            if not timestamp_attr:
+                                aria_label = elem.get_attribute("aria-label")
+                                if aria_label and (":" in aria_label or "/" in aria_label):
+                                    timestamp_attr = aria_label
+                                    logger.debug(f"Found timestamp_attr from aria-label: {timestamp_attr}")
                             
                             if timestamp_attr:
                                 # Parse timestamp from attribute
