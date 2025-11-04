@@ -302,9 +302,10 @@ export default function IntegrationsPage() {
             // Clear interval once authenticated - no need to keep checking
             clearInterval(checkInterval)
             setWhatsappCheckInterval(null)
-            clearInterval(checkInterval)
-            setWhatsappCheckInterval(null)
-            alert('✅ WhatsApp è connesso!')
+            // Show alert only once
+            if (checkCount === 1) {
+              alert('✅ WhatsApp è connesso!')
+            }
           } else if (checkCount >= maxChecks) {
             clearInterval(checkInterval)
             setWhatsappCheckInterval(null)
