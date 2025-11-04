@@ -137,3 +137,28 @@ async def close_whatsapp(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error closing WhatsApp: {str(e)}")
 
+
+@router.post("/reset")
+async def reset_whatsapp(
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
+):
+    """Force reset WhatsApp service - closes any hanging sessions"""
+    try:
+        # Force close driver if exists
+        if whatsapp_service.driver:
+            try:
+                whatsapp_service.driver.quit()
+            except:
+                pass
+        whatsapp_service.driver = None
+        whatsapp_service.is_authenticated = False
+        return {
+            "success": True,
+            "message": "WhatsApp service reset",
+        }
+    except Exception as e:
+        return {
+            "success": True,
+            "message": f"Reset completed (with errors: {str(e)})",
+        }
+
