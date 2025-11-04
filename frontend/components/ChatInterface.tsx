@@ -716,7 +716,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         )}
       </div>
 
-      <div className="p-4 border-t bg-white dark:bg-gray-800 pb-20">
+      <div className="p-4 border-t bg-white dark:bg-gray-800 pb-20 relative z-10">
         <div className="flex gap-2">
           <textarea
             value={input}
