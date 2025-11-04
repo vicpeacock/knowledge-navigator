@@ -83,38 +83,85 @@ class WhatsAppService:
     def _check_authentication_status(self) -> Dict[str, Any]:
         """Check if WhatsApp Web is authenticated"""
         if not self.driver:
-            return {"authenticated": False, "status": "no_driver"}
+            return {"authenticated": False, "status": "no_driver", "message": "WhatsApp Web not initialized"}
         
         try:
-            # Check for chat list (authenticated)
-            try:
-                chat_list = self.driver.find_element(By.CSS_SELECTOR, "[data-testid='chat-list']")
-                if chat_list:
-                    return {"authenticated": True, "status": "authenticated"}
-            except NoSuchElementException:
-                pass
+            # Get current URL to check if we're on WhatsApp Web
+            current_url = self.driver.current_url
+            if "web.whatsapp.com" not in current_url:
+                # Navigate to WhatsApp Web if not already there
+                try:
+                    self.driver.get("https://web.whatsapp.com")
+                    import time
+                    time.sleep(2)  # Wait for page to load
+                except Exception as e:
+                    logger.warning(f"Could not navigate to WhatsApp Web: {e}")
             
-            # Check for QR code (not authenticated)
-            try:
-                qr_code = self.driver.find_element(By.CSS_SELECTOR, "[data-ref]")
-                if qr_code:
-                    return {"authenticated": False, "status": "qr_code_visible", "message": "Please scan QR code"}
-            except NoSuchElementException:
-                pass
+            # Check for chat list (authenticated) - multiple selectors
+            auth_selectors = [
+                "[data-testid='chat-list']",
+                "[data-testid='conversation-list']",
+                "#side",  # Main sidebar
+                "[role='grid']",  # Chat grid
+            ]
             
-            # Check for loading screen
-            try:
-                loading = self.driver.find_element(By.CSS_SELECTOR, "[data-testid='loading']")
-                if loading:
-                    return {"authenticated": False, "status": "loading", "message": "WhatsApp Web is loading"}
-            except NoSuchElementException:
-                pass
+            for selector in auth_selectors:
+                try:
+                    element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if element and element.is_displayed():
+                        logger.info(f"Found authenticated element: {selector}")
+                        self.is_authenticated = True
+                        return {"authenticated": True, "status": "authenticated", "message": "WhatsApp Web is authenticated"}
+                except NoSuchElementException:
+                    continue
+            
+            # Check for QR code (not authenticated) - multiple selectors
+            qr_selectors = [
+                "[data-ref]",
+                "canvas",  # QR code canvas
+                "[data-testid='qr-code']",
+            ]
+            
+            for selector in qr_selectors:
+                try:
+                    element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if element and element.is_displayed():
+                        logger.info(f"Found QR code element: {selector}")
+                        self.is_authenticated = False
+                        return {"authenticated": False, "status": "qr_code_visible", "message": "Please scan QR code"}
+                except NoSuchElementException:
+                    continue
+            
+            # Check page source for keywords
+            page_source = self.driver.page_source.lower()
+            if "qr" in page_source or "scan" in page_source:
+                if "code" in page_source or "whatsapp" in page_source:
+                    return {"authenticated": False, "status": "qr_code_visible", "message": "QR code detected - please scan"}
+            
+            # If we can't find QR code but also can't find chat list, check if page is loaded
+            if "web.whatsapp.com" in current_url:
+                # Try to find any chat elements
+                try:
+                    # Look for any chat-related elements
+                    any_chat = self.driver.find_elements(By.CSS_SELECTOR, "[data-testid*='chat'], [data-testid*='conversation'], [role='listitem']")
+                    if any_chat:
+                        logger.info("Found chat elements - likely authenticated")
+                        self.is_authenticated = True
+                        return {"authenticated": True, "status": "authenticated", "message": "WhatsApp Web appears to be authenticated"}
+                except:
+                    pass
+            
+            # If we have a driver and we're on WhatsApp Web, assume authenticated if no QR code found
+            if "web.whatsapp.com" in current_url:
+                logger.info("On WhatsApp Web, no QR code found - assuming authenticated")
+                self.is_authenticated = True
+                return {"authenticated": True, "status": "authenticated", "message": "WhatsApp Web appears to be authenticated"}
             
             # Unknown state
             return {"authenticated": False, "status": "unknown", "message": "Could not determine authentication status"}
             
         except Exception as e:
-            logger.error(f"Error checking authentication status: {e}")
+            logger.error(f"Error checking authentication status: {e}", exc_info=True)
             return {"authenticated": False, "status": "error", "message": str(e)}
     
     async def setup_whatsapp_web(

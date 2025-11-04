@@ -261,24 +261,36 @@ export default function IntegrationsPage() {
     }
   }
 
+  const checkWhatsAppStatus = async () => {
+    try {
+      const statusResponse = await integrationsApi.whatsapp.getStatus()
+      if (statusResponse.data?.authenticated) {
+        setWhatsappConnected(true)
+        alert('WhatsApp è connesso!')
+      } else {
+        setWhatsappConnected(false)
+        alert(`WhatsApp non ancora autenticato. Stato: ${statusResponse.data?.status || 'unknown'}. ${statusResponse.data?.message || ''}`)
+      }
+    } catch (error: any) {
+      console.error('Error checking WhatsApp status:', error)
+      alert(`Errore nel controllo: ${error.response?.data?.detail || error.message}`)
+    }
+  }
+
   const testWhatsAppConnection = async () => {
     try {
       // First check status
-      const statusResponse = await integrationsApi.whatsapp.getStatus()
-      if (!statusResponse.data?.authenticated) {
-        alert(`WhatsApp non ancora autenticato. Stato: ${statusResponse.data?.status || 'unknown'}. Scansiona il QR code.`)
-        return
-      }
+      await checkWhatsAppStatus()
       
-      // Then try to get messages
-      const response = await integrationsApi.whatsapp.getMessages(undefined, 3)
-      if (response.data?.success && response.data?.messages) {
-        const count = response.data.count || 0
-        alert(`Connessione funzionante! Trovati ${count} messaggi recenti.`)
-        setWhatsappConnected(true)
-      } else {
-        alert('Connessione funzionante, ma nessun messaggio trovato.')
-        setWhatsappConnected(true)
+      // If authenticated, try to get messages
+      if (whatsappConnected) {
+        const response = await integrationsApi.whatsapp.getMessages(undefined, 3)
+        if (response.data?.success && response.data?.messages) {
+          const count = response.data.count || 0
+          alert(`Connessione funzionante! Trovati ${count} messaggi recenti.`)
+        } else {
+          alert('Connessione funzionante, ma nessun messaggio trovato.')
+        }
       }
     } catch (error: any) {
       console.error('Error testing WhatsApp:', error)
@@ -596,6 +608,13 @@ export default function IntegrationsPage() {
                 </ul>
               </div>
               <div className="flex gap-3">
+                <button
+                  onClick={checkWhatsAppStatus}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+                >
+                  <RefreshCw size={18} />
+                  Verifica Stato
+                </button>
                 <button
                   onClick={testWhatsAppConnection}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
