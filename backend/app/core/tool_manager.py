@@ -1059,14 +1059,33 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                 filtered_messages = []
                 for msg in messages:
                     msg_date_str = msg.get("date")
-                    if not msg_date_str:
-                        # If no date, include it (better to show than hide)
-                        filtered_messages.append(msg)
+                    msg_timestamp_str = msg.get("timestamp")
+                    
+                    # Try to get date from timestamp first (more precise)
+                    msg_date = None
+                    if msg_timestamp_str:
+                        try:
+                            msg_datetime = datetime.fromisoformat(msg_timestamp_str)
+                            msg_date = msg_datetime.date()
+                        except:
+                            pass
+                    
+                    # Fallback to date string
+                    if not msg_date and msg_date_str:
+                        try:
+                            msg_date = datetime.fromisoformat(msg_date_str).date()
+                        except:
+                            pass
+                    
+                    # If no date available, include message (better to show than hide)
+                    if not msg_date:
+                        # For "today" filter, if message has no date, assume it's recent and include it
+                        # This helps when WhatsApp doesn't provide precise dates
+                        if date_filter == "today":
+                            filtered_messages.append(msg)
                         continue
                     
                     try:
-                        msg_date = datetime.fromisoformat(msg_date_str).date()
-                        
                         if date_filter == "today":
                             if msg_date == today:
                                 filtered_messages.append(msg)
@@ -1082,8 +1101,8 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                             # Unknown filter, include all
                             filtered_messages.append(msg)
                     except Exception as e:
-                        logger.warning(f"Error parsing message date {msg_date_str}: {e}")
-                        # Include message if date parsing fails
+                        logger.warning(f"Error filtering message by date {msg_date}: {e}")
+                        # Include message if date filtering fails
                         filtered_messages.append(msg)
                 
                 messages = filtered_messages
