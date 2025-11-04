@@ -646,8 +646,9 @@ export default function IntegrationsPage() {
             <div className="space-y-4">
               <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
                 <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                  Per collegare WhatsApp, clicca il pulsante qui sotto. Verrà aperta una sessione
-                  WhatsApp Web che potresti dover autenticare scansionando il QR code.
+                  <strong>Importante:</strong> Chiudi tutte le finestre Chrome prima di connettere WhatsApp. 
+                  Verrà aperta una sessione WhatsApp Web che potresti dover autenticare scansionando il QR code.
+                  Se WhatsApp era già autenticato, verrà riutilizzata la sessione.
                 </p>
               </div>
               <div className="flex gap-3">

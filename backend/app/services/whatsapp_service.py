@@ -195,6 +195,12 @@ class WhatsAppService:
             
             options = self._get_chrome_options(headless=headless, profile_path=profile_path)
             
+            # Important: If Chrome is already open with the same profile, it will fail
+            # Add a unique port for remote debugging to avoid conflicts
+            import random
+            debug_port = random.randint(9000, 9999)
+            options.add_argument(f"--remote-debugging-port={debug_port}")
+            
             # Try to create Chrome driver using webdriver-manager for automatic ChromeDriver management
             # Use thread executor to avoid blocking event loop
             import asyncio
@@ -202,6 +208,8 @@ class WhatsAppService:
             
             try:
                 logger.info("Initializing Chrome driver with webdriver-manager...")
+                logger.info(f"Using profile: {profile_path or self.default_profile_path}")
+                logger.info(f"Debug port: {debug_port}")
                 
                 loop = asyncio.get_event_loop()
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -215,27 +223,47 @@ class WhatsAppService:
                         # Run Chrome() in thread too
                         self.driver = await asyncio.wait_for(
                             loop.run_in_executor(executor, lambda: webdriver.Chrome(service=service, options=options)),
-                            timeout=10.0
+                            timeout=15.0  # Increased timeout
                         )
                     except asyncio.TimeoutError:
                         logger.warning("ChromeDriver initialization timed out")
-                        raise Exception("ChromeDriver initialization timed out after 10 seconds")
+                        raise Exception("ChromeDriver initialization timed out. Please close Chrome if it's already open and try again.")
                     except Exception as e:
-                        logger.warning(f"Failed with webdriver-manager: {e}")
+                        error_msg = str(e)
+                        logger.warning(f"Failed with webdriver-manager: {error_msg}")
+                        
+                        # Check if error is about Chrome already running
+                        if "instance exited" in error_msg.lower() or "chrome instance" in error_msg.lower():
+                            raise Exception(
+                                "Chrome is already running with this profile. "
+                                "Please close all Chrome windows and try again, or use a different profile."
+                            )
+                        
                         # Fallback: try without service
                         try:
                             logger.info("Trying fallback: ChromeDriver from PATH")
                             self.driver = await asyncio.wait_for(
                                 loop.run_in_executor(executor, lambda: webdriver.Chrome(options=options)),
-                                timeout=10.0
+                                timeout=15.0
                             )
                         except Exception as e2:
+                            error_msg2 = str(e2)
+                            if "instance exited" in error_msg2.lower():
+                                raise Exception(
+                                    "Chrome is already running. Please close all Chrome windows and try again."
+                                )
                             logger.error(f"Fallback also failed: {e2}")
-                            raise Exception(f"ChromeDriver failed: {str(e2)}")
+                            raise Exception(f"ChromeDriver failed: {error_msg2}")
                             
             except Exception as e:
                 logger.error(f"ChromeDriver initialization error: {e}")
-                raise Exception(f"ChromeDriver initialization failed: {str(e)}")
+                error_str = str(e)
+                if "instance exited" in error_str.lower():
+                    raise Exception(
+                        "Cannot start Chrome: Chrome is already running with this profile. "
+                        "Please close all Chrome windows and try again."
+                    )
+                raise Exception(f"ChromeDriver initialization failed: {error_str}")
             
             logger.info("Chrome driver initialized successfully")
             
