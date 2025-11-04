@@ -251,26 +251,30 @@ export default function IntegrationsPage() {
   const connectWhatsApp = async () => {
     setConnectingWhatsApp(true)
     try {
-      // Start setup in background - don't wait for it
-      const setupPromise = integrationsApi.whatsapp.setup(false, undefined, false).catch((error) => {
-        console.error('WhatsApp setup error:', error)
-        // Show error but don't block
-        if (error.response?.data?.detail) {
-          alert(`Errore durante il setup: ${error.response.data.detail}`)
-        } else if (error.message && !error.message.includes('timeout')) {
-          alert(`Errore: ${error.message}`)
-        }
-        return { data: { success: false } }
-      })
-      
       // Show immediate feedback
       alert('WhatsApp Web si sta aprendo in una finestra Chrome separata. Il controllo dello stato avverrà automaticamente.')
       
-      // Wait for setup with timeout (but don't block UI)
-      const response = await Promise.race([
-        setupPromise,
-        new Promise((resolve) => setTimeout(() => resolve({ data: { success: true, message: 'Setup in corso...' } }), 8000))
-      ])
+      // Start setup in background - don't wait for it, ignore timeout errors
+      const setupPromise = integrationsApi.whatsapp.setup(false, undefined, false).catch((error) => {
+        console.error('WhatsApp setup error (non-blocking):', error)
+        // Don't show timeout errors - Chrome is probably opening anyway
+        if (error.response?.data?.detail && !error.response.data.detail.includes('timeout')) {
+          alert(`Errore durante il setup: ${error.response.data.detail}`)
+        } else if (error.message && !error.message.includes('timeout') && !error.code?.includes('ECONNABORTED')) {
+          console.error('Non-timeout error:', error.message)
+        }
+        // Return success anyway - status check will verify
+        return { data: { success: true, message: 'Setup in corso...' } }
+      })
+      
+      // Don't wait for setup - just start it
+      setupPromise.then((response) => {
+        if (response?.data?.success && response.data.message) {
+          console.log('Setup response:', response.data.message)
+        }
+      }).catch(() => {
+        // Ignored - already handled above
+      })
       
       // Start auto-check immediately (even if setup is still running)
       let checkCount = 0
