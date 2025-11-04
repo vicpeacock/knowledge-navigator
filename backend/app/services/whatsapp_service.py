@@ -204,7 +204,8 @@ class WhatsAppService:
             
             # Important: Use a fixed remote debugging port for WhatsApp Selenium
             # This prevents conflicts and makes it clear this is Selenium-controlled
-            options.add_argument("--remote-debugging-port=9223")
+            debug_port = 9223
+            options.add_argument(f"--remote-debugging-port={debug_port}")
             # Add app name to make it clear this is WhatsApp automation
             options.add_argument("--app-name=WhatsApp-Selenium")
             
