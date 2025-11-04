@@ -719,37 +719,88 @@ class WhatsAppService:
                         is_from_me = False
                         sender = None
                         
-                        # Try to find timestamp (WhatsApp shows relative times like "Oggi", "Ieri", or time)
+                        # Try to find timestamp (WhatsApp stores precise timestamps in data attributes)
                         try:
-                            # Look for time element
-                            time_selectors = [
-                                "[data-testid='msg-time']",
-                                "span[title]",
-                                ".message-time",
-                            ]
-                            for time_selector in time_selectors:
-                                try:
-                                    time_elem = elem.find_element(By.CSS_SELECTOR, time_selector)
-                                    time_text = time_elem.text.strip() or time_elem.get_attribute("title") or ""
-                                    if time_text:
-                                        # Try to parse relative times
-                                        if "oggi" in time_text.lower() or "today" in time_text.lower():
-                                            timestamp = datetime.now()
-                                        elif "ieri" in time_text.lower() or "yesterday" in time_text.lower():
-                                            from datetime import timedelta
-                                            timestamp = datetime.now() - timedelta(days=1)
+                            # First, try to get the precise timestamp from data attributes
+                            # WhatsApp stores timestamp in data-pre-plain-text or in span title attribute
+                            timestamp_attr = elem.get_attribute("data-pre-plain-text")
+                            if not timestamp_attr:
+                                # Try to find span with title that contains timestamp
+                                time_spans = elem.find_elements(By.CSS_SELECTOR, "span[title]")
+                                for span in time_spans:
+                                    title = span.get_attribute("title")
+                                    if title and ("oggi" in title.lower() or "today" in title.lower() or ":" in title):
+                                        timestamp_attr = title
+                                        break
+                            
+                            if timestamp_attr:
+                                # Parse timestamp from attribute
+                                # Format could be: "[14:30, 04/11/2024] Nome:" or "[Oggi, 14:30] Nome:" or just time
+                                import re
+                                from datetime import timedelta
+                                
+                                # Try to extract date from format like "04/11/2024"
+                                date_match = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', timestamp_attr)
+                                if date_match:
+                                    day, month, year = map(int, date_match.groups())
+                                    # Extract time from format like "14:30"
+                                    time_match = re.search(r'(\d{1,2}):(\d{1,2})', timestamp_attr)
+                                    if time_match:
+                                        hour, minute = map(int, time_match.groups())
+                                        timestamp = datetime(year, month, day, hour, minute)
+                                    else:
+                                        timestamp = datetime(year, month, day)
+                                else:
+                                    # Check for relative dates
+                                    attr_lower = timestamp_attr.lower()
+                                    if "oggi" in attr_lower or "today" in attr_lower:
+                                        # Extract time if present
+                                        time_match = re.search(r'(\d{1,2}):(\d{1,2})', timestamp_attr)
+                                        if time_match:
+                                            hour, minute = map(int, time_match.groups())
+                                            timestamp = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
                                         else:
+                                            timestamp = datetime.now()
+                                    elif "ieri" in attr_lower or "yesterday" in attr_lower:
+                                        time_match = re.search(r'(\d{1,2}):(\d{1,2})', timestamp_attr)
+                                        if time_match:
+                                            hour, minute = map(int, time_match.groups())
+                                            timestamp = (datetime.now() - timedelta(days=1)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                        else:
+                                            timestamp = datetime.now() - timedelta(days=1)
+                                    else:
+                                        # Just time, assume today
+                                        time_match = re.search(r'(\d{1,2}):(\d{1,2})', timestamp_attr)
+                                        if time_match:
+                                            hour, minute = map(int, time_match.groups())
+                                            timestamp = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+                            
+                            # Fallback: try to find time element in the message
+                            if not timestamp:
+                                time_selectors = [
+                                    "[data-testid='msg-time']",
+                                    "span[data-testid*='time']",
+                                    ".message-time",
+                                ]
+                                for time_selector in time_selectors:
+                                    try:
+                                        time_elem = elem.find_element(By.CSS_SELECTOR, time_selector)
+                                        time_text = time_elem.text.strip() or time_elem.get_attribute("title") or ""
+                                        if time_text and ":" in time_text:
                                             # Try to parse time like "14:30"
                                             try:
-                                                hour, minute = map(int, time_text.split(":"))
-                                                timestamp = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                                time_match = re.search(r'(\d{1,2}):(\d{1,2})', time_text)
+                                                if time_match:
+                                                    hour, minute = map(int, time_match.groups())
+                                                    # Assume today if no date info
+                                                    timestamp = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                                    break
                                             except:
                                                 pass
-                                        break
-                                except:
-                                    continue
-                        except:
-                            pass
+                                    except:
+                                        continue
+                        except Exception as e:
+                            logger.debug(f"Error extracting timestamp: {e}")
                         
                         # Check if message is from me (sent) or received
                         try:
