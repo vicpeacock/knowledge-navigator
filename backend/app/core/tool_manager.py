@@ -1077,8 +1077,8 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
             return (None, {
                 "error": "WhatsApp non inizializzato. Per favore connetti WhatsApp dalla pagina Integrations prima di usare questa funzione."
             })
-            
-            return (whatsapp_service, None)
+        
+        return (whatsapp_service, None)
     
     async def _execute_get_whatsapp_messages(
         self,
