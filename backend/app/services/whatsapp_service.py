@@ -649,14 +649,46 @@ class WhatsAppService:
                                 return { error: 'Store not available' };
                             }
                             
-                            // Get the active chat
-                            const chat = window.Store.Chat.find(window.Store.Conn.modelsByName['Chat'][0]);
+                            // Get the active chat - try multiple methods
+                            let chat = null;
+                            
+                            // Method 1: Get from active chat
+                            if (window.Store && window.Store.Chat && window.Store.Chat.find) {
+                                try {
+                                    chat = window.Store.Chat.find(window.Store.Conn.modelsByName['Chat'][0]);
+                                } catch (e) {
+                                    // Try alternative method
+                                }
+                            }
+                            
+                            // Method 2: Get from active chat list
+                            if (!chat && window.Store && window.Store.Chat && window.Store.Chat.models) {
+                                try {
+                                    // Get the first chat (most recent)
+                                    const chats = window.Store.Chat.models;
+                                    if (chats && chats.length > 0) {
+                                        chat = chats[0];
+                                    }
+                                } catch (e) {
+                                    // Try alternative method
+                                }
+                            }
+                            
+                            // Method 3: Get from current active chat
+                            if (!chat && window.Store && window.Store.Chat && window.Store.Chat.active) {
+                                try {
+                                    chat = window.Store.Chat.active;
+                                } catch (e) {
+                                    // Try alternative method
+                                }
+                            }
+                            
                             if (!chat) {
                                 return { error: 'No active chat found' };
                             }
                             
                             // Get messages from the chat
-                            const messages = chat.msgs.models || [];
+                            const messages = chat.msgs ? (chat.msgs.models || chat.msgs || []) : [];
                             const result = [];
                             const today = new Date();
                             today.setHours(0, 0, 0, 0);
@@ -743,25 +775,52 @@ class WhatsAppService:
                 if not message_panel:
                     logger.warning("Message panel not found, trying to find messages directly...")
                 else:
-                    # Scroll up to load more messages (WhatsApp loads messages dynamically)
-                    logger.info("Scrolling up to load more messages...")
+                    # Scroll to load more messages (especially important for "today" filter)
+                    # WhatsApp Web loads messages dynamically as you scroll
                     try:
-                        # Scroll up multiple times to load older messages
-                        for scroll_attempt in range(3):
-                            self.driver.execute_script(
-                                "arguments[0].scrollTop = 0;",
-                                message_panel
-                            )
-                            time.sleep(1)  # Wait for messages to load
-                            logger.info(f"Scroll attempt {scroll_attempt + 1}/3")
+                        # Scroll to top to load older messages
+                        logger.info("Scrolling to load more messages (this may take a moment)...")
+                        scroll_container = message_panel
                         
-                        # Scroll back down a bit to ensure we're in a good position
-                        time.sleep(1)
+                        # Get initial scroll position
+                        initial_scroll = self.driver.execute_script("return arguments[0].scrollTop;", scroll_container)
+                        
+                        # Scroll up multiple times to load more messages (especially today's messages)
+                        # WhatsApp loads messages in batches, so we need to scroll gradually
+                        for i in range(10):  # Increased from 3 to 10 scrolls
+                            self.driver.execute_script(
+                                "arguments[0].scrollTop = 0;", scroll_container
+                            )
+                            time.sleep(1.5)  # Increased wait time for messages to load
+                            
+                            # Check if we've reached the top (no more messages to load)
+                            current_scroll = self.driver.execute_script("return arguments[0].scrollTop;", scroll_container)
+                            if current_scroll == 0:
+                                # Try scrolling up a bit more to trigger loading
+                                self.driver.execute_script(
+                                    "arguments[0].scrollTop = -100; arguments[0].scrollTop = 0;", scroll_container
+                                )
+                                time.sleep(1)
+                        
+                        # Now scroll down gradually to today's messages
+                        # This ensures messages from today are loaded
+                        logger.info("Scrolling down to recent messages...")
+                        scroll_height = self.driver.execute_script("return arguments[0].scrollHeight;", scroll_container)
+                        for i in range(5):
+                            # Scroll down gradually
+                            scroll_position = scroll_height * (i + 1) / 5
+                            self.driver.execute_script(
+                                f"arguments[0].scrollTop = {scroll_position};", scroll_container
+                            )
+                            time.sleep(1)
+                        
+                        # Finally, scroll to bottom to get the most recent messages
                         self.driver.execute_script(
-                            "arguments[0].scrollTop = arguments[0].scrollHeight / 4;",
-                            message_panel
+                            "arguments[0].scrollTop = arguments[0].scrollHeight;", scroll_container
                         )
-                        time.sleep(1)
+                        time.sleep(3)  # Increased wait time for messages to render
+                        
+                        logger.info("Finished scrolling, messages should be loaded")
                     except Exception as e:
                         logger.warning(f"Error scrolling message panel: {e}")
                 
