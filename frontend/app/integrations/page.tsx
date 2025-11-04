@@ -252,7 +252,12 @@ export default function IntegrationsPage() {
         return { data: { success: true, message: 'Setup in corso...' } }
       })
       
-      alert('WhatsApp Web si sta aprendo. Controlla la finestra del browser.')
+      alert('WhatsApp Web si sta aprendo. Usa lo stesso profilo Chrome, quindi se era già autenticato dovrebbe rimanere autenticato. Dopo 3 secondi clicca "Verifica Stato".')
+      
+      // Auto-check status after a delay
+      setTimeout(async () => {
+        await checkWhatsAppStatus()
+      }, 3000)
     } catch (error: any) {
       console.error('Error:', error)
       alert('WhatsApp Web si sta aprendo. Se non vedi la finestra, controlla i processi Chrome.')
