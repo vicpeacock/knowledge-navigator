@@ -57,12 +57,14 @@ class WhatsAppService:
         # Security and stability options (essential for macOS)
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--disable-extensions")
+        # Try to avoid detection - use less aggressive options
+        # Don't disable AutomationControlled completely - might break things
+        # options.add_argument("--disable-blink-features=AutomationControlled")
         
         # macOS specific options
         if platform.system() == "Darwin":  # macOS
-            options.add_argument("--disable-features=VizDisplayCompositor")
+            # Try without VizDisplayCompositor disable - might be causing rendering issues
+            # options.add_argument("--disable-features=VizDisplayCompositor")
             # Important: exclude automation flags to avoid detection
             options.add_experimental_option("excludeSwitches", ["enable-automation"])
             options.add_experimental_option('useAutomationExtension', False)
@@ -333,8 +335,18 @@ class WhatsAppService:
                 except:
                     pass
             
-            # Additional wait for chats to load
-            time.sleep(5)  # Give WhatsApp time to load chats
+            # Additional wait for chats to load and render
+            logger.info("Waiting for WhatsApp Web to render chats...")
+            time.sleep(8)  # Give WhatsApp more time to load and render chats
+            
+            # Try to trigger a scroll or interaction to help rendering
+            try:
+                self.driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(1)
+                self.driver.execute_script("window.scrollTo(0, 100);")
+                time.sleep(1)
+            except:
+                pass
             
             # Check initial status
             try:

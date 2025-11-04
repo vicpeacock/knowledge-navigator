@@ -299,6 +299,9 @@ export default function IntegrationsPage() {
           const statusResponse = await integrationsApi.whatsapp.getStatus()
           if (statusResponse.data?.authenticated) {
             setWhatsappConnected(true)
+            // Clear interval once authenticated - no need to keep checking
+            clearInterval(checkInterval)
+            setWhatsappCheckInterval(null)
             clearInterval(checkInterval)
             setWhatsappCheckInterval(null)
             alert('✅ WhatsApp è connesso!')
@@ -334,8 +337,8 @@ export default function IntegrationsPage() {
     try {
       const statusResponse = await integrationsApi.whatsapp.getStatus()
       if (statusResponse.data?.authenticated) {
+        // Only update state, don't show alert (alert is annoying)
         setWhatsappConnected(true)
-        alert('WhatsApp è connesso!')
       } else {
         setWhatsappConnected(false)
         alert(`WhatsApp non ancora autenticato. Stato: ${statusResponse.data?.status || 'unknown'}. ${statusResponse.data?.message || ''}`)
