@@ -1047,10 +1047,13 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
             max_results = parameters.get("max_results", 20)  # Increased default to have more to filter
             date_filter = parameters.get("date_filter")
             
+            # Get messages first (always get them, even if we'll filter by date)
             messages = await whatsapp_service.get_recent_messages(
                 contact_name=contact_name,
-                max_results=max_results,
+                max_results=max_results * 3 if date_filter else max_results,  # Get more if filtering
             )
+            
+            logger.info(f"Retrieved {len(messages)} messages from WhatsApp service")
             
             # Filter messages by date if requested
             if date_filter:
@@ -1097,8 +1100,10 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                     try:
                         if date_filter == "today":
                             if msg_date == today:
+                                # For "today" filter, we typically want received messages (not sent)
+                                # But include all messages for now - can be filtered later if needed
                                 filtered_messages.append(msg)
-                                logger.debug(f"Including message from today: {msg_date} (text: {msg_text_preview}...)")
+                                logger.debug(f"Including message from today: date={msg_date}, is_from_me={msg.get('is_from_me')}, text={msg_text_preview}...")
                             else:
                                 messages_with_different_date += 1
                                 logger.debug(f"Excluding message: date={msg_date}, today={today} (text: {msg_text_preview}...)")
@@ -1127,18 +1132,29 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                 logger.info(f"Date filter result: {len(filtered_messages)} messages after filtering, {messages_without_date} without date, {messages_with_different_date} with different date")
                 messages = filtered_messages
             
+            # Debug: show sample of messages with dates (before filtering)
+            # We already have messages before filtering, so use those
+            debug_info = {
+                "total_messages_before_filter": len(messages) if date_filter else None,
+                "today_date": datetime.now().date().isoformat() if date_filter else None,
+                "sample_dates": [m.get("date") for m in messages[:10]] if date_filter and messages else [],
+                "messages_with_dates": sum(1 for m in messages if m.get("date")) if date_filter else None,
+                "messages_without_dates": sum(1 for m in messages if not m.get("date")) if date_filter else None,
+            }
+            
             result = {
                 "success": True,
                 "messages": messages,
                 "count": len(messages),
                 "date_filter": date_filter,
-                "note": "I messaggi includono testo, data/ora, e informazioni sul mittente (se disponibili)."
+                "note": "I messaggi includono testo, data/ora, e informazioni sul mittente (se disponibili).",
+                "debug": debug_info if date_filter else None,
             }
             
             # Add helpful message if no messages found with date filter
             if date_filter and len(messages) == 0:
                 if date_filter == "today":
-                    result["note"] += " Nessun messaggio trovato per oggi. Potrebbe essere che non ci siano messaggi ricevuti oggi, o che le date non siano state estratte correttamente."
+                    result["note"] += f" Nessun messaggio trovato per oggi. Debug: {len(raw_messages)} messaggi totali estratti, date di esempio: {debug_info['sample_dates']}, oggi={debug_info['today_date']}"
                 elif date_filter == "yesterday":
                     result["note"] += " Nessun messaggio trovato per ieri."
             
