@@ -199,10 +199,12 @@ class MemoryManager:
         )
         
         # Store in PostgreSQL
+        # Convert UUIDs to strings for JSONB storage
+        learned_from_sessions_str = [str(sid) for sid in learned_from_sessions]
         memory_long = MemoryLong(
             content=content,
             embedding_id=embedding_id,
-            learned_from_sessions=learned_from_sessions,
+            learned_from_sessions=learned_from_sessions_str,  # Store as strings for JSONB
             importance_score=importance_score,
         )
         db.add(memory_long)
