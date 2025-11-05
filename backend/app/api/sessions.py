@@ -657,241 +657,221 @@ L'integrazione WhatsApp è temporaneamente DISABILITATA. I tool per accedere a W
                 )
                 logger.info(f"Force web_search completed, result keys: {list(web_search_result.keys()) if isinstance(web_search_result, dict) else 'not a dict'}")
                 
-                # Add to tool results as if LLM called it
-                tool_results.append({
+                # Add to iteration_tool_results (same structure as regular tool calls)
+                iteration_tool_results = [{
                     "tool": "web_search",
                     "parameters": {"query": request.message},
                     "result": web_search_result,
-                })
+                }]
                 tools_used.append("web_search")
                 
-                # Format result for LLM
-                tool_results_text = "\n\n=== Risultati Ricerca Web (Forzata) ===\n"
-                if isinstance(web_search_result, dict) and web_search_result.get("success"):
-                    result_data = web_search_result.get("result", {})
-                    formatted_text = result_data.get("formatted_text", "")
-                    if formatted_text:
-                        tool_results_text += formatted_text
-                    else:
-                        # Fallback: format manually
-                        results_list = result_data.get("results", [])
-                        for i, r in enumerate(results_list[:5], 1):
-                            title = r.get('title', 'N/A')
-                            url = r.get('url', 'N/A')
-                            content = r.get('content', 'N/A')[:500]
-                            tool_results_text += f"\n{i}. {title}\n   URL: {url}\n   Contenuto: {content}\n"
-                else:
-                    error_msg = web_search_result.get("error", "Unknown error") if isinstance(web_search_result, dict) else str(web_search_result)
-                    tool_results_text += f"Errore nella ricerca web: {error_msg}\n"
-                tool_results_text += "\n=== Fine Risultati ===\n"
-                
-                # Update prompt to include web search results
-                current_prompt = f"""L'utente ha chiesto: "{request.message}"
-
-{tool_results_text}
-
-=== ISTRUZIONI ===
-Hai ricevuto i risultati di una ricerca web forzata sopra. Analizza attentamente TITOLI, URL e CONTENUTO di ciascun risultato. Usa queste informazioni REALI per rispondere all'utente in modo accurato e completo. Rispondi in italiano."""
-                
-                # Skip to LLM generation with results (no need to call LLM for tool selection)
+                # Skip tool calling loop and go directly to LLM generation with results
+                # (same logic as after regular tool execution)
                 tool_iteration += 1
-                continue  # Continue to next iteration to generate response with web search results
+                # Continue to tool results formatting below (don't call LLM for tool selection)
                 
             except Exception as e:
                 logger.error(f"Error in force web_search: {e}", exc_info=True)
                 # Continue normally - don't block if force web_search fails
+                iteration_tool_results = []
         
-        # Generate response with tools available
-        try:
-            # Use native tool calling if tools are available, otherwise fallback to prompt-based
-            pass_tools = available_tools if tool_iteration == 0 else None
-            pass_tools_description = tools_description if tool_iteration == 0 and not available_tools else None
-            
-            # Add time context to ollama client
-            ollama._time_context = time_context
-            
-            # WhatsApp integration temporarily disabled - will be re-enabled with Business API
-            # # Enhance prompt with explicit WhatsApp instructions if message mentions WhatsApp
-            # enhanced_prompt = current_prompt
-            # if "whatsapp" in current_prompt.lower() or "messaggi" in current_prompt.lower() or "oggi" in current_prompt.lower():
-            #     enhanced_prompt = f"""{current_prompt}
-            #
-            # 🔴 IMPORTANTE: Se questa richiesta riguarda WhatsApp o messaggi, DEVI chiamare il tool get_whatsapp_messages. Non rispondere senza aver chiamato il tool."""
-            enhanced_prompt = current_prompt
-            
-            response_data = await ollama.generate_with_context(
-                prompt=enhanced_prompt,
-                session_context=session_context,
-                retrieved_memory=retrieved_memory if retrieved_memory else None,
-                tools=pass_tools,
-                tools_description=pass_tools_description,
-                return_raw=True,
-            )
-            
-            # Handle both string response (old) and dict response (new with tool_calls)
-            if isinstance(response_data, dict):
-                response_text = response_data.get("content", "")
-                ollama_tool_calls = response_data.get("_parsed_tool_calls")
-                if ollama_tool_calls:
-                    logger.info(f"Ollama returned {len(ollama_tool_calls)} tool_calls in response structure")
-                # Debug: log the structure if content is empty
-                if not response_text and not ollama_tool_calls:
-                    raw_result = response_data.get("raw_result", {})
-                    logger.warning(f"Empty content and no tool_calls. Raw result keys: {list(raw_result.keys())}")
-                    if "message" in raw_result:
-                        msg = raw_result["message"]
-                        logger.warning(f"Message structure: {type(msg)}, keys: {list(msg.keys()) if isinstance(msg, dict) else 'N/A'}")
-            else:
-                response_text = response_data if response_data else ""
-                if not response_text:
-                    logger.warning(f"Response_data is not a dict and empty. Type: {type(response_data)}")
-            
-            logger.info(f"Ollama response received, length: {len(response_text) if response_text else 0}, has content: {bool(response_text and response_text.strip())}")
-        except Exception as e:
-            logger.error(f"Error calling Ollama: {e}", exc_info=True)
-            response_text = f"Errore nella chiamata al modello: {str(e)}"
-            response_data = None
-            break
+        # Check if we already have tool results from force_web_search
+        if 'iteration_tool_results' not in locals():
+            iteration_tool_results = []
         
-        # Check if we have tool_calls first (before checking if content is empty)
-        # This is important because tool_calls might mean empty content is OK
-        has_tool_calls_in_response = False
-        if response_data and isinstance(response_data, dict):
-            parsed_tc = response_data.get("_parsed_tool_calls")
-            raw_result = response_data.get("raw_result", {})
-            if parsed_tc or (raw_result.get("message", {}).get("tool_calls")):
-                has_tool_calls_in_response = True
-        
-        if not response_text or not response_text.strip():
-            if has_tool_calls_in_response:
-                logger.info("Content is empty but tool_calls present, continuing...")
-                # Set empty string - we'll generate response after tool execution
-                response_text = ""
-            else:
-                logger.error(f"Empty response from Ollama on iteration {tool_iteration} and no tool_calls. Response_data type: {type(response_data)}")
-                if response_data and isinstance(response_data, dict):
-                    logger.error(f"Response_data dict keys: {list(response_data.keys())}")
-                    raw_result = response_data.get('raw_result', {})
-                    if raw_result:
-                        msg = raw_result.get('message', {})
-                        if isinstance(msg, dict):
-                            logger.error(f"Message keys: {list(msg.keys())}")
-                            logger.error(f"Message content: '{msg.get('content', 'NOT FOUND')}'")
-                            logger.error(f"Message thinking: '{msg.get('thinking', 'NOT FOUND')[:200] if msg.get('thinking') else 'N/A'}'")
-                # Return error immediately - don't continue loop if content is empty and no tool calls
-                response_text = "Mi scuso, ho riscontrato un problema nella generazione della risposta. Per favore riprova."
+        # Generate response with tools available (skip if we already have tool results from force_web_search)
+        if not iteration_tool_results:
+            try:
+                # Use native tool calling if tools are available, otherwise fallback to prompt-based
+                pass_tools = available_tools if tool_iteration == 0 else None
+                pass_tools_description = tools_description if tool_iteration == 0 and not available_tools else None
+                
+                # Add time context to ollama client
+                ollama._time_context = time_context
+                
+                # WhatsApp integration temporarily disabled - will be re-enabled with Business API
+                # # Enhance prompt with explicit WhatsApp instructions if message mentions WhatsApp
+                # enhanced_prompt = current_prompt
+                # if "whatsapp" in current_prompt.lower() or "messaggi" in current_prompt.lower() or "oggi" in current_prompt.lower():
+                #     enhanced_prompt = f"""{current_prompt}
+                #
+                # 🔴 IMPORTANTE: Se questa richiesta riguarda WhatsApp o messaggi, DEVI chiamare il tool get_whatsapp_messages. Non rispondere senza aver chiamato il tool."""
+                enhanced_prompt = current_prompt
+                
+                response_data = await ollama.generate_with_context(
+                    prompt=enhanced_prompt,
+                    session_context=session_context,
+                    retrieved_memory=retrieved_memory if retrieved_memory else None,
+                    tools=pass_tools,
+                    tools_description=pass_tools_description,
+                    return_raw=True,
+                )
+                
+                # Handle both string response (old) and dict response (new with tool_calls)
+                if isinstance(response_data, dict):
+                    response_text = response_data.get("content", "")
+                    ollama_tool_calls = response_data.get("_parsed_tool_calls")
+                    if ollama_tool_calls:
+                        logger.info(f"Ollama returned {len(ollama_tool_calls)} tool_calls in response structure")
+                    # Debug: log the structure if content is empty
+                    if not response_text and not ollama_tool_calls:
+                        raw_result = response_data.get("raw_result", {})
+                        logger.warning(f"Empty content and no tool_calls. Raw result keys: {list(raw_result.keys())}")
+                        if "message" in raw_result:
+                            msg = raw_result["message"]
+                            logger.warning(f"Message structure: {type(msg)}, keys: {list(msg.keys()) if isinstance(msg, dict) else 'N/A'}")
+                else:
+                    response_text = response_data if response_data else ""
+                    if not response_text:
+                        logger.warning(f"Response_data is not a dict and empty. Type: {type(response_data)}")
+                
+                logger.info(f"Ollama response received, length: {len(response_text) if response_text else 0}, has content: {bool(response_text and response_text.strip())}")
+            except Exception as e:
+                logger.error(f"Error calling Ollama: {e}", exc_info=True)
+                response_text = f"Errore nella chiamata al modello: {str(e)}"
+                response_data = None
                 break
-        
-        # Check if LLM requested a tool call
-        # First check if Ollama returned tool_calls in response structure
-        tool_calls = []
-        if response_data and isinstance(response_data, dict):
-            # Check if we already have parsed tool calls from ollama_client
-            parsed_tc = response_data.get("_parsed_tool_calls")
-            if parsed_tc:
-                # Already parsed in ollama_client
-                tool_calls = parsed_tc
-                logger.info(f"✅ LLM automatically called {len(tool_calls)} tool(s): {[tc.get('name') for tc in tool_calls]}")
-            else:
-                # Fallback: try to parse from raw tool_calls structure (shouldn't be needed with native tool calling)
+            
+            # Check if we have tool_calls first (before checking if content is empty)
+            # This is important because tool_calls might mean empty content is OK
+            has_tool_calls_in_response = False
+            if response_data and isinstance(response_data, dict):
+                parsed_tc = response_data.get("_parsed_tool_calls")
                 raw_result = response_data.get("raw_result", {})
-                if "message" in raw_result and isinstance(raw_result["message"], dict):
-                    message = raw_result["message"]
-                    if "tool_calls" in message:
-                        ollama_tc = message["tool_calls"]
-                        # Standard Ollama format: {"function": {"name": "...", "arguments": {...}}}
-                        for tc in ollama_tc:
-                            if "function" in tc:
-                                func = tc["function"]
-                                func_name = func.get("name", "")
-                                func_args = func.get("arguments", {})
-                                
-                                # Parse arguments if string
-                                if isinstance(func_args, str):
-                                    try:
-                                        func_args = json_lib.loads(func_args)
-                                    except json_lib.JSONDecodeError:
-                                        logger.warning(f"Could not parse tool arguments: {func_args}")
-                                        continue
-                                
-                                if func_name and isinstance(func_args, dict):
-                                    tool_calls.append({
-                                        "name": func_name,
-                                        "parameters": func_args
-                                    })
-                        logger.info(f"Extracted {len(tool_calls)} tool calls from raw Ollama response")
-        
-        # Log what tools are available for debugging
-        if tool_iteration == 0:
-            available_tools = await tool_manager.get_available_tools()
-            browser_tools = [t.get('name') for t in available_tools if 'browser' in t.get('name', '').lower()]
-            logger.info(f"Available browser tools: {browser_tools}")
-        
-        # If response contains only JSON tool call, remove it for next iteration
-        if tool_calls and response_text.strip().startswith('{'):
-            # Response is likely only the JSON tool call
-            logger.info("Response contains only tool call JSON, will regenerate after tool execution")
-        
-        if not tool_calls:
-            # No tool calls, we have a normal response - use it
-            # Make sure response_text doesn't contain leftover JSON
-            if response_text and response_text.strip().startswith('{') and '"tool_call"' in response_text:
-                logger.warning("Response appears to be JSON but no tool calls parsed, attempting to clean")
-                # Try to extract any text after JSON
-                lines = response_text.split('\n')
-                text_only = [l for l in lines if not l.strip().startswith('{') and '}' not in l]
-                if text_only:
-                    response_text = '\n'.join(text_only).strip()
-                    logger.info(f"Cleaned response, new length: {len(response_text)}")
-                if not response_text:
-                    logger.warning("Response cleaned to empty")
-            # If we have content, use it; if empty, the check after the loop will handle it
-            if response_text and response_text.strip():
-                logger.info(f"Using LLM response (no tools needed): {len(response_text)} chars")
-            break
-        
-        # Execute tool calls
-        iteration_tool_results = []
-        
-        for tool_call in tool_calls:
-            tool_name = tool_call.get("name")
-            tool_params = tool_call.get("parameters", {})
+                if parsed_tc or (raw_result.get("message", {}).get("tool_calls")):
+                    has_tool_calls_in_response = True
             
-            logger.info(f"Executing tool: {tool_name} with params: {tool_params}")
+            if not response_text or not response_text.strip():
+                if has_tool_calls_in_response:
+                    logger.info("Content is empty but tool_calls present, continuing...")
+                    # Set empty string - we'll generate response after tool execution
+                    response_text = ""
+                else:
+                    logger.error(f"Empty response from Ollama on iteration {tool_iteration} and no tool_calls. Response_data type: {type(response_data)}")
+                    if response_data and isinstance(response_data, dict):
+                        logger.error(f"Response_data dict keys: {list(response_data.keys())}")
+                        raw_result = response_data.get('raw_result', {})
+                        if raw_result:
+                            msg = raw_result.get('message', {})
+                            if isinstance(msg, dict):
+                                logger.error(f"Message keys: {list(msg.keys())}")
+                                logger.error(f"Message content: '{msg.get('content', 'NOT FOUND')}'")
+                                logger.error(f"Message thinking: '{msg.get('thinking', 'NOT FOUND')[:200] if msg.get('thinking') else 'N/A'}'")
+                    # Return error immediately - don't continue loop if content is empty and no tool calls
+                    response_text = "Mi scuso, ho riscontrato un problema nella generazione della risposta. Per favore riprova."
+                    break
             
-            if tool_name:
-                # Regular tool - execute it (including web_search and web_fetch)
-                # Note: web_search and web_fetch are NOT automatically executed by Ollama
-                # We must call the Ollama REST API ourselves when Ollama requests these tools
-                try:
-                    result = await tool_manager.execute_tool(tool_name, tool_params, db, session_id=session_id)
-                    logger.info(f"Tool {tool_name} executed successfully, result keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
-                    # Log result preview safely - avoid str() on very large dicts which can block
-                    if isinstance(result, dict):
-                        # Check if result has large content field without serializing entire dict
-                        content_size = len(result.get('content', '')) if isinstance(result.get('content'), str) else 0
-                        if content_size > 10000:
-                            logger.info(f"Tool {tool_name} result preview: Large result with {content_size} chars in content field, keys: {list(result.keys())}")
-                        else:
-                            # Safe to serialize small dicts
-                            logger.info(f"Tool {tool_name} result preview: {str(result)[:500]}")
-                    elif isinstance(result, str):
-                        logger.info(f"Tool {tool_name} result preview: {result[:500]}")
-                    else:
-                        logger.info(f"Tool {tool_name} result type: {type(result)}")
-                    iteration_tool_results.append({
-                        "tool": tool_name,
-                        "parameters": tool_params,  # Store parameters for detailed response
-                        "result": result,
-                    })
-                    tools_used.append(tool_name)
-                except Exception as e:
-                    logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
-                    iteration_tool_results.append({
-                        "tool": tool_name,
-                        "parameters": tool_params,
-                        "result": {"error": str(e)},
-                    })
+            # Check if LLM requested a tool call
+            # First check if Ollama returned tool_calls in response structure
+            tool_calls = []
+            if response_data and isinstance(response_data, dict):
+                # Check if we already have parsed tool calls from ollama_client
+                parsed_tc = response_data.get("_parsed_tool_calls")
+                if parsed_tc:
+                    # Already parsed in ollama_client
+                    tool_calls = parsed_tc
+                    logger.info(f"✅ LLM automatically called {len(tool_calls)} tool(s): {[tc.get('name') for tc in tool_calls]}")
+                else:
+                    # Fallback: try to parse from raw tool_calls structure (shouldn't be needed with native tool calling)
+                    raw_result = response_data.get("raw_result", {})
+                    if "message" in raw_result and isinstance(raw_result["message"], dict):
+                        message = raw_result["message"]
+                        if "tool_calls" in message:
+                            ollama_tc = message["tool_calls"]
+                            # Standard Ollama format: {"function": {"name": "...", "arguments": {...}}}
+                            for tc in ollama_tc:
+                                if "function" in tc:
+                                    func = tc["function"]
+                                    func_name = func.get("name", "")
+                                    func_args = func.get("arguments", {})
+                                    
+                                    # Parse arguments if string
+                                    if isinstance(func_args, str):
+                                        try:
+                                            func_args = json_lib.loads(func_args)
+                                        except json_lib.JSONDecodeError:
+                                            logger.warning(f"Could not parse tool arguments: {func_args}")
+                                            continue
+                                    
+                                    if func_name and isinstance(func_args, dict):
+                                        tool_calls.append({
+                                            "name": func_name,
+                                            "parameters": func_args
+                                        })
+                            logger.info(f"Extracted {len(tool_calls)} tool calls from raw Ollama response")
+            
+            # Log what tools are available for debugging
+            if tool_iteration == 0:
+                available_tools = await tool_manager.get_available_tools()
+                browser_tools = [t.get('name') for t in available_tools if 'browser' in t.get('name', '').lower()]
+                logger.info(f"Available browser tools: {browser_tools}")
+            
+            # If response contains only JSON tool call, remove it for next iteration
+            if tool_calls and response_text.strip().startswith('{'):
+                # Response is likely only the JSON tool call
+                logger.info("Response contains only tool call JSON, will regenerate after tool execution")
+            
+            if not tool_calls:
+                # No tool calls, we have a normal response - use it
+                # Make sure response_text doesn't contain leftover JSON
+                if response_text and response_text.strip().startswith('{') and '"tool_call"' in response_text:
+                    logger.warning("Response appears to be JSON but no tool calls parsed, attempting to clean")
+                    # Try to extract any text after JSON
+                    lines = response_text.split('\n')
+                    text_only = [l for l in lines if not l.strip().startswith('{') and '}' not in l]
+                    if text_only:
+                        response_text = '\n'.join(text_only).strip()
+                        logger.info(f"Cleaned response, new length: {len(response_text)}")
+                    if not response_text:
+                        logger.warning("Response cleaned to empty")
+                # If we have content, use it; if empty, the check after the loop will handle it
+                if response_text and response_text.strip():
+                    logger.info(f"Using LLM response (no tools needed): {len(response_text)} chars")
+                break
+            
+            # Execute tool calls (only if we don't already have results from force_web_search)
+            if not iteration_tool_results:
+                iteration_tool_results = []
+                
+                for tool_call in tool_calls:
+                    tool_name = tool_call.get("name")
+                    tool_params = tool_call.get("parameters", {})
+                    
+                    logger.info(f"Executing tool: {tool_name} with params: {tool_params}")
+                    
+                    if tool_name:
+                        # Regular tool - execute it (including web_search and web_fetch)
+                        # Note: web_search and web_fetch are NOT automatically executed by Ollama
+                        # We must call the Ollama REST API ourselves when Ollama requests these tools
+                        try:
+                            result = await tool_manager.execute_tool(tool_name, tool_params, db, session_id=session_id)
+                            logger.info(f"Tool {tool_name} executed successfully, result keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
+                            # Log result preview safely - avoid str() on very large dicts which can block
+                            if isinstance(result, dict):
+                                # Check if result has large content field without serializing entire dict
+                                content_size = len(result.get('content', '')) if isinstance(result.get('content'), str) else 0
+                                if content_size > 10000:
+                                    logger.info(f"Tool {tool_name} result preview: Large result with {content_size} chars in content field, keys: {list(result.keys())}")
+                                else:
+                                    # Safe to serialize small dicts
+                                    logger.info(f"Tool {tool_name} result preview: {str(result)[:500]}")
+                            elif isinstance(result, str):
+                                logger.info(f"Tool {tool_name} result preview: {result[:500]}")
+                            else:
+                                logger.info(f"Tool {tool_name} result type: {type(result)}")
+                            iteration_tool_results.append({
+                                "tool": tool_name,
+                                "parameters": tool_params,  # Store parameters for detailed response
+                                "result": result,
+                            })
+                            tools_used.append(tool_name)
+                        except Exception as e:
+                            logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
+                            iteration_tool_results.append({
+                                "tool": tool_name,
+                                "parameters": tool_params,
+                                "result": {"error": str(e)},
+                            })
         
         logger.info(f"Tool execution completed. iteration_tool_results count: {len(iteration_tool_results)}")
         
