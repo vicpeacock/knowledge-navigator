@@ -644,6 +644,63 @@ L'integrazione WhatsApp è temporaneamente DISABILITATA. I tool per accedere a W
     while tool_iteration < max_tool_iterations:
         logger.info(f"Tool calling iteration {tool_iteration}, prompt length: {len(current_prompt)}")
         
+        # Force web_search if requested (like Ollama's web toggle)
+        if request.force_web_search and tool_iteration == 0:
+            logger.info(f"🔍 Force web_search enabled - executing web_search with query: '{request.message}'")
+            try:
+                # Execute web_search directly with the message as query
+                web_search_result = await tool_manager.execute_tool(
+                    "web_search",
+                    {"query": request.message},
+                    db=db,
+                    session_id=session_id
+                )
+                logger.info(f"Force web_search completed, result keys: {list(web_search_result.keys()) if isinstance(web_search_result, dict) else 'not a dict'}")
+                
+                # Add to tool results as if LLM called it
+                tool_results.append({
+                    "tool": "web_search",
+                    "parameters": {"query": request.message},
+                    "result": web_search_result,
+                })
+                tools_used.append("web_search")
+                
+                # Format result for LLM
+                tool_results_text = "\n\n=== Risultati Ricerca Web (Forzata) ===\n"
+                if isinstance(web_search_result, dict) and web_search_result.get("success"):
+                    result_data = web_search_result.get("result", {})
+                    formatted_text = result_data.get("formatted_text", "")
+                    if formatted_text:
+                        tool_results_text += formatted_text
+                    else:
+                        # Fallback: format manually
+                        results_list = result_data.get("results", [])
+                        for i, r in enumerate(results_list[:5], 1):
+                            title = r.get('title', 'N/A')
+                            url = r.get('url', 'N/A')
+                            content = r.get('content', 'N/A')[:500]
+                            tool_results_text += f"\n{i}. {title}\n   URL: {url}\n   Contenuto: {content}\n"
+                else:
+                    error_msg = web_search_result.get("error", "Unknown error") if isinstance(web_search_result, dict) else str(web_search_result)
+                    tool_results_text += f"Errore nella ricerca web: {error_msg}\n"
+                tool_results_text += "\n=== Fine Risultati ===\n"
+                
+                # Update prompt to include web search results
+                current_prompt = f"""L'utente ha chiesto: "{request.message}"
+
+{tool_results_text}
+
+=== ISTRUZIONI ===
+Hai ricevuto i risultati di una ricerca web forzata sopra. Analizza attentamente TITOLI, URL e CONTENUTO di ciascun risultato. Usa queste informazioni REALI per rispondere all'utente in modo accurato e completo. Rispondi in italiano."""
+                
+                # Skip to LLM generation with results (no need to call LLM for tool selection)
+                tool_iteration += 1
+                continue  # Continue to next iteration to generate response with web search results
+                
+            except Exception as e:
+                logger.error(f"Error in force web_search: {e}", exc_info=True)
+                # Continue normally - don't block if force web_search fails
+        
         # Generate response with tools available
         try:
             # Use native tool calling if tools are available, otherwise fallback to prompt-based

@@ -21,6 +21,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
   const [loading, setLoading] = useState(false)
   const [loadingMessages, setLoadingMessages] = useState(true)
   const [useMemory, setUseMemory] = useState(true)
+  const [forceWebSearch, setForceWebSearch] = useState(false)
   const [showFileManager, setShowFileManager] = useState(false)
   const [showMemoryViewer, setShowMemoryViewer] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -329,7 +330,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
     setLoading(true)
 
     try {
-      const response = await sessionsApi.chat(sessionId, input, useMemory)
+      const response = await sessionsApi.chat(sessionId, input, useMemory, forceWebSearch)
       console.log('Chat response received:', response.data)
       
       // Check if response is valid
@@ -400,6 +401,15 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
               className="rounded"
             />
             <span className="text-sm">Use Memory</span>
+          </label>
+          <label className="flex items-center gap-2" title="Forza ricerca web (come toggle Ollama)">
+            <input
+              type="checkbox"
+              checked={forceWebSearch}
+              onChange={(e) => setForceWebSearch(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-sm">🌐 Web Search</span>
           </label>
         </div>
         <div className="flex items-center gap-2">
