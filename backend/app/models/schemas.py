@@ -151,6 +151,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: UUID
     use_memory: bool = True
+    force_web_search: bool = False  # Force web search for this request (like Ollama's web toggle)
 
 
 class ToolExecutionDetail(BaseModel):

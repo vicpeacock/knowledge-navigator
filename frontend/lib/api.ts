@@ -33,8 +33,8 @@ export const sessionsApi = {
   archive: (id: string) => api.post(`/api/sessions/${id}/archive`),
   restore: (id: string) => api.post(`/api/sessions/${id}/restore`),
   getMessages: (id: string) => api.get(`/api/sessions/${id}/messages`),
-  chat: (id: string, message: string, useMemory: boolean = true) =>
-    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: useMemory }, { timeout: 180000 }), // 3 minutes - WhatsApp operations can take time
+  chat: (id: string, message: string, useMemory: boolean = true, forceWebSearch: boolean = false) =>
+    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: useMemory, force_web_search: forceWebSearch }, { timeout: 180000 }), // 3 minutes - WhatsApp operations can take time
   getMemory: (id: string) => api.get(`/api/sessions/${id}/memory`),
 }
 
