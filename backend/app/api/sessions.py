@@ -636,6 +636,7 @@ L'integrazione WhatsApp è temporaneamente DISABILITATA. I tool per accedere a W
     response_text = ""
     tool_results = []
     response_data = None  # Initialize to avoid undefined variable
+    tool_calls = []  # Initialize to avoid UnboundLocalError when force_web_search is used
     
     import logging
     import os
@@ -961,6 +962,34 @@ IMPORTANTE:
 Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:"""
             logger.info(f"Reinvoking LLM with tool results. Prompt length: {len(current_prompt)}")
             tool_results.extend(iteration_tool_results)
+            
+            # Call LLM with formatted tool results
+            try:
+                ollama._time_context = time_context
+                response_data = await ollama.generate_with_context(
+                    prompt=current_prompt,
+                    session_context=session_context,
+                    retrieved_memory=retrieved_memory if retrieved_memory else None,
+                    tools=None,  # No tools on final response generation
+                    tools_description=None,
+                    return_raw=True,
+                )
+                
+                # Extract response text
+                if isinstance(response_data, dict):
+                    response_text = response_data.get("content", "")
+                else:
+                    response_text = response_data if response_data else ""
+                
+                logger.info(f"LLM response generated from tool results, length: {len(response_text) if response_text else 0}")
+                
+                # Break after generating response
+                if response_text and response_text.strip():
+                    break
+            except Exception as e:
+                logger.error(f"Error calling LLM with tool results: {e}", exc_info=True)
+                response_text = f"Errore nella generazione della risposta: {str(e)}"
+                break
         else:
             # No tool results, break
             break
