@@ -184,6 +184,8 @@ class MemoryManager:
         
         # Store in ChromaDB
         embedding_id = f"long_{datetime.now().isoformat()}"
+        # ChromaDB doesn't accept lists in metadata, so convert to comma-separated string
+        learned_from_str = ",".join([str(sid) for sid in learned_from_sessions])
         self.long_term_memory_collection.add(
             ids=[embedding_id],
             embeddings=[embedding],
@@ -191,7 +193,7 @@ class MemoryManager:
             metadatas=[
                 {
                     "importance_score": importance_score,
-                    "learned_from": [str(sid) for sid in learned_from_sessions],
+                    "learned_from": learned_from_str,  # String instead of list
                 }
             ],
         )
