@@ -1,10 +1,16 @@
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from typing import Optional
 import os
 from pathlib import Path
 
 
 class Settings(BaseSettings):
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
     # Database
     database_url: str = "postgresql+asyncpg://knavigator:knavigator_pass@localhost:5432/knowledge_navigator"
     postgres_host: str = "localhost"
@@ -49,11 +55,6 @@ class Settings(BaseSettings):
     
     # Encryption for credentials
     credentials_encryption_key: str = "your-32-byte-encryption-key-change-me"
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
 
 
 settings = Settings()
