@@ -5,6 +5,13 @@ import { sessionsApi } from '@/lib/api'
 import { Brain, X, Clock, Archive, FileText, MessageSquare } from 'lucide-react'
 import { format } from 'date-fns'
 
+interface LongTermMemoryItem {
+  content: string
+  importance_score: number
+  created_at: string
+  learned_from_sessions: string[]
+}
+
 interface MemoryInfo {
   short_term: {
     last_user_message?: string
@@ -13,6 +20,7 @@ interface MemoryInfo {
   } | null
   medium_term_samples: string[]
   long_term_samples: string[]
+  long_term_memories?: LongTermMemoryItem[]  // New: full details
   files_count: number
   total_messages: number
 }
@@ -169,27 +177,73 @@ export default function MemoryViewer({ sessionId, isOpen, onClose }: MemoryViewe
               </div>
             )}
 
-            {/* Long-term Memory Samples */}
-            {memoryInfo.long_term_samples.length > 0 && (
+            {/* Long-term Memory - Show full details if available, otherwise samples */}
+            {(memoryInfo.long_term_memories && memoryInfo.long_term_memories.length > 0) || memoryInfo.long_term_samples.length > 0 ? (
               <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg">
                 <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
                   <Archive size={18} className="text-purple-600 dark:text-purple-400" />
                   Memoria a Lungo Termine (Conoscenza Condivisa)
+                  {memoryInfo.long_term_memories && (
+                    <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
+                      ({memoryInfo.long_term_memories.length} memorie)
+                    </span>
+                  )}
                 </h3>
                 <div className="space-y-3">
-                  {memoryInfo.long_term_samples.map((sample, index) => (
-                    <div
-                      key={index}
-                      className="bg-white dark:bg-gray-800 p-3 rounded border-l-4 border-purple-500"
-                    >
-                      <p className="text-sm text-gray-800 dark:text-gray-200">
-                        {sample.length > 300 ? `${sample.substring(0, 300)}...` : sample}
-                      </p>
-                    </div>
-                  ))}
+                  {/* Show full details if available */}
+                  {memoryInfo.long_term_memories && memoryInfo.long_term_memories.length > 0 ? (
+                    memoryInfo.long_term_memories.map((memory, index) => (
+                      <div
+                        key={index}
+                        className="bg-white dark:bg-gray-800 p-4 rounded border-l-4 border-purple-500"
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-semibold px-2 py-1 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+                              Importanza: {(memory.importance_score * 100).toFixed(0)}%
+                            </span>
+                            {memory.learned_from_sessions && memory.learned_from_sessions.length > 0 && (
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                Da {memory.learned_from_sessions.length} sessione{memory.learned_from_sessions.length > 1 ? 'i' : ''}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {format(new Date(memory.created_at), 'dd/MM/yyyy HH:mm')}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+                          {memory.content.length > 500 ? (
+                            <details>
+                              <summary className="cursor-pointer text-purple-600 dark:text-purple-400 hover:underline mb-2">
+                                {memory.content.substring(0, 200)}... (click per espandere)
+                              </summary>
+                              <div className="mt-2">
+                                {memory.content}
+                              </div>
+                            </details>
+                          ) : (
+                            memory.content
+                          )}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    // Fallback to samples if full details not available
+                    memoryInfo.long_term_samples.map((sample, index) => (
+                      <div
+                        key={index}
+                        className="bg-white dark:bg-gray-800 p-3 rounded border-l-4 border-purple-500"
+                      >
+                        <p className="text-sm text-gray-800 dark:text-gray-200">
+                          {sample.length > 300 ? `${sample.substring(0, 300)}...` : sample}
+                        </p>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
-            )}
+            ) : null}
 
             {!memoryInfo.short_term && 
              memoryInfo.medium_term_samples.length === 0 && 
