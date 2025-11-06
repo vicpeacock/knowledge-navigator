@@ -23,6 +23,7 @@ from app.models.schemas import (
 from app.core.dependencies import get_ollama_client, get_memory_manager
 from app.core.ollama_client import OllamaClient
 from app.core.memory_manager import MemoryManager
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -453,12 +454,16 @@ async def chat(
     previous_messages = messages_result.scalars().all()
     
     # Build context - ensure we're using plain dicts, not SQLAlchemy objects
-    session_context = [
+    all_messages_dict = [
         {"role": str(msg.role), "content": str(msg.content)}
-        for msg in previous_messages[-10:]  # Last 10 messages
+        for msg in previous_messages
     ]
     
-    # Retrieve memory if enabled
+    # Use conversation summarizer to optimize context if needed
+    from app.services.conversation_summarizer import ConversationSummarizer
+    summarizer = ConversationSummarizer(memory_manager=memory, ollama_client=ollama)
+    
+    # Retrieve memory if enabled (do this BEFORE optimizing context to consider it in size calculation)
     retrieved_memory = []
     memory_used = {"short_term": False, "medium_term": [], "long_term": [], "files": []}
     
@@ -530,6 +535,21 @@ async def chat(
         memory_used["long_term"] = long_mem
         retrieved_memory.extend(long_mem)
     
+    # Add file context info to retrieved memory if available
+    if file_context_info:
+        retrieved_memory = file_context_info + retrieved_memory
+    
+    # Now get optimized context AFTER retrieving memory (to consider it in size calculation)
+    session_context = await summarizer.get_optimized_context(
+        db=db,
+        session_id=session_id,
+        all_messages=all_messages_dict,
+        system_prompt="",  # Will be added by ollama client
+        retrieved_memory=retrieved_memory,
+        max_tokens=settings.max_context_tokens,
+        keep_recent=settings.context_keep_recent_messages,
+    )
+    
     # Save user message
     user_message = MessageModel(
         session_id=session_id,
@@ -538,10 +558,6 @@ async def chat(
     )
     db.add(user_message)
     await db.commit()
-    
-    # Add file context info to retrieved memory if available
-    if file_context_info:
-        retrieved_memory = file_context_info + retrieved_memory
     
     # Initialize tool manager
     from app.core.tool_manager import ToolManager
