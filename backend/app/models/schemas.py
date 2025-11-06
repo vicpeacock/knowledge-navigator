@@ -172,10 +172,17 @@ class ChatResponse(BaseModel):
 
 
 # Memory Info Schema
+class LongTermMemoryItem(BaseModel):
+    content: str
+    importance_score: float
+    created_at: datetime
+    learned_from_sessions: List[str] = []
+
 class MemoryInfo(BaseModel):
     short_term: Optional[Dict[str, Any]] = None
     medium_term_samples: List[str] = []
-    long_term_samples: List[str] = []
+    long_term_samples: List[str] = []  # Kept for backward compatibility
+    long_term_memories: List[LongTermMemoryItem] = []  # New: full details
     files_count: int = 0
     total_messages: int = 0
 

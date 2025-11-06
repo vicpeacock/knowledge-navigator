@@ -1154,10 +1154,28 @@ async def get_session_memory(
         session_id, "sessione conversazione", n_results=5
     )
     
-    # Get sample long-term memories - use a generic query
+    # Get sample long-term memories - use a generic query (for backward compatibility)
     long_samples = await memory.retrieve_long_term_memory(
         "conoscenza apprendimento", n_results=5
     )
+    
+    # Get ALL long-term memories from database with full metadata
+    from app.models.database import MemoryLong as MemoryLongModel
+    long_term_result = await db.execute(
+        select(MemoryLongModel)
+        .order_by(MemoryLongModel.created_at.desc())
+    )
+    all_long_term = long_term_result.scalars().all()
+    
+    # Convert to schema format
+    long_term_memories = []
+    for mem in all_long_term:
+        long_term_memories.append({
+            "content": mem.content,
+            "importance_score": mem.importance_score,
+            "created_at": mem.created_at,
+            "learned_from_sessions": mem.learned_from_sessions or [],
+        })
     
     # Count files
     from app.models.database import File as FileModel
@@ -1176,7 +1194,8 @@ async def get_session_memory(
     return MemoryInfo(
         short_term=short_term,
         medium_term_samples=medium_samples[:5],  # Limit to 5 samples
-        long_term_samples=long_samples[:5],  # Limit to 5 samples
+        long_term_samples=long_samples[:5],  # Limit to 5 samples (backward compatibility)
+        long_term_memories=long_term_memories,  # All memories with full details
         files_count=files_count,
         total_messages=total_messages,
     )
