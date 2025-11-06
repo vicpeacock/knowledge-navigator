@@ -116,7 +116,9 @@ export default function MemoryViewer({ sessionId, isOpen, onClose }: MemoryViewe
                   <Archive size={20} className="text-purple-600 dark:text-purple-400" />
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Lungo termine</span>
                 </div>
-                <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{memoryInfo.long_term_samples.length}</p>
+                <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                  {memoryInfo.long_term_memories ? memoryInfo.long_term_memories.length : memoryInfo.long_term_samples.length}
+                </p>
               </div>
             </div>
 
@@ -247,7 +249,7 @@ export default function MemoryViewer({ sessionId, isOpen, onClose }: MemoryViewe
 
             {!memoryInfo.short_term && 
              memoryInfo.medium_term_samples.length === 0 && 
-             memoryInfo.long_term_samples.length === 0 &&
+             (memoryInfo.long_term_memories?.length === 0 || memoryInfo.long_term_samples.length === 0) &&
              memoryInfo.files_count === 0 &&
              memoryInfo.total_messages === 0 && (
               <div className="text-center py-8 text-gray-500">
@@ -259,7 +261,7 @@ export default function MemoryViewer({ sessionId, isOpen, onClose }: MemoryViewe
             {/* Show message if there's data but no structured memory */}
             {(!memoryInfo.short_term && 
               memoryInfo.medium_term_samples.length === 0 && 
-              memoryInfo.long_term_samples.length === 0) &&
+              (memoryInfo.long_term_memories?.length === 0 || memoryInfo.long_term_samples.length === 0)) &&
              (memoryInfo.files_count > 0 || memoryInfo.total_messages > 0) && (
               <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
                 <p className="text-sm text-blue-800 dark:text-blue-200">
