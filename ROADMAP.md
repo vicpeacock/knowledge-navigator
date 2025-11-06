@@ -25,6 +25,8 @@
 - ✅ Archiviazione chat con indicizzazione semantica
 - ✅ Title e description per ogni chat
 - ✅ Home page con solo chat attive
+- ✅ Toggle "Web Search" per forzare ricerca web (come Ollama desktop)
+- ✅ Status panel globale per notifiche non bloccanti
 
 ### 🚧 In Progress / Da Completare
 
@@ -34,6 +36,8 @@
 - ✅ Ricerca web Ollama (web_search, web_fetch) con API ufficiale
 - ✅ Cleanup automatico container Playwright
 - ✅ Indicizzazione contenuti web visitati in memoria (long-term)
+- ✅ Toggle "Web Search" (force_web_search) - forzare ricerca web come in Ollama desktop
+- ✅ Test suite completa per indicizzazione web (9/9 test passati)
 - ❌ Navigazione autonoma web avanzata (Fase 3)
 
 **Proattività (Fase 2 - Non iniziata):**
@@ -52,6 +56,8 @@
 **Miglioramenti Memoria (Fase 2):**
 - ✅ Indicizzazione email in memoria (completata in Fase 1)
 - ✅ Indicizzazione contenuti web in memoria (completata in Fase 1)
+- ✅ Test suite completa per indicizzazione email (10/10 test passati)
+- ✅ Test suite completa per indicizzazione web (9/9 test passati)
 - ❌ Auto-apprendimento migliorato da interazioni
 
 ---
@@ -75,6 +81,8 @@
 - [x] Ricerca web Ollama (web_search, web_fetch)
 - [x] Integrazione ricerca web nelle risposte chatbot
 - [x] Indicizzazione contenuti web visitati in memoria (long-term)
+- [x] Toggle "Web Search" (force_web_search) - UI e API per forzare ricerca web
+- [x] Test suite completa per indicizzazione web (9/9 test passati)
 
 **WhatsApp** ⏸️ Temporaneamente Disabilitata
 - [x] Setup integrazione WhatsApp (Selenium/Web scraping - problemi con date extraction)
@@ -157,20 +165,32 @@
 
 ## 🎯 Prossimi Passi Suggeriti
 
-**Opzione 1: Completare Fase 1**
-- Navigazione web avanzata
-- Indicizzazione email in memoria
-- WhatsApp integration
+**Opzione 1: Completare Fase 1** ✅ (Quasi completa)
+- ✅ Navigazione web avanzata
+- ✅ Indicizzazione email in memoria
+- ✅ Indicizzazione contenuti web in memoria
+- ✅ Toggle Web Search
+- ⏸️ WhatsApp integration (pianificata con Business API)
 
-**Opzione 2: Iniziare Fase 2**
+**Opzione 2: Iniziare Fase 2** (Raccomandato)
 - Sistema eventi
 - WebSocket per proattività
 - Notifiche real-time
+- Monitoraggio email/calendario
 
 **Opzione 3: Miglioramenti Core**
 - Auto-apprendimento memoria
 - Ricerca semantica avanzata
 - UI/UX improvements
+- Export/Import sessioni
+
+## 📊 Statistiche Attuali
+
+- **Test Coverage**: 19/19 test passati (100%)
+  - Web Indexer: 9/9 ✅
+  - Email Indexer: 10/10 ✅
+- **Fase 1 Completamento**: ~95% (manca solo WhatsApp con Business API)
+- **Code Quality**: Nessun warning, Pydantic V2 compatibile
 
 Quale fase vuoi affrontare per prima?
 

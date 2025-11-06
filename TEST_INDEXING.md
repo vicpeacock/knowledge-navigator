@@ -3,12 +3,33 @@
 ## 🎯 Obiettivo
 Verificare che l'indicizzazione automatica dei contenuti web funzioni correttamente.
 
+## ✅ Test Suite Automatizzata
+
+Il progetto include una suite completa di test automatizzati per l'indicizzazione:
+
+### Test Web Indexer (9/9 test passati)
+```bash
+cd backend
+source venv/bin/activate
+PYTHONPATH=/Users/pallotta/Personal\ AI\ Assistant/backend pytest tests/test_web_indexer.py -v
+```
+
+### Test Email Indexer (10/10 test passati)
+```bash
+PYTHONPATH=/Users/pallotta/Personal\ AI\ Assistant/backend pytest tests/test_email_indexer.py -v
+```
+
+### Eseguire Tutti i Test
+```bash
+PYTHONPATH=/Users/pallotta/Personal\ AI\ Assistant/backend pytest tests/test_web_indexer.py tests/test_email_indexer.py -v
+```
+
 ## 📋 Test da Eseguire
 
-### Test 1: Indicizzazione web_search
+### Test 1: Indicizzazione web_search (Metodo Manuale)
 **Cosa fare:**
 1. Apri una nuova chat o usa una esistente
-2. Chiedi all'AI di fare una ricerca web, ad esempio:
+2. **Opzione A - Tool calling automatico**: Chiedi all'AI di fare una ricerca web, ad esempio:
    ```
    Cerca informazioni su Python async programming
    ```
@@ -16,6 +37,10 @@ Verificare che l'indicizzazione automatica dei contenuti web funzioni correttame
    ```
    Fai una ricerca web su "machine learning"
    ```
+3. **Opzione B - Toggle Web Search**: 
+   - Attiva il toggle "🌐 Web Search" nell'interfaccia chat
+   - Invia un messaggio (es. "Python async programming")
+   - La ricerca web verrà eseguita automaticamente prima della risposta
 
 **Cosa verificare:**
 - L'AI dovrebbe usare il tool `web_search`
@@ -24,6 +49,7 @@ Verificare che l'indicizzazione automatica dei contenuti web funzioni correttame
   Auto-indexed X web search results
   ```
 - Il risultato della chat dovrebbe includere `indexing_stats` nel risultato del tool
+- Con il toggle attivo, vedrai "🔍 Force web_search enabled" nei log
 
 ### Test 2: Indicizzazione web_fetch
 **Cosa fare:**
