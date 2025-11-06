@@ -3,7 +3,13 @@
 import { useEffect, useState } from 'react'
 import axios from 'axios'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// For testing: set TEST_BACKEND_OFFLINE=true to simulate offline backend
+const TEST_BACKEND_OFFLINE = typeof window !== 'undefined' && 
+  new URLSearchParams(window.location.search).get('test_offline') === 'true'
+
+const API_URL = TEST_BACKEND_OFFLINE 
+  ? 'http://localhost:9999' // Invalid port to simulate offline
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
 
 interface BackendStatusProps {
   children: React.ReactNode
