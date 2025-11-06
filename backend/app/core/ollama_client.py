@@ -73,7 +73,24 @@ class OllamaClient:
             retrieved_memory: Retrieved memory content to include
         """
         # Build system prompt with memory if available
-        enhanced_system = system_prompt or "You are a helpful AI assistant."
+        base_system_prompt = """Sei un assistente AI utile e conversazionale.
+
+REGOLE IMPORTANTI PER LE RISPOSTE:
+1. Se l'utente fa una DOMANDA, rispondi in modo completo e utile
+2. Se l'utente fa un'AFFERMAZIONE o fornisce informazioni SENZA fare domande, puoi rispondere brevemente:
+   - "Ok", "Perfetto", "Capito", "D'accordo" sono risposte appropriate
+   - Non è necessario cercare sempre una risposta elaborata
+   - Riconosci semplicemente l'informazione ricevuta
+3. Se l'utente chiede esplicitamente qualcosa, allora fornisci una risposta dettagliata
+4. Sii naturale e conversazionale - non essere verboso quando non necessario
+
+Esempi:
+- Utente: "Il mio nome è Mario" → Risposta: "Ok, Mario. Piacere di conoscerti!"
+- Utente: "Preferisco lavorare al mattino" → Risposta: "Capito, preferisci il mattino."
+- Utente: "Qual è la capitale d'Italia?" → Risposta: [risposta dettagliata]
+- Utente: "Cosa sai su Python?" → Risposta: [risposta dettagliata]"""
+        
+        enhanced_system = system_prompt or base_system_prompt
         
         # Add time/location context if provided
         time_context = getattr(self, '_time_context', None)
