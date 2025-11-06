@@ -1040,6 +1040,7 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
         await memory.update_short_term_memory(db, session_id, new_context)
         
         # Extract and index knowledge from conversation (auto-learning)
+        # Run in background to avoid blocking the response
         try:
             from app.services.conversation_learner import ConversationLearner
             learner = ConversationLearner(memory_manager=memory, ollama_client=ollama)
@@ -1053,23 +1054,33 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
             recent_messages.append({"role": "assistant", "content": response_text})
             
             # Extract knowledge (only if conversation has enough content)
+            # Run asynchronously to not block the response
             if len(recent_messages) >= 4:  # At least 2 exchanges
-                knowledge_items = await learner.extract_knowledge_from_conversation(
-                    db=db,
-                    session_id=session_id,
-                    messages=recent_messages,
-                    min_importance=0.6,
-                )
+                # Schedule for background execution (fire and forget)
+                import asyncio
+                async def _extract_knowledge_background():
+                    try:
+                        knowledge_items = await learner.extract_knowledge_from_conversation(
+                            db=db,
+                            session_id=session_id,
+                            messages=recent_messages,
+                            min_importance=0.6,
+                        )
+                        
+                        if knowledge_items:
+                            indexing_stats = await learner.index_extracted_knowledge(
+                                db=db,
+                                knowledge_items=knowledge_items,
+                                session_id=session_id,
+                            )
+                            logger.info(f"Auto-learned {indexing_stats.get('indexed', 0)} knowledge items from conversation")
+                    except Exception as e:
+                        logger.warning(f"Error in background auto-learning: {e}", exc_info=True)
                 
-                if knowledge_items:
-                    indexing_stats = await learner.index_extracted_knowledge(
-                        db=db,
-                        knowledge_items=knowledge_items,
-                        session_id=session_id,
-                    )
-                    logger.info(f"Auto-learned {indexing_stats.get('indexed', 0)} knowledge items from conversation")
+                # Schedule background task (don't await to avoid blocking)
+                asyncio.create_task(_extract_knowledge_background())
         except Exception as e:
-            logger.warning(f"Error in auto-learning from conversation: {e}", exc_info=True)
+            logger.warning(f"Error scheduling auto-learning from conversation: {e}", exc_info=True)
 
     # Build detailed tool execution information
     tool_details = []
