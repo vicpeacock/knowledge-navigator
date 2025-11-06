@@ -1058,24 +1058,27 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
             if len(recent_messages) >= 4:  # At least 2 exchanges
                 # Schedule for background execution (fire and forget)
                 import asyncio
+                from app.db.database import AsyncSessionLocal
                 async def _extract_knowledge_background():
-                    try:
-                        knowledge_items = await learner.extract_knowledge_from_conversation(
-                            db=db,
-                            session_id=session_id,
-                            messages=recent_messages,
-                            min_importance=0.6,
-                        )
-                        
-                        if knowledge_items:
-                            indexing_stats = await learner.index_extracted_knowledge(
-                                db=db,
-                                knowledge_items=knowledge_items,
+                    # Create a new database session for background task
+                    async with AsyncSessionLocal() as db_session:
+                        try:
+                            knowledge_items = await learner.extract_knowledge_from_conversation(
+                                db=db_session,
                                 session_id=session_id,
+                                messages=recent_messages,
+                                min_importance=0.6,
                             )
-                            logger.info(f"Auto-learned {indexing_stats.get('indexed', 0)} knowledge items from conversation")
-                    except Exception as e:
-                        logger.warning(f"Error in background auto-learning: {e}", exc_info=True)
+                            
+                            if knowledge_items:
+                                indexing_stats = await learner.index_extracted_knowledge(
+                                    db=db_session,
+                                    knowledge_items=knowledge_items,
+                                    session_id=session_id,
+                                )
+                                logger.info(f"Auto-learned {indexing_stats.get('indexed', 0)} knowledge items from conversation")
+                        except Exception as e:
+                            logger.warning(f"Error in background auto-learning: {e}", exc_info=True)
                 
                 # Schedule background task (don't await to avoid blocking)
                 asyncio.create_task(_extract_knowledge_background())
