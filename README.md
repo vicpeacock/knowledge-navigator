@@ -7,12 +7,18 @@ Un assistente AI personale che integra calendario, email, memoria multi-livello 
 - 🤖 **Assistente AI Conversazionale**: Interfaccia chat basata su Ollama (gpt-oss:20b)
 - 📅 **Integrazione Calendario**: Lettura eventi da Google Calendar con query in linguaggio naturale
 - 📧 **Integrazione Email**: Lettura e riassunto email da Gmail
+- 🌐 **Navigazione Web**: 
+  - Ricerca web nativa Ollama (web_search, web_fetch)
+  - Tool browser Playwright per navigazione avanzata
+  - Toggle "Web Search" per forzare ricerca web (come Ollama desktop)
+  - Indicizzazione automatica contenuti web in memoria long-term
 - 💾 **Memoria Multi-livello**:
   - **Short-term**: Contesto della sessione corrente
   - **Medium-term**: Memoria persistente per sessione (30 giorni)
-  - **Long-term**: Memoria condivisa tra tutte le sessioni
+  - **Long-term**: Memoria condivisa tra tutte le sessioni con indicizzazione automatica
 - 📁 **Gestione File**: Upload e indicizzazione file (PDF, DOCX, XLSX, TXT) con RAG
 - 🔧 **Tool Calling**: Sistema dinamico dove l'LLM decide autonomamente quando usare tool esterni
+- ✅ **Test Suite Completa**: Test automatizzati per indicizzazione web ed email
 
 ## Stack Tecnologico
 
