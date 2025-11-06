@@ -48,8 +48,8 @@ class EmailIndexer:
             for keyword in important_keywords
         )
         
-        # Index if: has body content OR is unread with important keywords OR has body and keywords
-        return has_body or (is_unread and has_important_keyword) or (has_body and has_important_keyword)
+        # Index if: has body content OR is unread with important keywords OR has body and keywords OR has important keywords (even without body)
+        return has_body or (is_unread and has_important_keyword) or (has_body and has_important_keyword) or has_important_keyword
     
     async def index_email(
         self,
@@ -107,11 +107,20 @@ class EmailIndexer:
         
         for email in emails:
             try:
+                # Check if should index first
+                should_index = await self.should_index_email(email)
+                if not should_index:
+                    skipped_count += 1
+                    continue
+                
+                # Try to index
                 indexed = await self.index_email(db, email, session_id)
                 if indexed:
                     indexed_count += 1
                 else:
-                    skipped_count += 1
+                    # If should_index is True but index_email returns False, it's an error
+                    errors.append(f"Email {email.get('id')}: Indexing failed")
+                    logger.error(f"Email {email.get('id')} should be indexed but indexing returned False")
             except Exception as e:
                 errors.append(f"Email {email.get('id')}: {str(e)}")
                 logger.error(f"Error indexing email {email.get('id')}: {e}")
