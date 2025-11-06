@@ -350,18 +350,49 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
       if (response.data.tool_details && response.data.tool_details.length > 0) {
         response.data.tool_details.forEach((tool: any) => {
           const toolName = tool.tool_name || 'unknown'
-          const params = tool.parameters ? JSON.stringify(tool.parameters, null, 2) : ''
-          const resultPreview = tool.result 
-            ? (typeof tool.result === 'string' 
-                ? tool.result.substring(0, 200) + (tool.result.length > 200 ? '...' : '')
-                : JSON.stringify(tool.result, null, 2).substring(0, 200) + (JSON.stringify(tool.result, null, 2).length > 200 ? '...' : ''))
-            : ''
           
-          const toolMessage = `🔧 ${toolName}${params ? `\nQuery: ${params}` : ''}${resultPreview ? `\nRisultato: ${resultPreview}` : ''}${tool.error ? `\n❌ Errore: ${tool.error}` : ''}`
+          // Format parameters (extract query if present)
+          let paramsText = ''
+          if (tool.parameters) {
+            if (tool.parameters.query) {
+              paramsText = `Query: "${tool.parameters.query}"`
+            } else {
+              const paramsStr = JSON.stringify(tool.parameters, null, 2)
+              if (paramsStr.length < 100) {
+                paramsText = `Parametri: ${paramsStr}`
+              } else {
+                paramsText = `Parametri: ${paramsStr.substring(0, 100)}...`
+              }
+            }
+          }
+          
+          // Format result preview
+          let resultText = ''
+          if (tool.result && tool.success) {
+            if (typeof tool.result === 'string') {
+              resultText = tool.result.substring(0, 150) + (tool.result.length > 150 ? '...' : '')
+            } else if (tool.result.content) {
+              resultText = tool.result.content.substring(0, 150) + (tool.result.content.length > 150 ? '...' : '')
+            } else if (tool.result.result) {
+              const resultStr = typeof tool.result.result === 'string' 
+                ? tool.result.result 
+                : JSON.stringify(tool.result.result, null, 2)
+              resultText = resultStr.substring(0, 150) + (resultStr.length > 150 ? '...' : '')
+            } else {
+              const resultStr = JSON.stringify(tool.result, null, 2)
+              resultText = resultStr.substring(0, 150) + (resultStr.length > 150 ? '...' : '')
+            }
+          }
+          
+          // Build message
+          const parts = [`🔧 Tool: ${toolName}`]
+          if (paramsText) parts.push(paramsText)
+          if (resultText) parts.push(`Risultato: ${resultText}`)
+          if (tool.error) parts.push(`❌ Errore: ${tool.error}`)
           
           addStatusMessage(
             tool.success ? 'info' : 'error',
-            toolMessage
+            parts.join('\n')
           )
         })
       }

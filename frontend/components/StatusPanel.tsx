@@ -121,7 +121,7 @@ export function StatusProvider({ children }: { children: ReactNode }) {
                         {msg.timestamp.toLocaleTimeString()}
                       </span>
                     </div>
-                    <p className="text-xs">{msg.message}</p>
+                    <p className="text-xs whitespace-pre-wrap">{msg.message}</p>
                   </div>
                   <button
                     onClick={() => removeStatusMessage(msg.id)}
