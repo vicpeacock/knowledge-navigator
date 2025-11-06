@@ -194,10 +194,21 @@ Riassunto (massimo 500 parole, mantieni tutti i dettagli importanti):"""
         # Need to summarize older messages
         logger.info(f"Context too large ({current_tokens} tokens), summarizing {len(older_messages)} older messages")
         
-        # Get existing summaries from medium-term memory
+        # Get existing summaries from medium-term memory (search for summaries)
         existing_summaries = await self.memory_manager.retrieve_medium_term_memory(
-            session_id, "riassunto conversazione", n_results=5
+            session_id, "riassunto conversazione precedente", n_results=10
         )
+        
+        # Filter to only get actual summaries (those starting with [RIASSUNTO CONVERSAZIONE])
+        summary_texts = []
+        for summary in existing_summaries:
+            if "[RIASSUNTO CONVERSAZIONE]" in summary or "[Riassunto conversazione precedente]" in summary:
+                # Extract just the summary text (remove the prefix)
+                summary_text = summary.replace("[RIASSUNTO CONVERSAZIONE]", "").replace("[Riassunto conversazione precedente]", "").strip()
+                if summary_text:
+                    summary_texts.append(summary_text)
+        
+        existing_summaries = summary_texts
         
         # If we have summaries, use them
         if existing_summaries:
