@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     medium_term_memory_days: int = 30
     long_term_importance_threshold: float = 0.7
     
+    # Context Management
+    max_context_tokens: int = 8000  # Maximum tokens before summarizing
+    context_keep_recent_messages: int = 10  # Keep last N messages when summarizing
+    
     # Google OAuth2 (for Calendar/Email)
     google_client_id: Optional[str] = None
     google_client_secret: Optional[str] = None
