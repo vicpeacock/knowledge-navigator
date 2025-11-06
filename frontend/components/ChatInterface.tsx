@@ -10,6 +10,7 @@ import { FileText, Brain } from 'lucide-react'
 import { format } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useStatus } from './StatusPanel'
 
 interface ChatInterfaceProps {
   sessionId: string
@@ -28,6 +29,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const [isUserAtBottom, setIsUserAtBottom] = useState(true)
   const [initialLoad, setInitialLoad] = useState(true)
+  const { addStatusMessage } = useStatus()
 
   // Load messages when sessionId changes or component mounts
   useEffect(() => {
@@ -344,6 +346,26 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         throw new Error('Invalid response format: no response text')
       }
       
+      // Add tool details to status panel if available
+      if (response.data.tool_details && response.data.tool_details.length > 0) {
+        response.data.tool_details.forEach((tool: any) => {
+          const toolName = tool.tool_name || 'unknown'
+          const params = tool.parameters ? JSON.stringify(tool.parameters, null, 2) : ''
+          const resultPreview = tool.result 
+            ? (typeof tool.result === 'string' 
+                ? tool.result.substring(0, 200) + (tool.result.length > 200 ? '...' : '')
+                : JSON.stringify(tool.result, null, 2).substring(0, 200) + (JSON.stringify(tool.result, null, 2).length > 200 ? '...' : ''))
+            : ''
+          
+          const toolMessage = `🔧 ${toolName}${params ? `\nQuery: ${params}` : ''}${resultPreview ? `\nRisultato: ${resultPreview}` : ''}${tool.error ? `\n❌ Errore: ${tool.error}` : ''}`
+          
+          addStatusMessage(
+            tool.success ? 'info' : 'error',
+            toolMessage
+          )
+        })
+      }
+      
       const assistantMessage: Message = {
         id: '',
         session_id: sessionId,
@@ -353,7 +375,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         metadata: {
           memory_used: response.data.memory_used || {},
           tools_used: response.data.tools_used || [],
-          tool_details: response.data.tool_details || [],
+          // Don't store tool_details in metadata - they're shown in status panel
         },
       }
       
@@ -487,71 +509,6 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
                 >
                   {message.role === 'assistant' ? (
                     <div className="max-w-none break-words">
-                      {/* Show tool execution details if available - BEFORE the response */}
-                      {message.metadata?.tool_details && message.metadata.tool_details.length > 0 && (
-                        <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 rounded-lg border-2 border-blue-300 dark:border-blue-700 shadow-sm">
-                          <div className="flex items-center gap-2 mb-3">
-                            <span className="text-lg">🔧</span>
-                            <div className="text-sm font-bold text-blue-800 dark:text-blue-200">
-                              Tools Utilizzati ({message.metadata.tool_details.length})
-                            </div>
-                          </div>
-                          <div className="space-y-3">
-                            {message.metadata.tool_details.map((tool: any, idx: number) => (
-                              <div key={idx} className="bg-white dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-700">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <span className={`px-3 py-1 rounded-lg text-xs font-bold ${
-                                    tool.success 
-                                      ? 'bg-green-500 text-white' 
-                                      : 'bg-red-500 text-white'
-                                  }`}>
-                                    {tool.success ? '✓' : '✗'} {tool.tool_name}
-                                  </span>
-                                  {tool.success && (
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">eseguito con successo</span>
-                                  )}
-                                </div>
-                                {Object.keys(tool.parameters || {}).length > 0 && (
-                                  <div className="mb-2">
-                                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                                      Parametri:
-                                    </div>
-                                    <pre className="bg-gray-50 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto border border-gray-200 dark:border-gray-700">
-                                      {JSON.stringify(tool.parameters, null, 2)}
-                                    </pre>
-                                  </div>
-                                )}
-                                {tool.result && (
-                                  <details className="text-xs">
-                                    <summary className="cursor-pointer text-blue-600 dark:text-blue-400 hover:underline mb-2 font-semibold">
-                                      {tool.success ? '📄 Risultato' : '❌ Errore'} (click per espandere)
-                                    </summary>
-                                    <pre className="bg-gray-50 dark:bg-gray-900 p-3 rounded mt-2 overflow-x-auto text-xs border border-gray-200 dark:border-gray-700 max-h-96 overflow-y-auto">
-                                      {typeof tool.result === 'string' 
-                                        ? tool.result.substring(0, 5000) + (tool.result.length > 5000 ? '\n\n... [risultato troncato]' : '')
-                                        : JSON.stringify(tool.result, null, 2).substring(0, 5000) + (JSON.stringify(tool.result, null, 2).length > 5000 ? '\n\n... [risultato troncato]' : '')
-                                      }
-                                    </pre>
-                                  </details>
-                                )}
-                                {tool.error && (
-                                  <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded border border-red-200 dark:border-red-800">
-                                    <div className="text-xs font-semibold text-red-700 dark:text-red-300 mb-1">
-                                      Errore:
-                                    </div>
-                                    <div className="text-xs text-red-600 dark:text-red-400">
-                                      {typeof tool.error === 'string' ? tool.error : JSON.stringify(tool.error)}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                          <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700 text-xs text-gray-600 dark:text-gray-400 italic">
-                            La risposta qui sotto è basata sui risultati di questi tool
-                          </div>
-                        </div>
-                      )}
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={{
