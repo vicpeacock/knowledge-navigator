@@ -1038,6 +1038,38 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
             "message_count": len(previous_messages) + 2,
         }
         await memory.update_short_term_memory(db, session_id, new_context)
+        
+        # Extract and index knowledge from conversation (auto-learning)
+        try:
+            from app.services.conversation_learner import ConversationLearner
+            learner = ConversationLearner(memory_manager=memory, ollama_client=ollama)
+            
+            # Get recent conversation (last 10 messages including the new ones)
+            recent_messages = [
+                {"role": str(msg.role), "content": str(msg.content)}
+                for msg in previous_messages[-8:]  # Last 8 previous + 2 new = 10 total
+            ]
+            recent_messages.append({"role": "user", "content": request.message})
+            recent_messages.append({"role": "assistant", "content": response_text})
+            
+            # Extract knowledge (only if conversation has enough content)
+            if len(recent_messages) >= 4:  # At least 2 exchanges
+                knowledge_items = await learner.extract_knowledge_from_conversation(
+                    db=db,
+                    session_id=session_id,
+                    messages=recent_messages,
+                    min_importance=0.6,
+                )
+                
+                if knowledge_items:
+                    indexing_stats = await learner.index_extracted_knowledge(
+                        db=db,
+                        knowledge_items=knowledge_items,
+                        session_id=session_id,
+                    )
+                    logger.info(f"Auto-learned {indexing_stats.get('indexed', 0)} knowledge items from conversation")
+        except Exception as e:
+            logger.warning(f"Error in auto-learning from conversation: {e}", exc_info=True)
 
     # Build detailed tool execution information
     tool_details = []

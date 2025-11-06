@@ -1,0 +1,234 @@
+"""
+Conversation Learner Service - Extracts knowledge from conversations
+"""
+from typing import List, Dict, Any, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
+from datetime import datetime, timezone
+import logging
+import re
+import numpy as np
+
+from app.core.memory_manager import MemoryManager
+from app.core.ollama_client import OllamaClient
+
+logger = logging.getLogger(__name__)
+
+
+class ConversationLearner:
+    """Service for learning from conversations and extracting knowledge"""
+    
+    def __init__(self, memory_manager: MemoryManager, ollama_client: Optional[OllamaClient] = None):
+        self.memory_manager = memory_manager
+        self.ollama_client = ollama_client or OllamaClient()
+    
+    async def extract_knowledge_from_conversation(
+        self,
+        db: AsyncSession,
+        session_id: UUID,
+        messages: List[Dict[str, str]],
+        min_importance: float = 0.6,
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract knowledge from a conversation.
+        Returns list of extracted knowledge items.
+        """
+        extracted_knowledge = []
+        
+        try:
+            # Combine conversation into a single text
+            conversation_text = self._format_conversation(messages)
+            
+            # Use LLM to extract facts, preferences, and important information
+            extraction_prompt = f"""Analizza questa conversazione e estrai conoscenze importanti che dovrebbero essere ricordate a lungo termine.
+
+Conversazione:
+{conversation_text}
+
+Estrai:
+1. Fatti importanti (date, eventi, decisioni)
+2. Preferenze dell'utente
+3. Informazioni personali rilevanti
+4. Contatti o riferimenti importanti
+5. Progetti o attività menzionate
+
+Per ogni conoscenza estratta, fornisci:
+- Tipo: "fact", "preference", "personal_info", "contact", "project"
+- Contenuto: descrizione chiara e concisa
+- Importanza: stima da 0.0 a 1.0
+
+Formato JSON:
+{{
+  "knowledge": [
+    {{
+      "type": "fact",
+      "content": "L'utente ha un appuntamento il 15 marzo alle 14:00",
+      "importance": 0.8
+    }}
+  ]
+}}
+
+Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}}."""
+
+            response = await self.ollama_client.generate_with_context(
+                prompt=extraction_prompt,
+                session_context=[],
+                retrieved_memory=None,
+                tools=None,
+                tools_description=None,
+                return_raw=False,
+            )
+            
+            # Parse response (try to extract JSON)
+            knowledge_items = self._parse_extraction_response(response)
+            
+            # Filter by importance
+            for item in knowledge_items:
+                if item.get("importance", 0) >= min_importance:
+                    extracted_knowledge.append(item)
+            
+            logger.info(f"Extracted {len(extracted_knowledge)} knowledge items from conversation")
+            
+        except Exception as e:
+            logger.error(f"Error extracting knowledge from conversation: {e}", exc_info=True)
+        
+        return extracted_knowledge
+    
+    def _format_conversation(self, messages: List[Dict[str, str]]) -> str:
+        """Format messages into a readable conversation text"""
+        formatted = []
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            formatted.append(f"{role.upper()}: {content}")
+        return "\n".join(formatted)
+    
+    def _parse_extraction_response(self, response: str) -> List[Dict[str, Any]]:
+        """Parse LLM response to extract knowledge items"""
+        knowledge_items = []
+        
+        try:
+            # Try to extract JSON from response
+            # Look for JSON block
+            json_match = re.search(r'\{[^{}]*"knowledge"[^{}]*\[[^\]]*\][^{}]*\}', response, re.DOTALL)
+            if json_match:
+                import json
+                json_str = json_match.group(0)
+                data = json.loads(json_str)
+                knowledge_items = data.get("knowledge", [])
+            else:
+                # Fallback: try to extract structured information
+                # Look for patterns like "type: ...", "content: ...", "importance: ..."
+                items = re.findall(
+                    r'(?:type|tipo)[:\s]+(\w+).*?(?:content|contenuto)[:\s]+([^\n]+).*?(?:importance|importanza)[:\s]+([\d.]+)',
+                    response,
+                    re.IGNORECASE | re.DOTALL
+                )
+                for item_type, content, importance in items:
+                    try:
+                        knowledge_items.append({
+                            "type": item_type.strip(),
+                            "content": content.strip(),
+                            "importance": float(importance.strip()),
+                        })
+                    except ValueError:
+                        continue
+        except Exception as e:
+            logger.warning(f"Error parsing extraction response: {e}")
+        
+        return knowledge_items
+    
+    async def index_extracted_knowledge(
+        self,
+        db: AsyncSession,
+        knowledge_items: List[Dict[str, Any]],
+        session_id: UUID,
+    ) -> Dict[str, Any]:
+        """
+        Index extracted knowledge into long-term memory.
+        Returns statistics about indexing.
+        """
+        indexed_count = 0
+        errors = []
+        
+        for item in knowledge_items:
+            try:
+                content = item.get("content", "")
+                if not content:
+                    continue
+                
+                # Add type information to content
+                knowledge_type = item.get("type", "fact")
+                formatted_content = f"[{knowledge_type.upper()}] {content}"
+                
+                importance = item.get("importance", 0.6)
+                
+                # Check if similar knowledge already exists
+                existing = await self._check_duplicate_knowledge(content, importance)
+                if existing:
+                    logger.debug(f"Similar knowledge already exists, skipping: {content[:50]}...")
+                    continue
+                
+                # Index in long-term memory
+                await self.memory_manager.add_long_term_memory(
+                    db=db,
+                    content=formatted_content,
+                    learned_from_sessions=[session_id],
+                    importance_score=importance,
+                )
+                
+                indexed_count += 1
+                logger.info(f"Indexed knowledge: {content[:50]}...")
+                
+            except Exception as e:
+                errors.append(f"Knowledge item: {str(e)}")
+                logger.error(f"Error indexing knowledge item: {e}")
+        
+        return {
+            "indexed": indexed_count,
+            "errors": errors,
+            "total": len(knowledge_items),
+        }
+    
+    async def _check_duplicate_knowledge(
+        self,
+        content: str,
+        min_similarity: float = 0.85,
+    ) -> bool:
+        """
+        Check if similar knowledge already exists in long-term memory.
+        Returns True if duplicate found, False otherwise.
+        """
+        try:
+            # Retrieve similar memories
+            similar = await self.memory_manager.retrieve_long_term_memory(
+                query=content,
+                n_results=3,
+            )
+            
+            if not similar:
+                return False
+            
+            # Check similarity using embeddings
+            from app.services.embedding_service import EmbeddingService
+            embedding_service = EmbeddingService()
+            
+            content_embedding = embedding_service.generate_embedding(content)
+            
+            for similar_content in similar:
+                similar_embedding = embedding_service.generate_embedding(similar_content)
+                
+                # Calculate cosine similarity
+                similarity = np.dot(content_embedding, similar_embedding) / (
+                    np.linalg.norm(content_embedding) * np.linalg.norm(similar_embedding)
+                )
+                
+                if similarity >= min_similarity:
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Error checking duplicate knowledge: {e}")
+            return False
+
