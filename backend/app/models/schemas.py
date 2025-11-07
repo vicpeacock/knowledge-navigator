@@ -186,3 +186,23 @@ class MemoryInfo(BaseModel):
     files_count: int = 0
     total_messages: int = 0
 
+
+# Notification Schemas
+class Notification(BaseModel):
+    id: UUID
+    type: str  # "contradiction", "event", "todo", ecc.
+    urgency: str  # "high", "medium", "low"
+    content: Dict[str, Any]
+    session_id: Optional[UUID] = None
+    read: bool
+    created_at: datetime
+    read_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationRead(BaseModel):
+    """Schema for marking notification as read"""
+    notification_id: UUID
+

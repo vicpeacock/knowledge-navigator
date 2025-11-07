@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
-from app.api import sessions, files, memory, tools, web
+from app.api import sessions, files, memory, tools, web, notifications
 from app.api.integrations import calendars, emails, whatsapp
 from app.core.dependencies import init_clients, get_ollama_client, get_mcp_client, get_memory_manager
 
@@ -100,6 +100,7 @@ app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
 app.include_router(tools.router, prefix="/api/tools", tags=["tools"])
 app.include_router(web.router, prefix="/api/web", tags=["web"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(calendars.router, prefix="/api/integrations/calendars", tags=["integrations", "calendars"])
 app.include_router(emails.router, prefix="/api/integrations/emails", tags=["integrations", "emails"])
 app.include_router(whatsapp.router, prefix="/api/integrations/whatsapp", tags=["integrations", "whatsapp"])
