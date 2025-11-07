@@ -346,6 +346,42 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         throw new Error('Invalid response format: no response text')
       }
       
+      // Handle high urgency notifications (contradictions, etc.)
+      if (response.data.high_urgency_notifications && response.data.high_urgency_notifications.length > 0) {
+        response.data.high_urgency_notifications.forEach((notif: any) => {
+          if (notif.type === 'contradiction') {
+            const content = notif.content || {}
+            const contradictions = content.contradictions || []
+            
+            if (contradictions.length > 0) {
+              let notificationMsg = '⚠️ CONTRADDIZIONE RILEVATA\n\n'
+              notificationMsg += 'Ho notato una contraddizione nella memoria:\n\n'
+              
+              contradictions.forEach((contr: any, idx: number) => {
+                const newMem = contr.new_memory || ''
+                const existingMem = contr.existing_memory || ''
+                const explanation = contr.explanation || ''
+                
+                notificationMsg += `${idx + 1}. Memoria precedente: "${existingMem}"\n`
+                notificationMsg += `   Memoria nuova: "${newMem}"\n`
+                if (explanation) {
+                  notificationMsg += `   (${explanation})\n`
+                }
+                notificationMsg += '\n'
+              })
+              
+              notificationMsg += 'Quale informazione è corretta?\n'
+              notificationMsg += '- A) La prima (memoria precedente)\n'
+              notificationMsg += '- B) La seconda (memoria nuova)\n'
+              notificationMsg += '- C) Entrambe sono corrette (spiega il contesto)\n'
+              notificationMsg += '- D) Cancella entrambe'
+              
+              addStatusMessage('warning', notificationMsg)
+            }
+          }
+        })
+      }
+      
       // Add tool details to status panel if available
       if (response.data.tool_details && response.data.tool_details.length > 0) {
         response.data.tool_details.forEach((tool: any) => {

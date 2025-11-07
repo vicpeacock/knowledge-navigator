@@ -1069,32 +1069,14 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
                         "id": notif.get("id"),
                     })
                     
-                    # Build notification message for user
-                    contradiction_msg = "\n\n[⚠️ CONTRADDIZIONE RILEVATA]\n\n"
-                    contradiction_msg += "Ho notato una contraddizione nella memoria:\n\n"
-                    
-                    for i, contr in enumerate(contradictions, 1):
-                        new_mem = contr.get("new_memory", "")
-                        existing_mem = contr.get("existing_memory", "")
-                        explanation = contr.get("explanation", "")
-                        
-                        contradiction_msg += f"{i}. Memoria precedente: \"{existing_mem}\"\n"
-                        contradiction_msg += f"   Memoria nuova: \"{new_mem}\"\n"
-                        if explanation:
-                            contradiction_msg += f"   ({explanation})\n"
-                        contradiction_msg += "\n"
-                    
-                    contradiction_msg += "Quale informazione è corretta?\n"
-                    contradiction_msg += "- A) La prima (memoria precedente)\n"
-                    contradiction_msg += "- B) La seconda (memoria nuova)\n"
-                    contradiction_msg += "- C) Entrambe sono corrette (spiega il contesto)\n"
-                    contradiction_msg += "- D) Cancella entrambe\n\n"
-                    
-                    notification_prefix = contradiction_msg
+                    # Build notification message for user (will be shown in StatusPanel, not in LLM response)
+                    # The notification is already in formatted_high_notifications and will be displayed separately
+                    # We don't prepend it to response_text to avoid the LLM including it in its response
+                    pass
     
-    # Prepend high urgency notifications to response
-    if notification_prefix:
-        response_text = notification_prefix + response_text
+    # NOTE: High urgency notifications are NOT prepended to response_text
+    # They are sent separately in high_urgency_notifications field and displayed in StatusPanel
+    # This prevents the LLM from including notification text in its response
     
     # Save assistant message
     # Log tools usage for debugging
