@@ -151,17 +151,18 @@ class SemanticIntegrityChecker:
             "concepts": [],  # Semantic concepts for contradiction detection
         }
         
-        # Extract dates (various formats)
+        # Extract dates (various formats) - use full match to get complete dates
         date_patterns = [
-            r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}',  # DD/MM/YYYY or DD-MM-YYYY
-            r'\d{1,2}\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{2,4}',
-            r'(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{1,2},?\s+\d{2,4}',
-            r'\d{1,2}\s+(gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic)\s+\d{2,4}',
+            (r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', lambda m: m.group(0)),  # DD/MM/YYYY or DD-MM-YYYY
+            (r'\d{1,2}\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{2,4}', lambda m: m.group(0)),  # "12 luglio 1966"
+            (r'(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{1,2},?\s+\d{2,4}', lambda m: m.group(0)),  # "luglio 12, 1966"
+            (r'\d{1,2}\s+(gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic)\s+\d{2,4}', lambda m: m.group(0)),  # "12 lug 1966"
         ]
         
-        for pattern in date_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            entities["dates"].extend(matches)
+        for pattern, extractor in date_patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                entities["dates"].append(extractor(match))
         
         # Extract numbers (integers and decimals)
         number_pattern = r'\b\d+(?:\.\d+)?\b'
@@ -188,7 +189,8 @@ class SemanticIntegrityChecker:
         
         # Preferences keywords
         preference_keywords = [
-            'preferisce', 'preferenza', 'prefers', 'preference',
+            'preferisco', 'preferisce', 'preferenza', 'preferisci', 'preferiamo', 'preferiscono',
+            'prefers', 'preference', 'prefer',
             'ama', 'non ama', 'piace', 'non piace', 'loves', 'hates', 'likes', 'dislikes',
             'favorisce', 'favors', 'evita', 'avoids',
         ]
@@ -206,10 +208,12 @@ class SemanticIntegrityChecker:
             'fidanzato', 'engaged', 'convivente', 'cohabiting',
         ]
         
-        # Collect all keywords
+        # Collect all keywords - use word boundaries to avoid partial matches
         all_keywords = personal_keywords + work_keywords + preference_keywords + relationship_keywords + status_keywords
         for keyword in all_keywords:
-            if keyword in text_lower:
+            # Use word boundaries to avoid matching "son" in "sono" or "son" in "person"
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, text_lower):
                 entities["keywords"].append(keyword)
         
         # Extract semantic concepts (categorize the type of information)
