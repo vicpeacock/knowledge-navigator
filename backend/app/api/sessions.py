@@ -1038,6 +1038,64 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
     if tool_iteration >= max_tool_iterations and tool_calls and tool_results:
         response_text += "\n\n[Nota: Alcuni tool sono stati eseguiti per ottenere informazioni reali.]"
     
+    # Check for pending notifications and format high urgency ones
+    from app.services.notification_service import NotificationService
+    notification_service = NotificationService(db)
+    
+    pending_notifications = await notification_service.get_pending_notifications(
+        session_id=session_id,
+        read=False,
+    )
+    
+    # Group by urgency
+    high_urgency = [n for n in pending_notifications if n.get("urgency") == "high"]
+    medium_urgency = [n for n in pending_notifications if n.get("urgency") == "medium"]
+    low_urgency = [n for n in pending_notifications if n.get("urgency") == "low"]
+    
+    # Format high urgency notifications for response (show immediately before response)
+    formatted_high_notifications = []
+    notification_prefix = ""
+    
+    if high_urgency:
+        for notif in high_urgency:
+            if notif.get("type") == "contradiction":
+                content = notif.get("content", {})
+                contradictions = content.get("contradictions", [])
+                if contradictions:
+                    # Format contradiction notification
+                    formatted_high_notifications.append({
+                        "type": "contradiction",
+                        "content": content,
+                        "id": notif.get("id"),
+                    })
+                    
+                    # Build notification message for user
+                    contradiction_msg = "\n\n[⚠️ CONTRADDIZIONE RILEVATA]\n\n"
+                    contradiction_msg += "Ho notato una contraddizione nella memoria:\n\n"
+                    
+                    for i, contr in enumerate(contradictions, 1):
+                        new_mem = contr.get("new_memory", "")
+                        existing_mem = contr.get("existing_memory", "")
+                        explanation = contr.get("explanation", "")
+                        
+                        contradiction_msg += f"{i}. Memoria precedente: \"{existing_mem}\"\n"
+                        contradiction_msg += f"   Memoria nuova: \"{new_mem}\"\n"
+                        if explanation:
+                            contradiction_msg += f"   ({explanation})\n"
+                        contradiction_msg += "\n"
+                    
+                    contradiction_msg += "Quale informazione è corretta?\n"
+                    contradiction_msg += "- A) La prima (memoria precedente)\n"
+                    contradiction_msg += "- B) La seconda (memoria nuova)\n"
+                    contradiction_msg += "- C) Entrambe sono corrette (spiega il contesto)\n"
+                    contradiction_msg += "- D) Cancella entrambe\n\n"
+                    
+                    notification_prefix = contradiction_msg
+    
+    # Prepend high urgency notifications to response
+    if notification_prefix:
+        response_text = notification_prefix + response_text
+    
     # Save assistant message
     # Log tools usage for debugging
     if tools_used:
@@ -1109,34 +1167,6 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
         except Exception as e:
             logger.warning(f"Error scheduling auto-learning from conversation: {e}", exc_info=True)
 
-    # Check for pending notifications
-    from app.services.notification_service import NotificationService
-    notification_service = NotificationService(db)
-    
-    pending_notifications = await notification_service.get_pending_notifications(
-        session_id=session_id,
-        read=False,
-    )
-    
-    # Group by urgency
-    high_urgency = [n for n in pending_notifications if n.get("urgency") == "high"]
-    medium_urgency = [n for n in pending_notifications if n.get("urgency") == "medium"]
-    low_urgency = [n for n in pending_notifications if n.get("urgency") == "low"]
-    
-    # Format high urgency notifications for response
-    formatted_high_notifications = []
-    for notif in high_urgency:
-        if notif.get("type") == "contradiction":
-            content = notif.get("content", {})
-            contradictions = content.get("contradictions", [])
-            if contradictions:
-                # Format contradiction notification
-                formatted_high_notifications.append({
-                    "type": "contradiction",
-                    "content": content,
-                    "id": notif.get("id"),
-                })
-    
     # Build detailed tool execution information
     tool_details = []
     for tr in tool_results:
@@ -1172,6 +1202,11 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
             "error": error,
         })
     
+    # Get notification count and high urgency notifications for response
+    # (pending_notifications and formatted_high_notifications are already defined above)
+    notification_count = len(pending_notifications) if 'pending_notifications' in locals() else 0
+    high_urgency_notifs = formatted_high_notifications if 'formatted_high_notifications' in locals() else []
+    
     # Return response
     return ChatResponse(
         response=response_text,
@@ -1179,8 +1214,8 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
         memory_used=memory_used,
         tools_used=tools_used,
         tool_details=tool_details,
-        notifications_count=len(pending_notifications),
-        high_urgency_notifications=formatted_high_notifications,
+        notifications_count=notification_count,
+        high_urgency_notifications=high_urgency_notifs,
     )
 
 
