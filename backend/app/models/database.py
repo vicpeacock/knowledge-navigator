@@ -97,3 +97,16 @@ class Integration(Base):
     enabled = Column(Boolean, default=True)
     session_metadata = Column("metadata", JSONB, default={})  # For MCP: selected_tools list, server_url, etc.
 
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    type = Column(String(50), nullable=False)  # "contradiction", "event", "todo", ecc.
+    urgency = Column(String(20), nullable=False)  # "high", "medium", "low"
+    content = Column(JSONB, nullable=False)  # Contenuto della notifica (dict)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=True)  # Opzionale: sessione correlata
+    read = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
