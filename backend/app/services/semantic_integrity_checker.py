@@ -218,6 +218,14 @@ Contradictions can occur at different levels of a taxonomy (hierarchy):
 - Consider: if someone likes a category but hates an instance of that category, that is a contradiction
 - Consider: if someone likes a general concept but hates a specific manifestation of that concept, that is a contradiction
 
+**EXAMPLES OF TAXONOMIC CONTRADICTIONS:**
+- "Likes pasta" vs "Hates spaghetti" → CONTRADICTION (spaghetti is a type of pasta)
+- "Loves Italian food" vs "Hates ravioli" → CONTRADICTION (ravioli is Italian food)
+- "Enjoys music" vs "Hates jazz" → CONTRADICTION (jazz is a type of music)
+- "Likes animals" vs "Hates dogs" → CONTRADICTION (dogs are animals)
+
+**IMPORTANT:** When analyzing preferences, you MUST check if the entities are taxonomically related. If one is a category and the other is an instance/subcategory of that category, and the preferences are opposite, it IS a contradiction.
+
 **Reasoning Process:**
 1. Identify what each statement is about (entity, category, instance, property)
 2. Determine if they refer to the same or taxonomically related things
