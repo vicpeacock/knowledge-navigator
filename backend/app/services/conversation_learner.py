@@ -169,7 +169,7 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                     logger.debug(f"Similar knowledge already exists, skipping: {content[:50]}...")
                     continue
                 
-                # Index in long-term memory
+                # Index in long-term memory (non-blocking)
                 await self.memory_manager.add_long_term_memory(
                     db=db,
                     content=formatted_content,
@@ -183,6 +183,41 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
             except Exception as e:
                 errors.append(f"Knowledge item: {str(e)}")
                 logger.error(f"Error indexing knowledge item: {e}")
+        
+        # Schedule background integrity check (fire and forget)
+        if indexed_count > 0:
+            try:
+                import asyncio
+                from app.db.database import AsyncSessionLocal
+                from app.services.background_agent import BackgroundAgent
+                
+                async def _check_integrity_background():
+                    """Background task to check integrity of newly indexed knowledge"""
+                    async with AsyncSessionLocal() as db_session:
+                        try:
+                            agent = BackgroundAgent(
+                                memory_manager=self.memory_manager,
+                                db=db_session,
+                                ollama_client=None,  # Will use background client
+                            )
+                            
+                            # Process each indexed knowledge item
+                            for item in knowledge_items:
+                                content = item.get("content", "")
+                                if content:
+                                    await agent.process_new_knowledge(
+                                        knowledge_item=item,
+                                        session_id=session_id,
+                                    )
+                        except Exception as e:
+                            logger.warning(f"Error in background integrity check: {e}", exc_info=True)
+                
+                # Schedule background task (don't await to avoid blocking)
+                asyncio.create_task(_check_integrity_background())
+                logger.debug(f"Scheduled background integrity check for {indexed_count} knowledge items")
+                
+            except Exception as e:
+                logger.warning(f"Error scheduling background integrity check: {e}", exc_info=True)
         
         return {
             "indexed": indexed_count,
