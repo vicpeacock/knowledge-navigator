@@ -201,35 +201,45 @@ class SemanticIntegrityChecker:
 EXISTING STATEMENT: "{existing_memory}"
 NEW STATEMENT: "{new_memory}"
 
-Determine if there is a LOGICAL CONTRADICTION between these statements. Consider:
+Determine if there is a LOGICAL CONTRADICTION between these statements. You must reason carefully about:
 
-1. **Direct Contradictions**: Opposite claims (e.g., "single" vs "married", "likes X" vs "dislikes X")
-2. **Temporal Contradictions**: Incompatible dates/events (e.g., "born July 12" vs "born August 15" for same person)
-3. **Numerical Contradictions**: Incompatible values for same property (e.g., "age 30" vs "age 35" at same time)
-4. **Status Contradictions**: Mutually exclusive states (e.g., "works at A" vs "works at B" simultaneously)
-5. **Preference Contradictions**: Opposite preferences for the SAME or SEMANTICALLY RELATED things:
-   - "likes pasta" vs "hates spaghetti" → CONTRADICTION (spaghetti is a type of pasta)
-   - "likes pastasciutta" vs "hates spaghetti" → CONTRADICTION (both refer to pasta dishes)
-   - "likes Italian food" vs "hates pasta" → CONTRADICTION (pasta is core to Italian food)
-   - "likes pizza" vs "hates margherita" → CONTRADICTION (margherita is a type of pizza)
-   - "likes red wine" vs "hates Chianti" → CONTRADICTION (Chianti is a type of red wine)
-6. **Relationship Contradictions**: Incompatible relationships (e.g., "single" vs "has wife")
+1. **Direct Contradictions**: Opposite claims about the same thing
+2. **Temporal Contradictions**: Incompatible dates/events for the same entity
+3. **Numerical Contradictions**: Incompatible values for the same property at the same time
+4. **Status Contradictions**: Mutually exclusive states
+5. **Preference Contradictions**: Opposite preferences (likes vs dislikes, loves vs hates)
+6. **Relationship Contradictions**: Incompatible relationships
 7. **Factual Contradictions**: Incompatible facts about the same entity
 
-IMPORTANT:
-- NOT contradictions: Complementary information, additional details, information about different time periods
-- ARE contradictions: Statements that logically exclude each other
-- Consider CONTEXT: "works at A in 2020" and "works at B in 2024" are NOT contradictions
-- Consider SEMANTIC RELATIONSHIPS: 
-  * If one statement is about a category and the other about a specific item in that category, and they have opposite preferences → CONTRADICTION
-  * If both refer to the same semantic concept (e.g., "pastasciutta" = "spaghetti" = pasta dishes) with opposite preferences → CONTRADICTION
-  * Examples of semantic relationships: pasta/spaghetti/pastasciutta, wine/Chianti, food/pizza, car/Ferrari, etc.
+**CRITICAL: TAXONOMIC RELATIONSHIPS**
+Contradictions can occur at different levels of a taxonomy (hierarchy):
+- If one statement is about a CATEGORY and the other about an INSTANCE or SUBCATEGORY of that category, and they express opposite preferences/claims → CONTRADICTION
+- Example: "likes pasta" (category) vs "hates spaghetti" (instance) → CONTRADICTION
+- Example: "likes Italian food" (category) vs "hates pasta" (subcategory) → CONTRADICTION
+- Example: "likes red wine" (category) vs "hates Chianti" (instance) → CONTRADICTION
 
-Respond ONLY with valid JSON (no other text):
+**Reasoning Process:**
+1. Identify what each statement is about (entity, category, instance, property)
+2. Determine if they refer to the same or taxonomically related things
+3. Check if the claims/preferences are opposite
+4. Consider if they logically exclude each other
+
+**NOT contradictions:**
+- Complementary information
+- Additional details that don't conflict
+- Information about different time periods
+- Different but compatible aspects
+
+**ARE contradictions:**
+- Statements that logically exclude each other
+- Opposite preferences for the same or taxonomically related things
+- Incompatible facts about the same entity
+
+Think step by step, then respond ONLY with valid JSON (no other text):
 {{
     "is_contradiction": true/false,
     "confidence": 0.0-1.0,
-    "explanation": "brief explanation of the contradiction type or why there is no contradiction",
+    "explanation": "brief explanation of your reasoning and the contradiction type or why there is no contradiction",
     "contradiction_type": "direct|temporal|numerical|status|preference|relationship|factual|none"
 }}"""
 
