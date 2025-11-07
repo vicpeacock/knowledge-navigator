@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     
     # Ollama Background (per task in background)
     ollama_background_base_url: str = "http://localhost:11435"
-    ollama_background_model: str = "qwen2.5:3b"  # Modello piccolo ed efficiente per background tasks
+    ollama_background_model: str = "tinyllama"  # Modello più piccolo (1B, 637MB) per background tasks - più veloce ma meno accurato
 
     # MCP Gateway (default, can be overridden per integration)
     # Default: localhost:8080 (if backend runs on host)
