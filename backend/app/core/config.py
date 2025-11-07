@@ -29,8 +29,10 @@ class Settings(BaseSettings):
     ollama_api_key: Optional[str] = None  # API key for Ollama web search (from https://ollama.com)
     
     # Ollama Background (per task in background)
-    ollama_background_base_url: str = "http://localhost:11435"
-    ollama_background_model: str = "llama3.2:3b"  # Llama3.2 3B (2.0GB) - buon compromesso velocità/qualità
+    # Può essere Ollama o llama.cpp (OpenAI-compatible API)
+    ollama_background_base_url: str = "http://localhost:11435"  # Per llama.cpp: aggiungere /v1 automaticamente
+    ollama_background_model: str = "llama3.2:3b"  # Modello da usare
+    use_llama_cpp_background: bool = True  # Se True, usa llama.cpp invece di Ollama per background
 
     # MCP Gateway (default, can be overridden per integration)
     # Default: localhost:8080 (if backend runs on host)
