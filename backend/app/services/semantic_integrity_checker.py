@@ -205,7 +205,12 @@ Determine if there is a LOGICAL CONTRADICTION between these statements. Consider
 2. **Temporal Contradictions**: Incompatible dates/events (e.g., "born July 12" vs "born August 15" for same person)
 3. **Numerical Contradictions**: Incompatible values for same property (e.g., "age 30" vs "age 35" at same time)
 4. **Status Contradictions**: Mutually exclusive states (e.g., "works at A" vs "works at B" simultaneously)
-5. **Preference Contradictions**: Opposite preferences (e.g., "prefers X" vs "prefers Y" for same thing)
+5. **Preference Contradictions**: Opposite preferences for the SAME or SEMANTICALLY RELATED things:
+   - "likes pasta" vs "hates spaghetti" → CONTRADICTION (spaghetti is a type of pasta)
+   - "likes pastasciutta" vs "hates spaghetti" → CONTRADICTION (both refer to pasta dishes)
+   - "likes Italian food" vs "hates pasta" → CONTRADICTION (pasta is core to Italian food)
+   - "likes pizza" vs "hates margherita" → CONTRADICTION (margherita is a type of pizza)
+   - "likes red wine" vs "hates Chianti" → CONTRADICTION (Chianti is a type of red wine)
 6. **Relationship Contradictions**: Incompatible relationships (e.g., "single" vs "has wife")
 7. **Factual Contradictions**: Incompatible facts about the same entity
 
@@ -213,6 +218,10 @@ IMPORTANT:
 - NOT contradictions: Complementary information, additional details, information about different time periods
 - ARE contradictions: Statements that logically exclude each other
 - Consider CONTEXT: "works at A in 2020" and "works at B in 2024" are NOT contradictions
+- Consider SEMANTIC RELATIONSHIPS: 
+  * If one statement is about a category and the other about a specific item in that category, and they have opposite preferences → CONTRADICTION
+  * If both refer to the same semantic concept (e.g., "pastasciutta" = "spaghetti" = pasta dishes) with opposite preferences → CONTRADICTION
+  * Examples of semantic relationships: pasta/spaghetti/pastasciutta, wine/Chianti, food/pizza, car/Ferrari, etc.
 
 Respond ONLY with valid JSON (no other text):
 {{
