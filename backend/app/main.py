@@ -6,7 +6,7 @@ import logging
 
 from app.core.config import settings
 from app.api import sessions, files, memory, tools, web, notifications
-from app.api.integrations import calendars, emails, whatsapp
+from app.api.integrations import calendars, emails
 from app.core.dependencies import init_clients, get_ollama_client, get_mcp_client, get_memory_manager
 
 # Configure logging
@@ -103,7 +103,6 @@ app.include_router(web.router, prefix="/api/web", tags=["web"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(calendars.router, prefix="/api/integrations/calendars", tags=["integrations", "calendars"])
 app.include_router(emails.router, prefix="/api/integrations/emails", tags=["integrations", "emails"])
-app.include_router(whatsapp.router, prefix="/api/integrations/whatsapp", tags=["integrations", "whatsapp"])
 from app.api.integrations import mcp as mcp_integration
 app.include_router(mcp_integration.router, prefix="/api/integrations/mcp", tags=["integrations", "mcp"])
 

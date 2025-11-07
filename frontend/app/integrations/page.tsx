@@ -25,9 +25,6 @@ export default function IntegrationsPage() {
   const [loading, setLoading] = useState(true)
   const [connectingCalendar, setConnectingCalendar] = useState(false)
   const [connectingEmail, setConnectingEmail] = useState(false)
-  const [connectingWhatsApp, setConnectingWhatsApp] = useState(false)
-  const [whatsappConnected, setWhatsappConnected] = useState(false)
-  const [whatsappCheckInterval, setWhatsappCheckInterval] = useState<NodeJS.Timeout | null>(null)
   const [connectingMCP, setConnectingMCP] = useState(false)
   const [mcpServerUrl, setMcpServerUrl] = useState('http://host.docker.internal:8080')
   const [mcpServerName, setMcpServerName] = useState('MCP Server')
@@ -52,25 +49,7 @@ export default function IntegrationsPage() {
       loadIntegrations()
     }
     
-    // Check WhatsApp status on page load (non-blocking)
-    setTimeout(async () => {
-      try {
-        const statusResponse = await integrationsApi.whatsapp.getStatus()
-        if (statusResponse.data?.authenticated) {
-          setWhatsappConnected(true)
-        }
-      } catch (error) {
-        // Silently fail - WhatsApp might not be initialized
-        console.log('WhatsApp status check on load:', error)
-      }
-    }, 1000) // Wait 1 second after page load
-    
-    // Cleanup WhatsApp check interval on unmount
-    return () => {
-      if (whatsappCheckInterval) {
-        clearInterval(whatsappCheckInterval)
-      }
-    }
+    return () => {}
   }, [])
 
   // Helper function to load tools for an integration
@@ -265,128 +244,6 @@ export default function IntegrationsPage() {
     } catch (error: any) {
       console.error('Error disconnecting email:', error)
       console.error('Errore nella rimozione:', error.response?.data?.detail || error.message)
-    }
-  }
-
-  const connectWhatsApp = async () => {
-    setConnectingWhatsApp(true)
-    try {
-      // Show immediate feedback
-      // WhatsApp Web si sta aprendo in background - UI si aggiorna automaticamente
-      
-      // Start setup in background - don't wait for it, ignore timeout errors
-      const setupPromise = integrationsApi.whatsapp.setup(false, undefined, false).catch((error) => {
-        console.error('WhatsApp setup error (non-blocking):', error)
-        // Don't show timeout errors - Chrome is probably opening anyway
-        if (error.response?.data?.detail && !error.response.data.detail.includes('timeout')) {
-          console.error('Errore durante il setup:', error.response.data.detail)
-        } else if (error.message && !error.message.includes('timeout') && !error.code?.includes('ECONNABORTED')) {
-          console.error('Non-timeout error:', error.message)
-        }
-        // Return success anyway - status check will verify
-        return { data: { success: true, message: 'Setup in corso...' } }
-      })
-      
-      // Don't wait for setup - just start it
-      setupPromise.then((response) => {
-        if (response?.data?.success && response.data.message) {
-          console.log('Setup response:', response.data.message)
-        }
-      }).catch(() => {
-        // Ignored - already handled above
-      })
-      
-      // Start auto-check immediately (even if setup is still running)
-      let checkCount = 0
-      const maxChecks = 30 // Check for 90 seconds (30 * 3 seconds)
-      
-      const checkInterval = setInterval(async () => {
-        checkCount++
-        try {
-          const statusResponse = await integrationsApi.whatsapp.getStatus()
-          if (statusResponse.data?.authenticated) {
-            setWhatsappConnected(true)
-            // Clear interval once authenticated - no need to keep checking
-            clearInterval(checkInterval)
-            setWhatsappCheckInterval(null)
-            // No alert - UI updates automatically
-          } else if (checkCount >= maxChecks) {
-            clearInterval(checkInterval)
-            setWhatsappCheckInterval(null)
-            // Don't show alert, just stop checking silently
-          }
-        } catch (error) {
-          console.error('Error checking status:', error)
-          if (checkCount >= maxChecks) {
-            clearInterval(checkInterval)
-            setWhatsappCheckInterval(null)
-          }
-        }
-      }, 3000) // Check every 3 seconds
-      
-      setWhatsappCheckInterval(checkInterval)
-      
-      // Check response if available
-      if (response?.data?.success && response.data.message) {
-        console.log('Setup response:', response.data.message)
-      }
-    } catch (error: any) {
-      console.error('Error:', error)
-      // Don't show alert here - already handled above
-    } finally {
-      setConnectingWhatsApp(false)
-    }
-  }
-
-  const checkWhatsAppStatus = async () => {
-    try {
-      const statusResponse = await integrationsApi.whatsapp.getStatus()
-      if (statusResponse.data?.authenticated) {
-        // Only update state, don't show alert (alert is annoying)
-        setWhatsappConnected(true)
-      } else {
-        setWhatsappConnected(false)
-        // Status updates automatically, no alert needed
-      }
-    } catch (error: any) {
-      console.error('Error checking WhatsApp status:', error)
-      // Error logged to console, no blocking alert
-    }
-  }
-
-  const testWhatsAppConnection = async () => {
-    try {
-      // First check status
-      await checkWhatsAppStatus()
-      
-      // If authenticated, try to get messages
-      if (whatsappConnected) {
-        const response = await integrationsApi.whatsapp.getMessages(undefined, 3)
-        // Test successful - show in status panel
-        if (response.data?.success && response.data?.messages) {
-          const count = response.data.count || 0
-          addStatusMessage('success', `WhatsApp: Connessione funzionante! Trovati ${count} messaggi recenti`)
-        } else {
-          addStatusMessage('info', 'WhatsApp: Connessione funzionante, nessun messaggio trovato')
-        }
-      }
-    } catch (error: any) {
-      console.error('Error testing WhatsApp:', error.response?.data?.detail || error.message)
-    }
-  }
-
-  const disconnectWhatsApp = async () => {
-    if (!confirm('Sei sicuro di voler chiudere la sessione WhatsApp?')) {
-      return
-    }
-    
-    try {
-      await integrationsApi.whatsapp.close()
-      setWhatsappConnected(false)
-      // UI updates automatically, no alert needed
-    } catch (error: any) {
-      console.error('Error disconnecting WhatsApp:', error)
-      console.error('Errore nella disconnessione:', error.response?.data?.detail || error.message)
     }
   }
 
@@ -658,76 +515,21 @@ export default function IntegrationsPage() {
                 </p>
               </div>
             </div>
-            {whatsappConnected ? (
-              <div className="flex items-center gap-2 text-green-600">
-                <CheckCircle size={24} />
-                <span className="font-semibold">Collegato</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-gray-400">
-                <XCircle size={24} />
-                <span>Non collegato</span>
-              </div>
-            )}
+            {/* Removed WhatsApp-specific state */}
+            <div className="flex items-center gap-2 text-gray-400">
+              <XCircle size={24} />
+              <span>Non collegato</span>
+            </div>
           </div>
 
-          {whatsappConnected ? (
-            <div className="space-y-4">
-              <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                <p className="text-sm text-green-800 dark:text-green-200">
-                  ✓ WhatsApp è collegato e funzionante. Puoi chiedere al chatbot di:
-                </p>
-                <ul className="mt-2 ml-4 list-disc text-sm text-green-700 dark:text-green-300">
-                  <li>Leggere i messaggi recenti</li>
-                  <li>Inviare messaggi a contatti</li>
-                  <li>Cercare messaggi per contatto</li>
-                </ul>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={testWhatsAppConnection}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                >
-                  <RefreshCw size={18} />
-                  Test Connessione
-                </button>
-                <button
-                  onClick={disconnectWhatsApp}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
-                >
-                  <Trash2 size={18} />
-                  Disconnetti
-                </button>
-              </div>
+          {/* Removed WhatsApp-specific logic */}
+          <div className="space-y-4">
+            <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+              <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                WhatsApp è stata rimossa dalle integrazioni.
+              </p>
             </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                  Verrà aperta una finestra Chrome separata e isolata per WhatsApp. 
-                  Non interferirà con il tuo Chrome personale. 
-                  Potresti dover autenticare scansionando il QR code la prima volta.
-                </p>
-              </div>
-              <button
-                onClick={connectWhatsApp}
-                disabled={connectingWhatsApp}
-                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {connectingWhatsApp ? (
-                  <>
-                    <RefreshCw size={18} className="animate-spin" />
-                    Connessione in corso...
-                  </>
-                ) : (
-                  <>
-                    <ExternalLink size={18} />
-                    Connetti WhatsApp
-                  </>
-                )}
-              </button>
-            </div>
-          )}
+          </div>
         </div>
 
         {/* MCP Integration Section */}
@@ -1005,113 +807,4 @@ export default function IntegrationsPage() {
                           console.log(`Connected successfully! Found ${toolCount} tools. Please select which tools to enable.`)
                         }, 200)
                       } else if (toolCount === 0) {
-                        console.warn(`Connected successfully to ${mcpServerUrl}, but no tools were found. Please check the server configuration and backend logs for details.`)
-                      } else {
-                        console.log(`Connected! Found ${toolCount} tools.`)
-                      }
-                    } catch (error: any) {
-                      console.error('Error:', error.response?.data?.detail || error.message)
-                      } finally {
-                        setConnectingMCP(false)
-                      }
-                    }}
-                    disabled={connectingMCP || !mcpServerUrl}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {connectingMCP ? 'Connecting...' : 'Connect'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <p className="text-sm text-blue-800 dark:text-blue-200">
-                  Connect to a Docker MCP Gateway server to access external tools like browser, maps, and academic papers.
-                </p>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Server URL</label>
-                  <input
-                    type="text"
-                    value={mcpServerUrl}
-                    onChange={(e) => setMcpServerUrl(e.target.value)}
-                    placeholder="http://host.docker.internal:8080 or http://localhost:8080"
-                    className="w-full p-2 border rounded-md bg-gray-50 dark:bg-gray-700"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Name (optional)</label>
-                  <input
-                    type="text"
-                    value={mcpServerName}
-                    onChange={(e) => setMcpServerName(e.target.value)}
-                    placeholder="MCP Server"
-                    className="w-full p-2 border rounded-md bg-gray-50 dark:bg-gray-700"
-                  />
-                </div>
-                <button
-                  onClick={async () => {
-                    setConnectingMCP(true)
-                    try {
-                      const response = await integrationsApi.mcp.connect(mcpServerUrl, mcpServerName)
-                      await loadIntegrations()
-                      
-                      const toolCount = response.data.count || 0
-                      if (toolCount > 0) {
-                        console.log(`Connected successfully! Found ${toolCount} tools. Click "Manage Tools" to select which tools to enable.`)
-                      } else {
-                        console.warn(`Connected successfully to ${mcpServerUrl}, but no tools were found. Please check the server configuration and logs.`)
-                      }
-                    } catch (error: any) {
-                      console.error('Error:', error.response?.data?.detail || error.message)
-                    } finally {
-                      setConnectingMCP(false)
-                    }
-                  }}
-                  disabled={connectingMCP || !mcpServerUrl}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {connectingMCP ? (
-                    <>
-                      <RefreshCw size={18} className="animate-spin" />
-                      Connecting...
-                    </>
-                  ) : (
-                    <>
-                      <Server size={18} />
-                      Connect MCP Server
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Info Section */}
-        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-6">
-          <h3 className="font-semibold mb-2 text-blue-900 dark:text-blue-100">
-            Come funziona?
-          </h3>
-          <ul className="space-y-2 text-sm text-blue-800 dark:text-blue-200">
-            <li>
-                  • Le credenziali sono criptate e salvate in modo sicuro nel database
-            </li>
-            <li>
-              • Puoi chiedere al chatbot informazioni sul calendario in linguaggio naturale
-            </li>
-            <li>
-              • Il sistema riconosce automaticamente quando una domanda riguarda il calendario
-            </li>
-            <li>
-              • Supporto per query come &ldquo;eventi domani&rdquo;, &ldquo;meeting questa settimana&rdquo;, ecc.
-            </li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  )
-}
-
+                        console.warn(`

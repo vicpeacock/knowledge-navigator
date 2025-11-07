@@ -34,22 +34,6 @@ Test per il servizio di indicizzazione contenuti web.
 pytest tests/test_web_indexer.py -v
 ```
 
-### 3. `test_whatsapp_integration.py`
-Test per l'integrazione WhatsApp.
-
-**Copertura:**
-- Inizializzazione servizio WhatsApp
-- Setup e autenticazione
-- Recupero messaggi
-- Invio messaggi
-- Endpoint API
-- Gestione errori
-
-**Eseguire:**
-```bash
-pytest tests/test_whatsapp_integration.py -v
-```
-
 ## Installazione Dipendenze
 
 ```bash

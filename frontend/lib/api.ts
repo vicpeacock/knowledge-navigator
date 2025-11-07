@@ -11,16 +11,6 @@ const api = axios.create({
   timeout: 120000, // 2 minutes - increased for longer responses (file summaries can take time)
 })
 
-// Separate API instance for WhatsApp with reasonable timeout
-const whatsappApi = axios.create({
-  baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  withCredentials: false,
-  timeout: 20000, // 20 seconds - enough for Chrome to start and navigate
-})
-
 // Sessions API
 export const sessionsApi = {
   list: (status?: string) => api.get('/api/sessions/', { params: status ? { status } : {} }),
@@ -34,7 +24,7 @@ export const sessionsApi = {
   restore: (id: string) => api.post(`/api/sessions/${id}/restore`),
   getMessages: (id: string) => api.get(`/api/sessions/${id}/messages`),
   chat: (id: string, message: string, useMemory: boolean = true, forceWebSearch: boolean = false) =>
-    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: useMemory, force_web_search: forceWebSearch }, { timeout: 180000 }), // 3 minutes - WhatsApp operations can take time
+    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: useMemory, force_web_search: forceWebSearch }, { timeout: 180000 }), // 3 minutes to allow long-running background tasks
   getMemory: (id: string) => api.get(`/api/sessions/${id}/memory`),
 }
 
@@ -143,35 +133,6 @@ export const integrationsApi = {
         },
         deleteIntegration: (integrationId: string) =>
           api.delete(`/api/integrations/emails/integrations/${integrationId}`),
-      },
-      whatsapp: {
-        setup: (headless: boolean = false, profilePath?: string, waitForAuth: boolean = false) => {
-          // Use a promise that doesn't fail on timeout - we'll check status separately
-          return whatsappApi.post('/api/integrations/whatsapp/setup', { 
-            headless, 
-            profile_path: profilePath,
-            wait_for_auth: waitForAuth,
-            timeout: 10, // Short timeout on backend
-          }).catch((error) => {
-            // If timeout, don't throw - just return a success response
-            // The status check will verify if it actually worked
-            if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-              console.log('Setup request timed out, but Chrome may still be opening...')
-              return { data: { success: true, message: 'Setup in corso...' } }
-            }
-            throw error
-          })
-        },
-        getStatus: () => whatsappApi.get('/api/integrations/whatsapp/status', { timeout: 15000 }),
-        getMessages: (contactName?: string, maxResults: number = 10) => {
-          const params: any = { max_results: maxResults }
-          if (contactName) params.contact_name = contactName
-          return api.get('/api/integrations/whatsapp/messages', { params, timeout: 10000 })
-        },
-        sendMessage: (phoneNumber: string, message: string) =>
-          api.post('/api/integrations/whatsapp/send', { phone_number: phoneNumber, message }, { timeout: 10000 }),
-        close: () => whatsappApi.post('/api/integrations/whatsapp/close', {}, { timeout: 5000 }),
-        reset: () => whatsappApi.post('/api/integrations/whatsapp/reset', {}, { timeout: 5000 }),
       },
 }
 
