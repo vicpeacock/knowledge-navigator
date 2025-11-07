@@ -75,62 +75,34 @@ class SemanticIntegrityChecker:
             
             logger.info(f"Found {len(similar_memories)} similar memories to check for contradictions")
             
-            # 2. Fast pre-filtering: check for obvious contradictions before LLM
-            # This reduces LLM calls significantly
+            # 2. Analyze all similar memories with LLM (fully LLM-based, no hard-coded heuristics)
+            # Since llama.cpp is fast, we can afford to use LLM for all cases
             contradictions = []
-            new_entities = self._extract_entities(clean_content)
             
             for memory_content in similar_memories:
                 # Clean memory content (remove type prefix)
                 clean_memory = re.sub(r'^\[.*?\]\s*', '', memory_content).strip()
                 
-                # Extract entities from existing memory
-                existing_entities = self._extract_entities(clean_memory)
+                logger.info(f"Analyzing potential contradiction with LLM (fully LLM-based)...")
+                logger.info(f"  New: '{clean_content[:100]}...'")
+                logger.info(f"  Existing: '{clean_memory[:100]}...'")
                 
-                # Fast pre-filter: check for obvious contradictions (dates, numbers, direct opposites)
-                fast_check = self._fast_contradiction_check(clean_content, clean_memory, new_entities, existing_entities)
+                # Use LLM for complete semantic analysis (no pre-filtering)
+                contradiction = await self._analyze_with_llm(
+                    clean_content,
+                    clean_memory,
+                    threshold
+                )
                 
-                if fast_check.get("is_contradiction"):
-                    # Fast check found contradiction - use it directly (high confidence)
-                    fast_check["new_memory"] = clean_content
-                    fast_check["existing_memory"] = clean_memory
-                    contradictions.append(fast_check)
-                    logger.info(f"✅ Fast check found contradiction: {fast_check.get('explanation', '')[:100]}...")
-                    continue  # Skip LLM call for this memory
+                logger.info(f"LLM analysis result: is_contradiction={contradiction.get('is_contradiction')}, confidence={contradiction.get('confidence', 0):.2f}, threshold={threshold:.2f}")
                 
-                # If fast check didn't find contradiction, use LLM for deeper analysis
-                # But only if entities suggest potential conflict
-                should_check_llm = False
-                if new_entities.get("dates") or existing_entities.get("dates") or \
-                   new_entities.get("numbers") or existing_entities.get("numbers"):
-                    should_check_llm = self._entities_conflict(new_entities, existing_entities)
+                if contradiction.get("is_contradiction") and contradiction.get("confidence", 0) >= threshold:
+                    contradiction["new_memory"] = clean_content
+                    contradiction["existing_memory"] = clean_memory
+                    contradictions.append(contradiction)
+                    logger.warning(f"✅ Contradiction confirmed: {contradiction.get('explanation', 'No explanation')[:100]}...")
                 else:
-                    # No dates/numbers, but semantic similarity is high - check with LLM
-                    # But limit to top 3 most similar to avoid too many LLM calls
-                    memory_index = similar_memories.index(memory_content) if memory_content in similar_memories else len(similar_memories)
-                    if len(contradictions) == 0 and memory_index < 3:
-                        should_check_llm = True
-                
-                if should_check_llm:
-                    logger.info(f"Analyzing potential contradiction with LLM (language-agnostic)...")
-                    logger.info(f"  New: '{clean_content[:100]}...'")
-                    logger.info(f"  Existing: '{clean_memory[:100]}...'")
-                    # Use LLM for semantic analysis (works in any language)
-                    contradiction = await self._analyze_with_llm(
-                        clean_content,
-                        clean_memory,
-                        threshold
-                    )
-                    
-                    logger.info(f"LLM analysis result: is_contradiction={contradiction.get('is_contradiction')}, confidence={contradiction.get('confidence', 0):.2f}, threshold={threshold:.2f}")
-                    
-                    if contradiction.get("is_contradiction") and contradiction.get("confidence", 0) >= threshold:
-                        contradiction["new_memory"] = clean_content
-                        contradiction["existing_memory"] = clean_memory
-                        contradictions.append(contradiction)
-                        logger.warning(f"✅ Contradiction confirmed: {contradiction.get('explanation', 'No explanation')[:100]}...")
-                    else:
-                        logger.info(f"❌ No contradiction (is_contradiction={contradiction.get('is_contradiction')}, confidence={contradiction.get('confidence', 0):.2f} < threshold={threshold:.2f})")
+                    logger.info(f"❌ No contradiction (is_contradiction={contradiction.get('is_contradiction')}, confidence={contradiction.get('confidence', 0):.2f} < threshold={threshold:.2f})")
             
             return {
                 "has_contradiction": len(contradictions) > 0,
@@ -202,105 +174,6 @@ class SemanticIntegrityChecker:
         
         return entities
     
-    def _fast_contradiction_check(
-        self,
-        new_text: str,
-        existing_text: str,
-        new_entities: Dict[str, Any],
-        existing_entities: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """
-        Fast pre-filtering for obvious contradictions without LLM.
-        Returns dict with is_contradiction, confidence, explanation if found, else empty.
-        """
-        # Check for different dates (high confidence contradiction)
-        if new_entities.get("dates") and existing_entities.get("dates"):
-            new_dates = set(new_entities["dates"])
-            existing_dates = set(existing_entities["dates"])
-            if new_dates and existing_dates and not new_dates.intersection(existing_dates):
-                # Different dates - likely contradiction
-                return {
-                    "is_contradiction": True,
-                    "confidence": 0.9,  # High confidence for different dates
-                    "explanation": f"Different dates found: {list(new_dates)[0]} vs {list(existing_dates)[0]}",
-                    "contradiction_type": "temporal",
-                }
-        
-        # Check for direct opposites (common patterns)
-        opposites = [
-            ("single", "sposato", "married", "moglie", "wife"),
-            ("single", "fidanzato", "engaged"),
-            ("lavora", "non lavora", "disoccupato", "unemployed"),
-            ("ama", "non ama", "odia", "hates"),
-            ("preferisce", "non preferisce", "evita", "avoids"),
-        ]
-        
-        new_lower = new_text.lower()
-        existing_lower = existing_text.lower()
-        
-        for group in opposites:
-            new_has = any(word in new_lower for word in group)
-            existing_has = any(word in existing_lower for word in group)
-            if new_has and existing_has:
-                # Check if they're opposite (one has first word, other has different word from group)
-                new_first = any(new_lower.count(group[0]) > 0 for word in group[:2])
-                existing_other = any(existing_lower.count(word) > 0 for word in group[2:])
-                if new_first and existing_other:
-                    return {
-                        "is_contradiction": True,
-                        "confidence": 0.85,
-                        "explanation": f"Direct opposite found in status/preference",
-                        "contradiction_type": "direct",
-                    }
-        
-        # No fast contradiction found
-        return {
-            "is_contradiction": False,
-            "confidence": 0.0,
-            "explanation": "",
-            "contradiction_type": "none",
-        }
-    
-    def _entities_conflict(self, new_entities: Dict[str, Any], existing_entities: Dict[str, Any]) -> bool:
-        """
-        Check if extracted entities suggest a potential conflict.
-        This is a lightweight pre-filter - the LLM will do the deep semantic analysis.
-        Returns True if there's a potential conflict worth checking with LLM.
-        
-        Since we removed language-specific keywords, we only check:
-        - Different dates (might indicate contradiction)
-        - Different numbers (might indicate contradiction)
-        - If both have dates/numbers, it's worth checking with LLM
-        """
-        # If both have dates and they're different, potential conflict
-        if new_entities.get("dates") and existing_entities.get("dates"):
-            new_dates = set(new_entities["dates"])
-            existing_dates = set(existing_entities["dates"])
-            if new_dates and existing_dates and not new_dates.intersection(existing_dates):
-                # Different dates - potential conflict (LLM will determine if it's a real contradiction)
-                return True
-        
-        # If both have numbers and they're different, potential conflict
-        # (but this is less reliable without context, so we're more conservative)
-        if new_entities.get("numbers") and existing_entities.get("numbers"):
-            new_nums = set(new_entities["numbers"])
-            existing_nums = set(existing_entities["numbers"])
-            if new_nums and existing_nums and not new_nums.intersection(existing_nums):
-                # Different numbers - might be a conflict (LLM will analyze context)
-                # But we're more conservative here since numbers alone don't mean much
-                # Only flag if there are also dates (suggests same type of info)
-                if new_entities.get("dates") or existing_entities.get("dates"):
-                    return True
-        
-        # If both have dates or both have numbers, it's worth checking with LLM
-        # (semantic similarity search already filtered similar memories)
-        if (new_entities.get("dates") and existing_entities.get("dates")) or \
-           (new_entities.get("numbers") and existing_entities.get("numbers")):
-            return True
-        
-        # Default: let LLM decide based on semantic similarity
-        # If memories are semantically similar (found by search), check them
-        return True
     
     async def _analyze_with_llm(
         self,
@@ -337,13 +210,35 @@ Rispondi in formato JSON:
     "which_correct": "existing" | "new" | "both" | "unknown"
 }}"""
 
-            # Ultra-simplified prompt for phi3:mini (very small model, needs minimal prompts)
-            prompt = f"""Do these contradict? Answer JSON only.
+            # Comprehensive LLM-based prompt for logical contradiction detection
+            # Works in any language, detects all types of contradictions
+            prompt = f"""Analyze if these two statements logically contradict each other.
 
-EXISTING: "{existing_memory}"
-NEW: "{new_memory}"
+EXISTING STATEMENT: "{existing_memory}"
+NEW STATEMENT: "{new_memory}"
 
-JSON: {{"is_contradiction": true/false, "confidence": 0.0-1.0, "explanation": "why", "contradiction_type": "temporal|direct|none"}}"""
+Determine if there is a LOGICAL CONTRADICTION between these statements. Consider:
+
+1. **Direct Contradictions**: Opposite claims (e.g., "single" vs "married", "likes X" vs "dislikes X")
+2. **Temporal Contradictions**: Incompatible dates/events (e.g., "born July 12" vs "born August 15" for same person)
+3. **Numerical Contradictions**: Incompatible values for same property (e.g., "age 30" vs "age 35" at same time)
+4. **Status Contradictions**: Mutually exclusive states (e.g., "works at A" vs "works at B" simultaneously)
+5. **Preference Contradictions**: Opposite preferences (e.g., "prefers X" vs "prefers Y" for same thing)
+6. **Relationship Contradictions**: Incompatible relationships (e.g., "single" vs "has wife")
+7. **Factual Contradictions**: Incompatible facts about the same entity
+
+IMPORTANT:
+- NOT contradictions: Complementary information, additional details, information about different time periods
+- ARE contradictions: Statements that logically exclude each other
+- Consider CONTEXT: "works at A in 2020" and "works at B in 2024" are NOT contradictions
+
+Respond ONLY with valid JSON (no other text):
+{{
+    "is_contradiction": true/false,
+    "confidence": 0.0-1.0,
+    "explanation": "brief explanation of the contradiction type or why there is no contradiction",
+    "contradiction_type": "direct|temporal|numerical|status|preference|relationship|factual|none"
+}}"""
 
             logger.info(f"Calling LLM for contradiction analysis (model: {self.ollama_client.model}, base_url: {self.ollama_client.base_url})")
             # Don't use format="json" for phi3:mini - it's too slow, parse JSON from text response instead
