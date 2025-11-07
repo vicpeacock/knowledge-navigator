@@ -119,41 +119,75 @@ class HealthCheckService:
             return {"healthy": False, "error": str(e)}
     
     async def _check_ollama_background(self) -> Dict[str, Any]:
-        """Check Ollama Background connection and model availability"""
+        """Check Background LLM connection (Ollama or llama.cpp) and model availability"""
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                # Check if Ollama Background is running
-                response = await client.get(f"{settings.ollama_background_base_url}/api/tags")
-                if response.status_code != 200:
+                if settings.use_llama_cpp_background:
+                    # llama.cpp uses OpenAI-compatible API
+                    base_url = settings.ollama_background_base_url
+                    if not base_url.endswith('/v1'):
+                        base_url = base_url.rstrip('/') + '/v1'
+                    
+                    response = await client.get(f"{base_url}/models")
+                    if response.status_code != 200:
+                        return {
+                            "healthy": False,
+                            "error": f"llama.cpp background returned status {response.status_code}"
+                        }
+                    
+                    # Check if model is available (llama.cpp format)
+                    models_data = response.json().get("data", [])
+                    model_names = [m.get("id", "") or m.get("name", "") for m in models_data]
+                    
+                    # llama.cpp might return model name with .gguf extension
+                    expected_model = settings.ollama_background_model
+                    model_found = expected_model in model_names or f"{expected_model}.gguf" in model_names
+                    
+                    if not model_found:
+                        return {
+                            "healthy": False,
+                            "error": f"Model '{expected_model}' not found. Available: {model_names}. "
+                                    f"Make sure llama-server is running with the correct model."
+                        }
+                    
                     return {
-                        "healthy": False,
-                        "error": f"Ollama background returned status {response.status_code}"
+                        "healthy": True,
+                        "message": f"llama.cpp background connection successful, model '{expected_model}' available"
                     }
-                
-                # Check if model is available
-                models = response.json().get("models", [])
-                model_names = [m.get("name", "") for m in models]
-                
-                if settings.ollama_background_model not in model_names:
+                else:
+                    # Ollama Docker container
+                    response = await client.get(f"{settings.ollama_background_base_url}/api/tags")
+                    if response.status_code != 200:
+                        return {
+                            "healthy": False,
+                            "error": f"Ollama background returned status {response.status_code}"
+                        }
+                    
+                    # Check if model is available
+                    models = response.json().get("models", [])
+                    model_names = [m.get("name", "") for m in models]
+                    
+                    if settings.ollama_background_model not in model_names:
+                        return {
+                            "healthy": False,
+                            "error": f"Model '{settings.ollama_background_model}' not found. Available: {model_names}. "
+                                    f"Run: docker exec knowledge-navigator-ollama-background ollama pull {settings.ollama_background_model}"
+                        }
+                    
                     return {
-                        "healthy": False,
-                        "error": f"Model '{settings.ollama_background_model}' not found. Available: {model_names}. "
-                                f"Run: docker exec knowledge-navigator-ollama-background ollama pull {settings.ollama_background_model}"
+                        "healthy": True,
+                        "message": f"Ollama background connection successful, model '{settings.ollama_background_model}' available"
                     }
-                
-                return {
-                    "healthy": True,
-                    "message": f"Ollama background connection successful, model '{settings.ollama_background_model}' available"
-                }
         except httpx.ConnectError:
-            logger.error(f"❌ Ollama background health check failed: Connection refused")
+            logger.error(f"❌ Background LLM health check failed: Connection refused")
+            service_name = "llama.cpp" if settings.use_llama_cpp_background else "Ollama background"
             return {
                 "healthy": False,
-                "error": "Cannot connect to Ollama background (connection refused). "
-                        "Make sure the container is running: docker-compose up -d ollama-background"
+                "error": f"Cannot connect to {service_name} (connection refused). "
+                        f"Make sure the service is running on {settings.ollama_background_base_url}"
             }
         except Exception as e:
-            logger.error(f"❌ Ollama background health check failed: {e}")
+            logger.error(f"❌ Background LLM health check failed: {e}")
             return {"healthy": False, "error": str(e)}
     
     def get_status_summary(self) -> Dict[str, Any]:
