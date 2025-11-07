@@ -201,7 +201,7 @@ Riassunto (massimo 500 parole, mantieni tutti i dettagli importanti):"""
         # But if recent alone exceeds threshold, we still need to summarize older to make room
         
         # Need to summarize older messages
-        logger.info(f"Context too large ({current_tokens} tokens), summarizing {len(older_messages)} older messages")
+        logger.info(f"Context too large (total: {total_tokens} tokens, recent: {recent_tokens} tokens), summarizing {len(older_messages)} older messages")
         
         # Get existing summaries from medium-term memory (search for summaries)
         existing_summaries = await self.memory_manager.retrieve_medium_term_memory(
