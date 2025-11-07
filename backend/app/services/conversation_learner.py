@@ -157,6 +157,8 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
         errors = []
         
         logger.info(f"Processing {len(knowledge_items)} knowledge items for indexing")
+        items_to_check_contradictions = []  # Store items for contradiction check even if duplicate
+        
         for item in knowledge_items:
             try:
                 content = item.get("content", "")
@@ -174,7 +176,9 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                 # Check if similar knowledge already exists
                 existing = await self._check_duplicate_knowledge(content, importance)
                 if existing:
-                    logger.info(f"⚠️ Similar knowledge already exists, skipping: {content[:50]}...")
+                    logger.info(f"⚠️ Similar knowledge already exists, skipping indexing: {content[:50]}...")
+                    # Still add to contradiction check list - duplicates might still be contradictions
+                    items_to_check_contradictions.append(item)
                     continue
                 
                 # Index in long-term memory (non-blocking)
@@ -188,20 +192,23 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                 
                 indexed_count += 1
                 logger.info(f"✅ Indexed knowledge: {content[:50]}... (importance: {importance})")
+                # Add to contradiction check list
+                items_to_check_contradictions.append(item)
                 
             except Exception as e:
                 errors.append(f"Knowledge item: {str(e)}")
                 logger.error(f"Error indexing knowledge item: {e}")
         
         # Schedule background integrity check (fire and forget)
-        if indexed_count > 0:
+        # Check contradictions for ALL items (including duplicates) - duplicates might still be contradictions
+        if items_to_check_contradictions:
             try:
                 import asyncio
                 from app.db.database import AsyncSessionLocal
                 from app.services.background_agent import BackgroundAgent
                 
                 async def _check_integrity_background():
-                    """Background task to check integrity of newly indexed knowledge"""
+                    """Background task to check integrity of knowledge (including duplicates)"""
                     async with AsyncSessionLocal() as db_session:
                         try:
                             agent = BackgroundAgent(
@@ -210,10 +217,11 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                                 ollama_client=None,  # Will use background client
                             )
                             
-                            # Process each indexed knowledge item
-                            for item in knowledge_items:
+                            # Process each knowledge item (including duplicates) for contradiction check
+                            for item in items_to_check_contradictions:
                                 content = item.get("content", "")
                                 if content:
+                                    logger.info(f"🔍 Checking contradictions for: {content[:50]}...")
                                     await agent.process_new_knowledge(
                                         knowledge_item=item,
                                         session_id=session_id,
@@ -223,7 +231,7 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                 
                 # Schedule background task (don't await to avoid blocking)
                 asyncio.create_task(_check_integrity_background())
-                logger.debug(f"Scheduled background integrity check for {indexed_count} knowledge items")
+                logger.info(f"🔍 Scheduled background integrity check for {len(items_to_check_contradictions)} knowledge items (including duplicates)")
                 
             except Exception as e:
                 logger.warning(f"Error scheduling background integrity check: {e}", exc_info=True)
