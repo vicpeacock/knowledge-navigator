@@ -66,11 +66,14 @@ class BackgroundAgent:
                 confidence_threshold=settings.integrity_confidence_threshold,
             )
             
+            logger.debug(f"Integrity check result: has_contradiction={contradiction_info.get('has_contradiction')}, confidence={contradiction_info.get('confidence', 0):.2f}, contradictions_count={len(contradiction_info.get('contradictions', []))}")
+            
             if contradiction_info.get("has_contradiction"):
-                logger.warning(f"Contradiction detected for knowledge: {knowledge_item.get('content', '')[:50]}...")
+                logger.warning(f"⚠️ Contradiction detected for knowledge: {knowledge_item.get('content', '')[:50]}...")
+                logger.warning(f"   Confidence: {contradiction_info.get('confidence', 0):.2f}, Count: {len(contradiction_info.get('contradictions', []))}")
                 
                 # Create notification (always HIGH urgency for contradictions)
-                await self.notification_service.create_notification(
+                notification = await self.notification_service.create_notification(
                     type="contradiction",
                     urgency="high",
                     content={
@@ -81,9 +84,9 @@ class BackgroundAgent:
                     session_id=session_id,
                 )
                 
-                logger.info(f"Created contradiction notification for session {session_id}")
+                logger.info(f"✅ Created contradiction notification {notification.id} for session {session_id}")
             else:
-                logger.debug(f"No contradictions found for knowledge: {knowledge_item.get('content', '')[:50]}...")
+                logger.debug(f"No contradictions found for knowledge: {knowledge_item.get('content', '')[:50]}... (confidence: {contradiction_info.get('confidence', 0):.2f})")
                 
         except Exception as e:
             logger.error(f"Error processing new knowledge in background: {e}", exc_info=True)
