@@ -63,9 +63,10 @@ class HealthCheckService:
     async def _check_postgres(self) -> Dict[str, Any]:
         """Check PostgreSQL connection"""
         try:
+            from sqlalchemy import text
             engine = create_async_engine(settings.database_url)
             async with engine.connect() as conn:
-                await conn.execute("SELECT 1")
+                await conn.execute(text("SELECT 1"))
             await engine.dispose()
             return {"healthy": True, "message": "PostgreSQL connection successful"}
         except Exception as e:
