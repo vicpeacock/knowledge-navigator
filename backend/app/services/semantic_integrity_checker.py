@@ -255,8 +255,17 @@ Rispondi in formato JSON:
     "which_correct": "existing" | "new" | "both" | "unknown"
 }}"""
 
+            # Use a simpler prompt for background agent (faster)
+            simple_prompt = f"""Analizza se queste due informazioni si contraddicono:
+
+1. "{existing_memory}"
+2. "{new_memory}"
+
+Rispondi SOLO con JSON:
+{{"is_contradiction": true/false, "confidence": 0.0-1.0, "explanation": "breve spiegazione"}}"""
+
             response = await self.ollama_client.generate_with_context(
-                prompt=prompt,
+                prompt=simple_prompt,
                 session_context=[],
                 retrieved_memory=None,
                 tools=None,
