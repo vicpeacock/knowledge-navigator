@@ -214,9 +214,9 @@ Determine if there is a LOGICAL CONTRADICTION between these statements. You must
 **CRITICAL: TAXONOMIC RELATIONSHIPS**
 Contradictions can occur at different levels of a taxonomy (hierarchy):
 - If one statement is about a CATEGORY and the other about an INSTANCE or SUBCATEGORY of that category, and they express opposite preferences/claims → CONTRADICTION
-- Example: "likes pasta" (category) vs "hates spaghetti" (instance) → CONTRADICTION
-- Example: "likes Italian food" (category) vs "hates pasta" (subcategory) → CONTRADICTION
-- Example: "likes red wine" (category) vs "hates Chianti" (instance) → CONTRADICTION
+- You must reason about whether the entities mentioned are taxonomically related (category-instance, category-subcategory, or semantically equivalent)
+- Consider: if someone likes a category but hates an instance of that category, that is a contradiction
+- Consider: if someone likes a general concept but hates a specific manifestation of that concept, that is a contradiction
 
 **Reasoning Process:**
 1. Identify what each statement is about (entity, category, instance, property)
