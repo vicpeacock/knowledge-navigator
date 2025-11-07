@@ -268,8 +268,11 @@ Think step by step, then respond ONLY with valid JSON (no other text):
                     parsed = json.loads(response)
                     logger.info(f"Parsed JSON (direct): {parsed}")
                 
+                # Handle typo in LLM response: "is_contriction" -> "is_contradiction"
+                is_contradiction = parsed.get("is_contradiction", parsed.get("is_contriction", False))
+                
                 return {
-                    "is_contradiction": parsed.get("is_contradiction", False),
+                    "is_contradiction": is_contradiction,
                     "confidence": float(parsed.get("confidence", 0.0)),
                     "explanation": parsed.get("explanation", ""),
                     "which_correct": parsed.get("which_correct", "unknown"),
