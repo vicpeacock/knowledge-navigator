@@ -261,37 +261,23 @@ Rispondi in formato JSON:
     "which_correct": "existing" | "new" | "both" | "unknown"
 }}"""
 
-            # Simplified prompt for phi3:mini (smaller model, needs shorter prompts)
-            prompt = f"""Do these two statements contradict each other logically?
+            # Ultra-simplified prompt for phi3:mini (very small model, needs minimal prompts)
+            prompt = f"""Do these contradict? Answer JSON only.
 
 EXISTING: "{existing_memory}"
 NEW: "{new_memory}"
 
-Check for logical contradictions:
-- Direct opposites (e.g., "single" vs "married")
-- Different dates for same event (e.g., "born July 12" vs "born August 15")
-- Different numbers for same property (e.g., "age 30" vs "age 35")
-- Mutually exclusive states (e.g., "works at A" vs "works at B" at same time)
-- Opposite preferences (e.g., "likes X" vs "dislikes X")
-
-NOT contradictions: complementary info, additional details, different time periods.
-
-Respond ONLY with JSON (no other text):
-{{
-    "is_contradiction": true/false,
-    "confidence": 0.0-1.0,
-    "explanation": "brief explanation",
-    "contradiction_type": "direct|temporal|numerical|status|preference|relationship|none"
-}}"""
+JSON: {{"is_contradiction": true/false, "confidence": 0.0-1.0, "explanation": "why", "contradiction_type": "temporal|direct|none"}}"""
 
             logger.info(f"Calling LLM for contradiction analysis (model: {self.ollama_client.model}, base_url: {self.ollama_client.base_url})")
+            # Don't use format="json" for phi3:mini - it's too slow, parse JSON from text response instead
             response = await self.ollama_client.generate_with_context(
                 prompt=prompt,
                 session_context=[],
                 retrieved_memory=None,
                 tools=None,
                 tools_description=None,
-                format="json",
+                format=None,  # No strict JSON mode for faster response
                 return_raw=False,
             )
             
