@@ -182,14 +182,23 @@ Riassunto (massimo 500 parole, mantieni tutti i dettagli importanti):"""
         recent_messages = all_messages[-keep_recent:] if len(all_messages) > keep_recent else all_messages
         older_messages = all_messages[:-keep_recent] if len(all_messages) > keep_recent else []
         
-        # Check if we need to summarize
-        current_tokens = self.estimate_context_size(
+        # Check total context size (recent + older + system + retrieved_memory)
+        total_tokens = self.estimate_context_size(
+            all_messages, system_prompt, retrieved_memory
+        )
+        
+        # Also check if just recent messages exceed threshold
+        recent_tokens = self.estimate_context_size(
             recent_messages, system_prompt, retrieved_memory
         )
         
-        if current_tokens <= max_tokens or not older_messages:
-            # Context is fine, return recent messages
-            return recent_messages
+        # If total doesn't exceed threshold, no need to summarize
+        if total_tokens <= max_tokens or not older_messages:
+            # Context is fine, return recent messages (or all if small enough)
+            return recent_messages if len(all_messages) > keep_recent else all_messages
+        
+        # If we get here, total exceeds threshold, so we need to summarize older messages
+        # But if recent alone exceeds threshold, we still need to summarize older to make room
         
         # Need to summarize older messages
         logger.info(f"Context too large ({current_tokens} tokens), summarizing {len(older_messages)} older messages")
