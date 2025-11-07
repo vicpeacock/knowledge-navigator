@@ -26,7 +26,6 @@ llama-server \
   --ctx-size 4096 \
   --threads 8 \
   --n-gpu-layers 999 \
-  --keep-alive 5m \
   > "$LOG_FILE" 2>&1 &
 
 PID=$!
