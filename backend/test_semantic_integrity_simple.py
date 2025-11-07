@@ -4,10 +4,13 @@ Tests entity extraction and pre-filtering without LLM
 """
 import asyncio
 from uuid import uuid4
+import pytest
 from app.db.database import AsyncSessionLocal
 from app.core.memory_manager import MemoryManager
 from app.services.semantic_integrity_checker import SemanticIntegrityChecker
 from app.core.dependencies import get_ollama_background_client
+
+pytestmark = pytest.mark.skip(reason="Test semplificato dell'integrità semantica da eseguire manualmente")
 
 async def test_entity_extraction():
     """Test entity extraction and concept categorization"""

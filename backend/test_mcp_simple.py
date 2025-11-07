@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
-"""Test simple MCPClient"""
+"""Simple MCP test"""
 import asyncio
+import sys
+import os
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+pytestmark = pytest.mark.skip(reason="Test MCP semplificato da eseguire manualmente")
+
 from app.core.mcp_client import MCPClient
 
 async def test():

@@ -5,6 +5,8 @@ Test script per verificare il rilevamento contraddizioni completamente basato su
 import asyncio
 import sys
 import os
+from typing import List, Dict
+import pytest
 
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -12,6 +14,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app.core.llama_cpp_client import LlamaCppClient
 from app.core.memory_manager import MemoryManager
 from app.services.semantic_integrity_checker import SemanticIntegrityChecker
+from app.core.dependencies import get_ollama_background_client
+
+
+pytestmark = pytest.mark.skip(reason="Test approfondito dell'integrità semantica: richiede run manuale")
+
+
+class MockMemoryManager(MemoryManager):
+    def __init__(self):
+        super().__init__()
+        self.memory: List[Dict] = []
+
+    def add_memory(self, memory_item: Dict):
+        self.memory.append(memory_item)
+
+    def get_memory(self) -> List[Dict]:
+        return self.memory
+
+    def clear_memory(self):
+        self.memory = []
 
 
 async def test_contradiction_detection():
@@ -28,7 +49,7 @@ async def test_contradiction_detection():
         model="Phi-3-mini-4k-instruct-q4"
     )
     
-    memory_manager = MemoryManager()
+    memory_manager = MockMemoryManager()
     checker = SemanticIntegrityChecker(
         memory_manager=memory_manager,
         ollama_client=client

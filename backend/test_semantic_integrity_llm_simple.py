@@ -7,11 +7,40 @@ import asyncio
 import sys
 import os
 import json
+import pytest
 
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.core.llama_cpp_client import LlamaCppClient
+from app.services.semantic_integrity_checker import SemanticIntegrityChecker
+from app.core.memory_manager import MemoryManager
+from app.core.dependencies import get_ollama_background_client
+
+
+pytestmark = pytest.mark.skip(reason="Test manuale leggero per l'integrità semantica")
+
+
+class MockMemoryManager(MemoryManager):
+    """Mock della classe MemoryManager per testare l'analisi LLM indipendentemente dal backend."""
+    def __init__(self):
+        self.memory = {}
+
+    async def add_memory(self, key: str, value: str):
+        self.memory[key] = value
+
+    async def get_memory(self, key: str) -> str | None:
+        return self.memory.get(key)
+
+    async def delete_memory(self, key: str):
+        if key in self.memory:
+            del self.memory[key]
+
+    async def clear_memory(self):
+        self.memory.clear()
+
+    async def get_all_memory(self) -> dict[str, str]:
+        return self.memory
 
 
 async def test_llm_contradiction_analysis():

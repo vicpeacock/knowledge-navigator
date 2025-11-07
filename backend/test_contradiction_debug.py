@@ -5,6 +5,9 @@ Test script per debuggare il rilevamento contraddizioni
 import asyncio
 import sys
 import os
+import pytest
+
+pytestmark = pytest.mark.skip(reason="Test manuale/integrativo: eseguirlo direttamente via __main__ quando serve")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

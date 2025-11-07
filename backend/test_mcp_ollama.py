@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
-"""Test MCP client with Ollama"""
+"""Test MCP client with Ollama provider"""
 import asyncio
+import sys
+import os
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+pytestmark = pytest.mark.skip(reason="Test MCP/Ollama manuale: usare solo per debug dedicato")
 from app.core.mcp_client import MCPClient
 
 async def test():

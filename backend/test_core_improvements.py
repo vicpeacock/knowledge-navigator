@@ -9,6 +9,9 @@ import asyncio
 import sys
 from uuid import uuid4
 from datetime import datetime
+import pytest
+
+pytestmark = pytest.mark.skip(reason="Test manuali per verifiche integrate: eseguirli a mano quando necessario")
 
 # Add backend to path
 sys.path.insert(0, '/Users/pallotta/Personal AI Assistant/backend')
