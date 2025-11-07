@@ -454,6 +454,9 @@ async def chat(
     
     logger = logging.getLogger(__name__)
     
+    # Create a task for contradiction check that we can optionally wait for
+    contradiction_check_task = None
+    
     async def _check_contradictions_background():
         """Background task to check if user message contradicts existing memory"""
         async with AsyncSessionLocal() as db_session:
@@ -477,11 +480,12 @@ async def chat(
                     knowledge_item=user_message_knowledge,
                     session_id=session_id,
                 )
+                logger.info(f"✅ Contradiction check completed for user message: {request.message[:50]}...")
             except Exception as e:
                 logger.warning(f"Error checking contradictions for user message: {e}", exc_info=True)
     
-    # Schedule contradiction check in background (fire and forget)
-    asyncio.create_task(_check_contradictions_background())
+    # Schedule contradiction check in background
+    contradiction_check_task = asyncio.create_task(_check_contradictions_background())
     
     # Get session context (previous messages)
     messages_result = await db.execute(
@@ -1075,6 +1079,18 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
     # If we exhausted iterations and had tool calls, add note
     if tool_iteration >= max_tool_iterations and tool_calls and tool_results:
         response_text += "\n\n[Nota: Alcuni tool sono stati eseguiti per ottenere informazioni reali.]"
+    
+    # Wait a bit for contradiction check to complete (if it's still running)
+    # This ensures we catch contradictions detected for the current message
+    if contradiction_check_task and not contradiction_check_task.done():
+        try:
+            # Wait up to 2 seconds for contradiction check to complete
+            await asyncio.wait_for(contradiction_check_task, timeout=2.0)
+            logger.info("✅ Contradiction check completed before retrieving notifications")
+        except asyncio.TimeoutError:
+            logger.info("⏱️ Contradiction check still running, retrieving notifications anyway")
+        except Exception as e:
+            logger.warning(f"Error waiting for contradiction check: {e}")
     
     # Check for pending notifications and format high urgency ones
     from app.services.notification_service import NotificationService
