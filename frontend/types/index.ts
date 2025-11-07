@@ -54,5 +54,11 @@ export interface ChatResponse {
   }
   tools_used: string[]
   tool_details?: ToolExecutionDetail[]
+  notifications_count?: number
+  high_urgency_notifications?: Array<{
+    type: string
+    content: any
+    id: string
+  }>
 }
 

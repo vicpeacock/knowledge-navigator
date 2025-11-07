@@ -26,17 +26,13 @@ export function StatusProvider({ children }: { children: ReactNode }) {
   const addStatusMessage = (type: 'success' | 'error' | 'info' | 'warning', message: string) => {
     const id = Date.now().toString() + Math.random().toString(36).substr(2, 9)
     const newMessage: StatusMessage = { id, type, message, timestamp: new Date() }
-    setStatusMessages(prev => [...prev, newMessage].slice(-20)) // Keep last 20 messages
+    setStatusMessages(prev => [...prev, newMessage].slice(-50)) // Keep last 50 messages (increased from 20)
     // Auto-expand panel when new message arrives
     if (!statusPanelExpanded) {
       setStatusPanelExpanded(true)
     }
-    // Auto-remove success/info messages after 5 seconds
-    if (type === 'success' || type === 'info') {
-      setTimeout(() => {
-        setStatusMessages(prev => prev.filter(m => m.id !== id))
-      }, 5000)
-    }
+    // Messages are now persistent - user must manually remove them
+    // No auto-removal to prevent important notifications from disappearing
   }
 
   const removeStatusMessage = (id: string) => {
@@ -53,7 +49,7 @@ export function StatusProvider({ children }: { children: ReactNode }) {
       
       {/* Status Messages Panel - Collapsible, positioned at bottom */}
       <div className={`fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shadow-lg transition-all duration-300 z-50 ${
-        statusPanelExpanded ? 'h-64' : 'h-12'
+        statusPanelExpanded ? 'h-96' : 'h-12'
       }`}>
         <div 
           className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
