@@ -1119,7 +1119,8 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
             
             # Extract knowledge (only if conversation has enough content)
             # Run asynchronously to not block the response
-            if len(recent_messages) >= 4:  # At least 2 exchanges
+            # Reduced to 2 messages (1 exchange) to catch single statements like preferences
+            if len(recent_messages) >= 2:  # At least 1 exchange (user + assistant)
                 # Schedule for background execution (fire and forget)
                 import asyncio
                 from app.db.database import AsyncSessionLocal
