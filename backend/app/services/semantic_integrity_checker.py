@@ -75,26 +75,43 @@ class SemanticIntegrityChecker:
             
             logger.info(f"Found {len(similar_memories)} similar memories to check for contradictions")
             
-            # 2. Analyze each similar memory with LLM
-            # Since we removed language-specific keywords, we rely on semantic similarity
-            # and let the LLM do all the contradiction detection
+            # 2. Fast pre-filtering: check for obvious contradictions before LLM
+            # This reduces LLM calls significantly
             contradictions = []
+            new_entities = self._extract_entities(clean_content)
+            
             for memory_content in similar_memories:
                 # Clean memory content (remove type prefix)
                 clean_memory = re.sub(r'^\[.*?\]\s*', '', memory_content).strip()
                 
-                # Extract basic entities for optional pre-filtering (dates/numbers only)
-                new_entities = self._extract_entities(clean_content)
+                # Extract entities from existing memory
                 existing_entities = self._extract_entities(clean_memory)
                 
-                # Lightweight pre-filter: if both have dates/numbers, check if they differ
-                # Otherwise, semantic similarity already filtered, so check with LLM anyway
-                should_check = True
+                # Fast pre-filter: check for obvious contradictions (dates, numbers, direct opposites)
+                fast_check = self._fast_contradiction_check(clean_content, clean_memory, new_entities, existing_entities)
+                
+                if fast_check.get("is_contradiction"):
+                    # Fast check found contradiction - use it directly (high confidence)
+                    fast_check["new_memory"] = clean_content
+                    fast_check["existing_memory"] = clean_memory
+                    contradictions.append(fast_check)
+                    logger.info(f"✅ Fast check found contradiction: {fast_check.get('explanation', '')[:100]}...")
+                    continue  # Skip LLM call for this memory
+                
+                # If fast check didn't find contradiction, use LLM for deeper analysis
+                # But only if entities suggest potential conflict
+                should_check_llm = False
                 if new_entities.get("dates") or existing_entities.get("dates") or \
                    new_entities.get("numbers") or existing_entities.get("numbers"):
-                    should_check = self._entities_conflict(new_entities, existing_entities)
+                    should_check_llm = self._entities_conflict(new_entities, existing_entities)
+                else:
+                    # No dates/numbers, but semantic similarity is high - check with LLM
+                    # But limit to top 3 most similar to avoid too many LLM calls
+                    memory_index = similar_memories.index(memory_content) if memory_content in similar_memories else len(similar_memories)
+                    if len(contradictions) == 0 and memory_index < 3:
+                        should_check_llm = True
                 
-                if should_check:
+                if should_check_llm:
                     logger.info(f"Analyzing potential contradiction with LLM (language-agnostic)...")
                     logger.info(f"  New: '{clean_content[:100]}...'")
                     logger.info(f"  Existing: '{clean_memory[:100]}...'")
@@ -184,6 +201,65 @@ class SemanticIntegrityChecker:
         entities["numbers"] = [float(n) if '.' in n else int(n) for n in numbers]
         
         return entities
+    
+    def _fast_contradiction_check(
+        self,
+        new_text: str,
+        existing_text: str,
+        new_entities: Dict[str, Any],
+        existing_entities: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Fast pre-filtering for obvious contradictions without LLM.
+        Returns dict with is_contradiction, confidence, explanation if found, else empty.
+        """
+        # Check for different dates (high confidence contradiction)
+        if new_entities.get("dates") and existing_entities.get("dates"):
+            new_dates = set(new_entities["dates"])
+            existing_dates = set(existing_entities["dates"])
+            if new_dates and existing_dates and not new_dates.intersection(existing_dates):
+                # Different dates - likely contradiction
+                return {
+                    "is_contradiction": True,
+                    "confidence": 0.9,  # High confidence for different dates
+                    "explanation": f"Different dates found: {list(new_dates)[0]} vs {list(existing_dates)[0]}",
+                    "contradiction_type": "temporal",
+                }
+        
+        # Check for direct opposites (common patterns)
+        opposites = [
+            ("single", "sposato", "married", "moglie", "wife"),
+            ("single", "fidanzato", "engaged"),
+            ("lavora", "non lavora", "disoccupato", "unemployed"),
+            ("ama", "non ama", "odia", "hates"),
+            ("preferisce", "non preferisce", "evita", "avoids"),
+        ]
+        
+        new_lower = new_text.lower()
+        existing_lower = existing_text.lower()
+        
+        for group in opposites:
+            new_has = any(word in new_lower for word in group)
+            existing_has = any(word in existing_lower for word in group)
+            if new_has and existing_has:
+                # Check if they're opposite (one has first word, other has different word from group)
+                new_first = any(new_lower.count(group[0]) > 0 for word in group[:2])
+                existing_other = any(existing_lower.count(word) > 0 for word in group[2:])
+                if new_first and existing_other:
+                    return {
+                        "is_contradiction": True,
+                        "confidence": 0.85,
+                        "explanation": f"Direct opposite found in status/preference",
+                        "contradiction_type": "direct",
+                    }
+        
+        # No fast contradiction found
+        return {
+            "is_contradiction": False,
+            "confidence": 0.0,
+            "explanation": "",
+            "contradiction_type": "none",
+        }
     
     def _entities_conflict(self, new_entities: Dict[str, Any], existing_entities: Dict[str, Any]) -> bool:
         """
