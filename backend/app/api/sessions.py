@@ -1128,7 +1128,7 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
                     # Create a new database session for background task
                     async with AsyncSessionLocal() as db_session:
                         try:
-                            logger.debug(f"Extracting knowledge from {len(recent_messages)} messages")
+                            logger.info(f"🔍 Extracting knowledge from {len(recent_messages)} messages")
                             knowledge_items = await learner.extract_knowledge_from_conversation(
                                 db=db_session,
                                 session_id=session_id,
@@ -1145,14 +1145,14 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
                                 )
                                 logger.info(f"Auto-learned {indexing_stats.get('indexed', 0)} knowledge items from conversation")
                             else:
-                                logger.debug("No knowledge items extracted (might be below importance threshold or not extractable)")
+                                logger.info("⚠️ No knowledge items extracted (might be below importance threshold or not extractable)")
                         except Exception as e:
                             logger.warning(f"Error in background auto-learning: {e}", exc_info=True)
                 
                 # Schedule background task (don't await to avoid blocking)
                 asyncio.create_task(_extract_knowledge_background())
             else:
-                logger.debug(f"Skipping knowledge extraction: only {len(recent_messages)} messages (need at least 4)")
+                logger.info(f"⚠️ Skipping knowledge extraction: only {len(recent_messages)} messages (need at least 2)")
         except Exception as e:
             logger.warning(f"Error scheduling auto-learning from conversation: {e}", exc_info=True)
 
