@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     
     # Ollama Background (per task in background)
     ollama_background_base_url: str = "http://localhost:11435"
-    ollama_background_model: str = "phi-3-mini"  # Modello piccolo ed efficiente per background tasks
+    ollama_background_model: str = "llama3.2:3b"  # Modello piccolo ed efficiente per background tasks (alternativa: microsoft/phi-3-mini)
 
     # MCP Gateway (default, can be overridden per integration)
     # Default: localhost:8080 (if backend runs on host)
