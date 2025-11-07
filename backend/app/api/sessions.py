@@ -1179,6 +1179,8 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
         memory_used=memory_used,
         tools_used=tools_used,
         tool_details=tool_details,
+        notifications_count=len(pending_notifications),
+        high_urgency_notifications=formatted_high_notifications,
     )
 
 
