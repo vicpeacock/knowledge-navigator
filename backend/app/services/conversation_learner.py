@@ -47,23 +47,34 @@ Conversazione:
 
 Estrai:
 1. Fatti importanti (date, eventi, decisioni)
-2. Preferenze dell'utente
+2. Preferenze dell'utente (cibi, attività, stili, opinioni - IMPORTANTE: estrai anche preferenze negative come "non mi piace", "detesto", "odio")
 3. Informazioni personali rilevanti
 4. Contatti o riferimenti importanti
 5. Progetti o attività menzionate
 
+IMPORTANTE per le preferenze:
+- Se l'utente dice "Mi piace X" o "Amo X" → estrai come preferenza positiva
+- Se l'utente dice "Non mi piace X", "Detesto X", "Odio X" → estrai come preferenza negativa
+- Se l'utente menziona cibi, attività, hobby, stili → estrai sempre come preferenza (anche se sembra banale)
+- Per cibi simili (es. "pastasciutta" e "spaghetti"), estrai entrambi con descrizioni chiare che permettano di riconoscerli come simili
+
 Per ogni conoscenza estratta, fornisci:
 - Tipo: "fact", "preference", "personal_info", "contact", "project"
-- Contenuto: descrizione chiara e concisa
-- Importanza: stima da 0.0 a 1.0
+- Contenuto: descrizione chiara e concisa che includa il contesto (es. "L'utente ama la pastasciutta" o "L'utente detesta gli spaghetti")
+- Importanza: stima da 0.0 a 1.0 (preferenze anche semplici hanno importanza 0.6+)
 
 Formato JSON:
 {{
   "knowledge": [
     {{
-      "type": "fact",
-      "content": "L'utente ha un appuntamento il 15 marzo alle 14:00",
-      "importance": 0.8
+      "type": "preference",
+      "content": "L'utente ama la pastasciutta",
+      "importance": 0.7
+    }},
+    {{
+      "type": "preference",
+      "content": "L'utente detesta gli spaghetti",
+      "importance": 0.7
     }}
   ]
 }}

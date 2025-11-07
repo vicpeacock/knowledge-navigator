@@ -58,8 +58,8 @@ class Settings(BaseSettings):
     context_keep_recent_messages: int = 10  # Keep last N messages when summarizing
     
     # Semantic Integrity Check
-    integrity_confidence_threshold: float = 0.8  # Soglia confidenza contraddizioni
-    integrity_max_similar_memories: int = 10  # Numero memorie simili da controllare
+    integrity_confidence_threshold: float = 0.7  # Soglia confidenza contraddizioni (ridotta da 0.8 per catturare più casi)
+    integrity_max_similar_memories: int = 15  # Numero memorie simili da controllare (aumentato da 10)
     integrity_check_exhaustive: bool = False  # Se True, controlla tutte (più lento)
     
     # Google OAuth2 (for Calendar/Email)
