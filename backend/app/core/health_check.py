@@ -77,11 +77,22 @@ class HealthCheckService:
         """Check ChromaDB connection"""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
+                # ChromaDB v1.0.0+ uses API v2
+                # Try v2 first, fallback to v1 for older versions
                 response = await client.get(
-                    f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v1/heartbeat"
+                    f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v2/heartbeat"
                 )
                 if response.status_code == 200:
                     return {"healthy": True, "message": "ChromaDB connection successful"}
+                elif response.status_code == 410:
+                    # v1 endpoint deprecated, try v2
+                    response = await client.get(
+                        f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v2/heartbeat"
+                    )
+                    if response.status_code == 200:
+                        return {"healthy": True, "message": "ChromaDB connection successful"}
+                    else:
+                        return {"healthy": False, "error": f"ChromaDB returned status {response.status_code}"}
                 else:
                     return {"healthy": False, "error": f"ChromaDB returned status {response.status_code}"}
         except Exception as e:
@@ -137,11 +148,17 @@ class HealthCheckService:
                     
                     # Check if model is available (llama.cpp format)
                     models_data = response.json().get("data", [])
-                    model_names = [m.get("id", "") or m.get("name", "") for m in models_data]
+                    model_names = [m.get("id", "") or m.get("name", "") or m.get("model", "") for m in models_data]
                     
                     # llama.cpp might return model name with .gguf extension
                     expected_model = settings.ollama_background_model
-                    model_found = expected_model in model_names or f"{expected_model}.gguf" in model_names
+                    # Check if model name matches (with or without .gguf extension)
+                    # llama.cpp returns model name as "Phi-3-mini-4k-instruct-q4.gguf" but we configure without .gguf
+                    model_found = (
+                        expected_model in model_names or 
+                        f"{expected_model}.gguf" in model_names or
+                        any(expected_model in name or name.replace(".gguf", "") == expected_model for name in model_names)
+                    )
                     
                     if not model_found:
                         return {
