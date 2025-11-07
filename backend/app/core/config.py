@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     integrity_max_similar_memories: int = 15  # Numero memorie simili da controllare (aumentato da 10)
     integrity_check_exhaustive: bool = False  # Se True, controlla tutte (più lento)
     
+    # Feature flags
+    use_langgraph_prototype: bool = False
+    
     # Google OAuth2 (for Calendar/Email)
     google_client_id: Optional[str] = None
     google_client_secret: Optional[str] = None
