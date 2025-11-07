@@ -445,6 +445,41 @@ async def chat(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
+    # Check for contradictions in user message (run in background, don't block response)
+    # This checks EVERY user message against long-term memory, regardless of knowledge extraction
+    import asyncio
+    from app.db.database import AsyncSessionLocal
+    from app.services.background_agent import BackgroundAgent
+    
+    async def _check_contradictions_background():
+        """Background task to check if user message contradicts existing memory"""
+        async with AsyncSessionLocal() as db_session:
+            try:
+                # Create a temporary knowledge item from the user message
+                # This allows the background agent to check for contradictions
+                user_message_knowledge = {
+                    "type": "user_statement",
+                    "content": request.message,
+                    "importance": 0.5,  # Default importance for user statements
+                }
+                
+                agent = BackgroundAgent(
+                    memory_manager=memory,
+                    db=db_session,
+                    ollama_client=None,  # Will use background client
+                )
+                
+                logger.info(f"🔍 Checking contradictions for user message: {request.message[:50]}...")
+                await agent.process_new_knowledge(
+                    knowledge_item=user_message_knowledge,
+                    session_id=session_id,
+                )
+            except Exception as e:
+                logger.warning(f"Error checking contradictions for user message: {e}", exc_info=True)
+    
+    # Schedule contradiction check in background (fire and forget)
+    asyncio.create_task(_check_contradictions_background())
+    
     # Get session context (previous messages)
     messages_result = await db.execute(
         select(MessageModel)
