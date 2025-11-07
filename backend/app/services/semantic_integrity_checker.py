@@ -75,22 +75,28 @@ class SemanticIntegrityChecker:
             
             logger.info(f"Found {len(similar_memories)} similar memories to check for contradictions")
             
-            # 2. Extract entities from new knowledge
-            new_entities = self._extract_entities(clean_content)
-            
-            # 3. Compare with each similar memory
+            # 2. Analyze each similar memory with LLM
+            # Since we removed language-specific keywords, we rely on semantic similarity
+            # and let the LLM do all the contradiction detection
             contradictions = []
             for memory_content in similar_memories:
                 # Clean memory content (remove type prefix)
                 clean_memory = re.sub(r'^\[.*?\]\s*', '', memory_content).strip()
                 
-                # Extract entities from existing memory
+                # Extract basic entities for optional pre-filtering (dates/numbers only)
+                new_entities = self._extract_entities(clean_content)
                 existing_entities = self._extract_entities(clean_memory)
                 
-                # Check if entities conflict
-                if self._entities_conflict(new_entities, existing_entities):
-                    logger.info(f"Potential contradiction detected, analyzing with LLM...")
-                    # 4. Use LLM for deep analysis
+                # Lightweight pre-filter: if both have dates/numbers, check if they differ
+                # Otherwise, semantic similarity already filtered, so check with LLM anyway
+                should_check = True
+                if new_entities.get("dates") or existing_entities.get("dates") or \
+                   new_entities.get("numbers") or existing_entities.get("numbers"):
+                    should_check = self._entities_conflict(new_entities, existing_entities)
+                
+                if should_check:
+                    logger.info(f"Analyzing potential contradiction with LLM (language-agnostic)...")
+                    # Use LLM for semantic analysis (works in any language)
                     contradiction = await self._analyze_with_llm(
                         clean_content,
                         clean_memory,
