@@ -56,10 +56,7 @@ async def lifespan(app: FastAPI):
     health_status = await health_service.check_all_services()
     
     # Log summary
-    all_healthy = health_status.get("all_healthy", False) if isinstance(health_status, dict) else all(
-        status.get("healthy", False) 
-        for status in health_service.health_status.values()
-    )
+    all_healthy = health_status.get("all_healthy", False)
     
     if all_healthy:
         logging.info("✅ All services are healthy. Backend ready!")
