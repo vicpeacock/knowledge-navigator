@@ -192,24 +192,6 @@ class SemanticIntegrityChecker:
             }
         """
         try:
-            prompt = f"""Analizza queste due memorie e determina se si contraddicono.
-
-Memoria esistente: "{existing_memory}"
-
-Memoria nuova: "{new_memory}"
-
-Le memorie si contraddicono? (sì/no)
-Se sì, quale informazione è corretta? (memoria esistente, memoria nuova, o entrambe potrebbero essere corrette)
-Motivazione: [spiegazione breve]
-
-Rispondi in formato JSON:
-{{
-    "is_contradiction": true/false,
-    "confidence": 0.0-1.0,
-    "explanation": "spiegazione",
-    "which_correct": "existing" | "new" | "both" | "unknown"
-}}"""
-
             # Comprehensive LLM-based prompt for logical contradiction detection
             # Works in any language, detects all types of contradictions
             prompt = f"""Analyze if these two statements logically contradict each other.
