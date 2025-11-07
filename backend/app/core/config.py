@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     max_context_tokens: int = 8000  # Maximum tokens before summarizing
     context_keep_recent_messages: int = 10  # Keep last N messages when summarizing
     
+    # Semantic Integrity Check
+    integrity_confidence_threshold: float = 0.8  # Soglia confidenza contraddizioni
+    integrity_max_similar_memories: int = 10  # Numero memorie simili da controllare
+    integrity_check_exhaustive: bool = False  # Se True, controlla tutte (più lento)
+    
     # Google OAuth2 (for Calendar/Email)
     google_client_id: Optional[str] = None
     google_client_secret: Optional[str] = None
