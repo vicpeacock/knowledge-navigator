@@ -133,16 +133,22 @@ class SemanticIntegrityChecker:
     
     def _extract_entities(self, text: str) -> Dict[str, Any]:
         """
-        Extract entities (dates, numbers, names) from text.
-        Uses regex patterns for common entity types.
+        Extract entities and semantic concepts from text.
+        Uses regex patterns and keyword matching for common entity types.
         
         Returns:
-            Dict with extracted entities: {"dates": [...], "numbers": [...], "keywords": [...]}
+            Dict with extracted entities: {
+                "dates": [...], 
+                "numbers": [...], 
+                "keywords": [...],
+                "concepts": [...]  # Semantic concepts (work, location, preferences, etc.)
+            }
         """
         entities = {
             "dates": [],
             "numbers": [],
             "keywords": [],
+            "concepts": [],  # Semantic concepts for contradiction detection
         }
         
         # Extract dates (various formats)
@@ -162,60 +168,126 @@ class SemanticIntegrityChecker:
         numbers = re.findall(number_pattern, text)
         entities["numbers"] = [float(n) if '.' in n else int(n) for n in numbers]
         
-        # Extract keywords (important words like "nato", "compleanno", "altezza", etc.)
-        important_keywords = [
-            'nato', 'compleanno', 'nascita', 'data di nascita',
-            'altezza', 'peso', 'età',
-            'indirizzo', 'città', 'paese',
-            'lavoro', 'azienda', 'posizione',
-            'preferisce', 'preferenza',
+        # Extract keywords and semantic concepts
+        text_lower = text.lower()
+        
+        # Personal info keywords
+        personal_keywords = [
+            'nato', 'compleanno', 'nascita', 'data di nascita', 'born',
+            'altezza', 'peso', 'età', 'age', 'height', 'weight',
+            'indirizzo', 'città', 'paese', 'address', 'city', 'country',
+            'residenza', 'residence', 'domicilio',
         ]
         
-        text_lower = text.lower()
-        for keyword in important_keywords:
+        # Work/professional keywords
+        work_keywords = [
+            'lavoro', 'azienda', 'posizione', 'ruolo', 'job', 'work', 'company', 'position', 'role',
+            'impiego', 'occupazione', 'professione', 'employment', 'occupation', 'profession',
+            'dipendente', 'freelance', 'autonomo', 'employee', 'self-employed',
+        ]
+        
+        # Preferences keywords
+        preference_keywords = [
+            'preferisce', 'preferenza', 'prefers', 'preference',
+            'ama', 'non ama', 'piace', 'non piace', 'loves', 'hates', 'likes', 'dislikes',
+            'favorisce', 'favors', 'evita', 'avoids',
+        ]
+        
+        # Relationship keywords
+        relationship_keywords = [
+            'sposo', 'sposa', 'moglie', 'marito', 'spouse', 'wife', 'husband',
+            'figlio', 'figlia', 'son', 'daughter', 'child',
+            'genitore', 'parent', 'madre', 'padre', 'mother', 'father',
+        ]
+        
+        # Status keywords (for contradictions like "single" vs "married")
+        status_keywords = [
+            'single', 'celibe', 'nubile', 'sposato', 'married', 'divorziato', 'divorced',
+            'fidanzato', 'engaged', 'convivente', 'cohabiting',
+        ]
+        
+        # Collect all keywords
+        all_keywords = personal_keywords + work_keywords + preference_keywords + relationship_keywords + status_keywords
+        for keyword in all_keywords:
             if keyword in text_lower:
                 entities["keywords"].append(keyword)
+        
+        # Extract semantic concepts (categorize the type of information)
+        concepts = []
+        if any(kw in text_lower for kw in personal_keywords):
+            concepts.append("personal_info")
+        if any(kw in text_lower for kw in work_keywords):
+            concepts.append("work_info")
+        if any(kw in text_lower for kw in preference_keywords):
+            concepts.append("preference")
+        if any(kw in text_lower for kw in relationship_keywords):
+            concepts.append("relationship")
+        if any(kw in text_lower for kw in status_keywords):
+            concepts.append("status")
+        
+        entities["concepts"] = list(set(concepts))  # Remove duplicates
         
         return entities
     
     def _entities_conflict(self, new_entities: Dict[str, Any], existing_entities: Dict[str, Any]) -> bool:
         """
         Check if extracted entities conflict.
-        Returns True if there's a potential conflict.
+        This is a fast pre-filter - the LLM will do the deep semantic analysis.
+        Returns True if there's a potential conflict worth checking with LLM.
         """
-        # Check dates conflict
+        # Check if they share semantic concepts (same type of information)
+        new_concepts = set(new_entities.get("concepts", []))
+        existing_concepts = set(existing_entities.get("concepts", []))
+        
+        if not new_concepts.intersection(existing_concepts):
+            # Different types of information - unlikely to conflict
+            return False
+        
+        # They share concepts - check for potential conflicts
+        
+        # Check dates conflict (for same concept type)
         if new_entities.get("dates") and existing_entities.get("dates"):
-            # If both have dates and they're different, potential conflict
             new_dates = set(new_entities["dates"])
             existing_dates = set(existing_entities["dates"])
             if new_dates and existing_dates and not new_dates.intersection(existing_dates):
-                # Different dates found
+                # Different dates for same concept type - potential conflict
                 return True
         
         # Check numbers conflict (for same keyword context)
         if new_entities.get("numbers") and existing_entities.get("numbers"):
-            # If both have numbers and keywords overlap, check if numbers are very different
             new_keywords = set(new_entities.get("keywords", []))
             existing_keywords = set(existing_entities.get("keywords", []))
             
             if new_keywords.intersection(existing_keywords):
-                # Same keywords but different numbers might be a conflict
-                # This is a simple heuristic - LLM will do deeper analysis
+                # Same keywords but different numbers - potential conflict
                 new_nums = set(new_entities["numbers"])
                 existing_nums = set(existing_entities["numbers"])
                 if new_nums and existing_nums and not new_nums.intersection(existing_nums):
-                    # Different numbers for same keywords
                     return True
         
-        # Check keywords conflict (mutually exclusive preferences)
+        # Check for mutually exclusive keywords (e.g., "single" vs "married")
+        mutually_exclusive_pairs = [
+            (["single", "celibe", "nubile"], ["married", "sposato", "sposa", "moglie", "marito"]),
+            (["divorced", "divorziato"], ["married", "sposato"]),
+            (["loves", "ama", "piace"], ["hates", "non ama", "non piace", "dislikes"]),
+        ]
+        
         new_keywords = set(new_entities.get("keywords", []))
         existing_keywords = set(existing_entities.get("keywords", []))
         
-        # If both mention same type of info (e.g., both have "compleanno" or "nato")
-        # but with different values, potential conflict
-        if new_keywords.intersection(existing_keywords):
-            # Same type of information - check if values differ
-            # This is a simple check - LLM will do deeper analysis
+        for group1, group2 in mutually_exclusive_pairs:
+            has_group1_new = any(kw in new_keywords for kw in group1)
+            has_group2_existing = any(kw in existing_keywords for kw in group2)
+            has_group2_new = any(kw in new_keywords for kw in group2)
+            has_group1_existing = any(kw in existing_keywords for kw in group1)
+            
+            if (has_group1_new and has_group2_existing) or (has_group2_new and has_group1_existing):
+                # Mutually exclusive keywords found - definite conflict
+                return True
+        
+        # If they share concepts and keywords, worth checking with LLM
+        # (even if no obvious conflict, semantic analysis might find one)
+        if new_concepts.intersection(existing_concepts) and new_keywords.intersection(existing_keywords):
             return True
         
         return False
@@ -255,17 +327,36 @@ Rispondi in formato JSON:
     "which_correct": "existing" | "new" | "both" | "unknown"
 }}"""
 
-            # Use a simpler prompt for background agent (faster)
-            simple_prompt = f"""Analizza se queste due informazioni si contraddicono:
+            # Use a comprehensive prompt that guides LLM to detect logical contradictions
+            prompt = f"""Analizza se queste due informazioni si contraddicono logicamente.
 
-1. "{existing_memory}"
-2. "{new_memory}"
+INFORMAZIONE ESISTENTE: "{existing_memory}"
+INFORMAZIONE NUOVA: "{new_memory}"
 
-Rispondi SOLO con JSON:
-{{"is_contradiction": true/false, "confidence": 0.0-1.0, "explanation": "breve spiegazione"}}"""
+Verifica se ci sono CONTRADDIZIONI LOGICHE tra le due informazioni. Considera:
+
+1. **Contraddizioni dirette**: Affermazioni opposte (es: "single" vs "sposato", "ama X" vs "non ama X")
+2. **Contraddizioni temporali**: Date/eventi incompatibili (es: "nato il 12 luglio" vs "compleanno 15 agosto")
+3. **Contraddizioni numeriche**: Valori incompatibili per la stessa proprietà (es: "età 30" vs "età 35" nella stessa data)
+4. **Contraddizioni di stato**: Stati mutuamente esclusivi (es: "lavora in A" vs "lavora in B" contemporaneamente)
+5. **Contraddizioni di preferenza**: Preferenze opposte (es: "preferisce X" vs "preferisce Y" per la stessa cosa)
+6. **Contraddizioni di relazione**: Relazioni incompatibili (es: "single" vs "ha moglie")
+
+IMPORTANTE:
+- NON sono contraddizioni: informazioni complementari, dettagli aggiuntivi, informazioni su periodi diversi
+- SONO contraddizioni: affermazioni che si escludono a vicenda logicamente
+- Considera il CONTESTO: "lavora in A nel 2020" e "lavora in B nel 2024" NON sono contraddizioni
+
+Rispondi SOLO con JSON (nessun altro testo):
+{{
+    "is_contradiction": true/false,
+    "confidence": 0.0-1.0,
+    "explanation": "breve spiegazione del tipo di contraddizione o perché non c'è contraddizione",
+    "contradiction_type": "direct|temporal|numerical|status|preference|relationship|none"
+}}"""
 
             response = await self.ollama_client.generate_with_context(
-                prompt=simple_prompt,
+                prompt=prompt,
                 session_context=[],
                 retrieved_memory=None,
                 tools=None,
@@ -288,6 +379,7 @@ Rispondi SOLO con JSON:
                     "confidence": float(parsed.get("confidence", 0.0)),
                     "explanation": parsed.get("explanation", ""),
                     "which_correct": parsed.get("which_correct", "unknown"),
+                    "contradiction_type": parsed.get("contradiction_type", "none"),
                 }
             except json.JSONDecodeError:
                 # Fallback: try to parse from text

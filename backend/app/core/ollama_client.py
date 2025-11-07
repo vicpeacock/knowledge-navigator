@@ -16,7 +16,8 @@ class OllamaClient:
         self.base_url = base_url or settings.ollama_base_url
         self.model = model or settings.ollama_model
         # Use longer timeout for background agent (phi3:mini can be slower)
-        timeout_value = 180.0 if base_url == settings.ollama_background_base_url else 120.0
+        actual_base_url = self.base_url
+        timeout_value = 180.0 if actual_base_url == settings.ollama_background_base_url else 120.0
         self.client = httpx.AsyncClient(timeout=timeout_value)
 
     async def generate(
