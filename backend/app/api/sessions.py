@@ -1109,6 +1109,34 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
         except Exception as e:
             logger.warning(f"Error scheduling auto-learning from conversation: {e}", exc_info=True)
 
+    # Check for pending notifications
+    from app.services.notification_service import NotificationService
+    notification_service = NotificationService(db)
+    
+    pending_notifications = await notification_service.get_pending_notifications(
+        session_id=session_id,
+        read=False,
+    )
+    
+    # Group by urgency
+    high_urgency = [n for n in pending_notifications if n.get("urgency") == "high"]
+    medium_urgency = [n for n in pending_notifications if n.get("urgency") == "medium"]
+    low_urgency = [n for n in pending_notifications if n.get("urgency") == "low"]
+    
+    # Format high urgency notifications for response
+    formatted_high_notifications = []
+    for notif in high_urgency:
+        if notif.get("type") == "contradiction":
+            content = notif.get("content", {})
+            contradictions = content.get("contradictions", [])
+            if contradictions:
+                # Format contradiction notification
+                formatted_high_notifications.append({
+                    "type": "contradiction",
+                    "content": content,
+                    "id": notif.get("id"),
+                })
+    
     # Build detailed tool execution information
     tool_details = []
     for tr in tool_results:
