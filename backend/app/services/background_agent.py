@@ -66,7 +66,7 @@ class BackgroundAgent:
                 confidence_threshold=settings.integrity_confidence_threshold,
             )
             
-            logger.debug(f"Integrity check result: has_contradiction={contradiction_info.get('has_contradiction')}, confidence={contradiction_info.get('confidence', 0):.2f}, contradictions_count={len(contradiction_info.get('contradictions', []))}")
+            logger.info(f"Integrity check result: has_contradiction={contradiction_info.get('has_contradiction')}, confidence={contradiction_info.get('confidence', 0):.2f}, contradictions_count={len(contradiction_info.get('contradictions', []))}")
             
             if contradiction_info.get("has_contradiction"):
                 logger.warning(f"⚠️ Contradiction detected for knowledge: {knowledge_item.get('content', '')[:50]}...")
@@ -86,7 +86,7 @@ class BackgroundAgent:
                 
                 logger.info(f"✅ Created contradiction notification {notification.id} for session {session_id}")
             else:
-                logger.debug(f"No contradictions found for knowledge: {knowledge_item.get('content', '')[:50]}... (confidence: {contradiction_info.get('confidence', 0):.2f})")
+                logger.info(f"No contradictions found for knowledge: {knowledge_item.get('content', '')[:50]}... (confidence: {contradiction_info.get('confidence', 0):.2f})")
                 
         except Exception as e:
             logger.error(f"Error processing new knowledge in background: {e}", exc_info=True)
