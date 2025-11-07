@@ -1096,18 +1096,26 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
             if notif.get("type") == "contradiction":
                 content = notif.get("content", {})
                 contradictions = content.get("contradictions", [])
+                confidence = content.get("confidence", 0.0)
+                
                 if contradictions:
-                    # Format contradiction notification
+                    # Main decides notification urgency based on confidence and contradiction type
+                    # High confidence (>0.8) = HIGH urgency, Medium (0.6-0.8) = MEDIUM, Low (<0.6) = LOW
+                    final_urgency = "high"  # Default for contradictions
+                    if confidence < 0.6:
+                        final_urgency = "low"
+                    elif confidence < 0.8:
+                        final_urgency = "medium"
+                    
+                    logger.info(f"📋 Main decided notification urgency: {final_urgency} (confidence: {confidence:.2f})")
+                    
+                    # Format contradiction notification with Main's decision
                     formatted_high_notifications.append({
                         "type": "contradiction",
+                        "urgency": final_urgency,  # Main's decision
                         "content": content,
                         "id": notif.get("id"),
                     })
-                    
-                    # Build notification message for user (will be shown in StatusPanel, not in LLM response)
-                    # The notification is already in formatted_high_notifications and will be displayed separately
-                    # We don't prepend it to response_text to avoid the LLM including it in its response
-                    pass
     
     # NOTE: High urgency notifications are NOT prepended to response_text
     # They are sent separately in high_urgency_notifications field and displayed in StatusPanel
