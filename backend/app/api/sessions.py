@@ -24,6 +24,7 @@ from app.core.dependencies import get_ollama_client, get_memory_manager
 from app.core.ollama_client import OllamaClient
 from app.core.memory_manager import MemoryManager
 from app.core.config import settings
+from app.agents import run_prototype_event
 
 router = APIRouter()
 
@@ -600,6 +601,31 @@ async def chat(
     )
     db.add(user_message)
     await db.commit()
+    
+    # LangGraph prototype branch (bypass legacy pipeline when flag is enabled)
+    if settings.use_langgraph_prototype:
+        lg_state = await run_prototype_event(request.message)
+        notifications = lg_state.get("notifications") or []
+        response_text = lg_state.get("response") or "LangGraph prototype: risposta generata."
+        
+        assistant_message = MessageModel(
+            session_id=session_id,
+            role="assistant",
+            content=response_text,
+            session_metadata={"memory_used": memory_used, "tools_used": []},
+        )
+        db.add(assistant_message)
+        await db.commit()
+        
+        return ChatResponse(
+            response=response_text,
+            session_id=session_id,
+            memory_used=memory_used,
+            tools_used=[],
+            tool_details=[],
+            notifications_count=len(notifications),
+            high_urgency_notifications=notifications,
+        )
     
     # Initialize tool manager
     from app.core.tool_manager import ToolManager
