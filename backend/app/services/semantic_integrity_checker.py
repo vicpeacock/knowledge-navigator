@@ -289,6 +289,7 @@ Rispondi SOLO con JSON (nessun altro testo):
     "contradiction_type": "direct|temporal|numerical|status|preference|relationship|none"
 }}"""
 
+            logger.debug(f"Calling LLM for contradiction analysis (model: {self.ollama_client.model}, base_url: {self.ollama_client.base_url})")
             response = await self.ollama_client.generate_with_context(
                 prompt=prompt,
                 session_context=[],
@@ -299,14 +300,18 @@ Rispondi SOLO con JSON (nessun altro testo):
                 return_raw=False,
             )
             
+            logger.debug(f"LLM raw response (first 500 chars): {response[:500]}")
+            
             # Parse JSON response
             try:
                 # Try to extract JSON from response
                 json_match = re.search(r'\{.*\}', response, re.DOTALL)
                 if json_match:
                     parsed = json.loads(json_match.group())
+                    logger.debug(f"Parsed JSON: {parsed}")
                 else:
                     parsed = json.loads(response)
+                    logger.debug(f"Parsed JSON (direct): {parsed}")
                 
                 return {
                     "is_contradiction": parsed.get("is_contradiction", False),
