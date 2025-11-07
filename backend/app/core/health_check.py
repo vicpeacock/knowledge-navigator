@@ -1,0 +1,178 @@
+"""
+Health check service for verifying all dependencies are available at startup
+"""
+import httpx
+import logging
+from typing import Dict, Any, Optional
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class HealthCheckService:
+    """Service for checking health of all dependencies"""
+    
+    def __init__(self):
+        self.health_status: Dict[str, Dict[str, Any]] = {}
+    
+    async def check_all_services(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Check health of all services:
+        - PostgreSQL
+        - ChromaDB
+        - Ollama Main
+        - Ollama Background
+        """
+        logger.info("🔍 Starting health check for all services...")
+        
+        # Check PostgreSQL
+        postgres_status = await self._check_postgres()
+        self.health_status["postgres"] = postgres_status
+        
+        # Check ChromaDB
+        chromadb_status = await self._check_chromadb()
+        self.health_status["chromadb"] = chromadb_status
+        
+        # Check Ollama Main
+        ollama_main_status = await self._check_ollama_main()
+        self.health_status["ollama_main"] = ollama_main_status
+        
+        # Check Ollama Background
+        ollama_background_status = await self._check_ollama_background()
+        self.health_status["ollama_background"] = ollama_background_status
+        
+        # Summary
+        all_healthy = all(
+            status.get("healthy", False) 
+            for status in self.health_status.values()
+        )
+        
+        logger.info(f"✅ Health check completed. All services healthy: {all_healthy}")
+        if not all_healthy:
+            logger.warning("⚠️  Some services are not healthy:")
+            for service, status in self.health_status.items():
+                if not status.get("healthy", False):
+                    logger.warning(f"  - {service}: {status.get('error', 'Unknown error')}")
+        
+        return self.health_status
+    
+    async def _check_postgres(self) -> Dict[str, Any]:
+        """Check PostgreSQL connection"""
+        try:
+            engine = create_async_engine(settings.database_url)
+            async with engine.connect() as conn:
+                await conn.execute("SELECT 1")
+            await engine.dispose()
+            return {"healthy": True, "message": "PostgreSQL connection successful"}
+        except Exception as e:
+            logger.error(f"❌ PostgreSQL health check failed: {e}")
+            return {"healthy": False, "error": str(e)}
+    
+    async def _check_chromadb(self) -> Dict[str, Any]:
+        """Check ChromaDB connection"""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v1/heartbeat"
+                )
+                if response.status_code == 200:
+                    return {"healthy": True, "message": "ChromaDB connection successful"}
+                else:
+                    return {"healthy": False, "error": f"ChromaDB returned status {response.status_code}"}
+        except Exception as e:
+            logger.error(f"❌ ChromaDB health check failed: {e}")
+            return {"healthy": False, "error": str(e)}
+    
+    async def _check_ollama_main(self) -> Dict[str, Any]:
+        """Check Ollama Main connection and model availability"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Check if Ollama is running
+                response = await client.get(f"{settings.ollama_base_url}/api/tags")
+                if response.status_code != 200:
+                    return {"healthy": False, "error": f"Ollama main returned status {response.status_code}"}
+                
+                # Check if model is available
+                models = response.json().get("models", [])
+                model_names = [m.get("name", "") for m in models]
+                
+                if settings.ollama_model not in model_names:
+                    return {
+                        "healthy": False,
+                        "error": f"Model '{settings.ollama_model}' not found. Available: {model_names}"
+                    }
+                
+                return {
+                    "healthy": True,
+                    "message": f"Ollama main connection successful, model '{settings.ollama_model}' available"
+                }
+        except httpx.ConnectError:
+            logger.error(f"❌ Ollama main health check failed: Connection refused")
+            return {"healthy": False, "error": "Cannot connect to Ollama main (connection refused)"}
+        except Exception as e:
+            logger.error(f"❌ Ollama main health check failed: {e}")
+            return {"healthy": False, "error": str(e)}
+    
+    async def _check_ollama_background(self) -> Dict[str, Any]:
+        """Check Ollama Background connection and model availability"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Check if Ollama Background is running
+                response = await client.get(f"{settings.ollama_background_base_url}/api/tags")
+                if response.status_code != 200:
+                    return {
+                        "healthy": False,
+                        "error": f"Ollama background returned status {response.status_code}"
+                    }
+                
+                # Check if model is available
+                models = response.json().get("models", [])
+                model_names = [m.get("name", "") for m in models]
+                
+                if settings.ollama_background_model not in model_names:
+                    return {
+                        "healthy": False,
+                        "error": f"Model '{settings.ollama_background_model}' not found. Available: {model_names}. "
+                                f"Run: docker exec knowledge-navigator-ollama-background ollama pull {settings.ollama_background_model}"
+                    }
+                
+                return {
+                    "healthy": True,
+                    "message": f"Ollama background connection successful, model '{settings.ollama_background_model}' available"
+                }
+        except httpx.ConnectError:
+            logger.error(f"❌ Ollama background health check failed: Connection refused")
+            return {
+                "healthy": False,
+                "error": "Cannot connect to Ollama background (connection refused). "
+                        "Make sure the container is running: docker-compose up -d ollama-background"
+            }
+        except Exception as e:
+            logger.error(f"❌ Ollama background health check failed: {e}")
+            return {"healthy": False, "error": str(e)}
+    
+    def get_status_summary(self) -> Dict[str, Any]:
+        """Get summary of health status"""
+        all_healthy = all(
+            status.get("healthy", False) 
+            for status in self.health_status.values()
+        )
+        
+        return {
+            "all_healthy": all_healthy,
+            "services": self.health_status,
+        }
+
+
+# Global health check service instance
+_health_check_service: Optional[HealthCheckService] = None
+
+
+def get_health_check_service() -> HealthCheckService:
+    """Get global health check service instance"""
+    global _health_check_service
+    if _health_check_service is None:
+        _health_check_service = HealthCheckService()
+    return _health_check_service
+

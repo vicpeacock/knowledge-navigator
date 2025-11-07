@@ -5,9 +5,16 @@ import json
 
 
 class OllamaClient:
-    def __init__(self):
-        self.base_url = settings.ollama_base_url
-        self.model = settings.ollama_model
+    def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None):
+        """
+        Initialize Ollama client.
+        
+        Args:
+            base_url: Ollama base URL (default: settings.ollama_base_url)
+            model: Ollama model name (default: settings.ollama_model)
+        """
+        self.base_url = base_url or settings.ollama_base_url
+        self.model = model or settings.ollama_model
         self.client = httpx.AsyncClient(timeout=120.0)
 
     async def generate(

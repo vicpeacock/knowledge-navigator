@@ -23,10 +23,14 @@ class Settings(BaseSettings):
     chromadb_host: str = "localhost"
     chromadb_port: int = 8001  # Changed from 8000 to avoid conflict with FastAPI backend
 
-    # Ollama
+    # Ollama Main (per chat)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "gpt-oss:20b"
     ollama_api_key: Optional[str] = None  # API key for Ollama web search (from https://ollama.com)
+    
+    # Ollama Background (per task in background)
+    ollama_background_base_url: str = "http://localhost:11435"
+    ollama_background_model: str = "phi-3-mini"  # Modello piccolo ed efficiente per background tasks
 
     # MCP Gateway (default, can be overridden per integration)
     # Default: localhost:8080 (if backend runs on host)

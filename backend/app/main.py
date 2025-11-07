@@ -45,17 +45,39 @@ logging.info(f"Logging to file: {log_file.absolute()}")
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown"""
     # Startup
+    logging.info("🚀 Starting Knowledge Navigator backend...")
+    
+    # Initialize clients
     init_clients()
+    
+    # Health check all services
+    from app.core.health_check import get_health_check_service
+    health_service = get_health_check_service()
+    health_status = await health_service.check_all_services()
+    
+    # Log summary
+    all_healthy = health_status.get("all_healthy", False) if isinstance(health_status, dict) else all(
+        status.get("healthy", False) 
+        for status in health_service.health_status.values()
+    )
+    
+    if all_healthy:
+        logging.info("✅ All services are healthy. Backend ready!")
+    else:
+        logging.warning("⚠️  Some services are not healthy. Check logs above for details.")
+        logging.warning("⚠️  Backend will start but some features may not work correctly.")
     
     yield
     
     # Shutdown
+    logging.info("🛑 Shutting down Knowledge Navigator backend...")
     ollama = get_ollama_client()
     mcp = get_mcp_client()
     if ollama:
         await ollama.close()
     if mcp:
         await mcp.close()
+    logging.info("✅ Shutdown complete")
 
 
 app = FastAPI(
@@ -95,7 +117,16 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    """Health check endpoint - returns status of all services"""
+    from app.core.health_check import get_health_check_service
+    health_service = get_health_check_service()
+    
+    # Get current status (or run check if not done yet)
+    if not health_service.health_status:
+        await health_service.check_all_services()
+    
+    summary = health_service.get_status_summary()
+    return summary
 
 
 # Dependencies are imported from core.dependencies
