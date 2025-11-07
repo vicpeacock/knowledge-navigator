@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # Ollama Background (per task in background)
     # Può essere Ollama o llama.cpp (OpenAI-compatible API)
     ollama_background_base_url: str = "http://localhost:11435"  # Per llama.cpp: aggiungere /v1 automaticamente
-    ollama_background_model: str = "llama3.2:3b"  # Modello da usare
+    ollama_background_model: str = "Phi-3-mini-4k-instruct-q4"  # Modello llama.cpp (Phi-3-mini quantizzato Q4)
     use_llama_cpp_background: bool = True  # Se True, usa llama.cpp invece di Ollama per background
 
     # MCP Gateway (default, can be overridden per integration)
