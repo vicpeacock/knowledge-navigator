@@ -156,10 +156,12 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
         indexed_count = 0
         errors = []
         
+        logger.info(f"Processing {len(knowledge_items)} knowledge items for indexing")
         for item in knowledge_items:
             try:
                 content = item.get("content", "")
                 if not content:
+                    logger.debug("Skipping knowledge item: empty content")
                     continue
                 
                 # Add type information to content
@@ -167,14 +169,16 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                 formatted_content = f"[{knowledge_type.upper()}] {content}"
                 
                 importance = item.get("importance", 0.6)
+                logger.debug(f"Processing knowledge item: type={knowledge_type}, importance={importance}, content={content[:50]}...")
                 
                 # Check if similar knowledge already exists
                 existing = await self._check_duplicate_knowledge(content, importance)
                 if existing:
-                    logger.debug(f"Similar knowledge already exists, skipping: {content[:50]}...")
+                    logger.info(f"⚠️ Similar knowledge already exists, skipping: {content[:50]}...")
                     continue
                 
                 # Index in long-term memory (non-blocking)
+                logger.debug(f"Attempting to index knowledge: type={knowledge_type}, importance={importance}, content={content[:50]}...")
                 await self.memory_manager.add_long_term_memory(
                     db=db,
                     content=formatted_content,
@@ -183,7 +187,7 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                 )
                 
                 indexed_count += 1
-                logger.info(f"Indexed knowledge: {content[:50]}...")
+                logger.info(f"✅ Indexed knowledge: {content[:50]}... (importance: {importance})")
                 
             except Exception as e:
                 errors.append(f"Knowledge item: {str(e)}")
