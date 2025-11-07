@@ -448,8 +448,11 @@ async def chat(
     # Check for contradictions in user message (run in background, don't block response)
     # This checks EVERY user message against long-term memory, regardless of knowledge extraction
     import asyncio
+    import logging
     from app.db.database import AsyncSessionLocal
     from app.services.background_agent import BackgroundAgent
+    
+    logger = logging.getLogger(__name__)
     
     async def _check_contradictions_background():
         """Background task to check if user message contradicts existing memory"""
