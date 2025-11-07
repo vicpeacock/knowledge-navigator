@@ -58,7 +58,11 @@
 - ✅ Indicizzazione contenuti web in memoria (completata in Fase 1)
 - ✅ Test suite completa per indicizzazione email (10/10 test passati)
 - ✅ Test suite completa per indicizzazione web (9/9 test passati)
-- ❌ Auto-apprendimento migliorato da interazioni
+- ✅ Auto-apprendimento da conversazioni (ConversationLearner)
+- ✅ Ricerca semantica avanzata (hybrid search, query suggestions)
+- ✅ Consolidamento memoria (duplicati, riassunti)
+- ✅ Riassunto automatico conversazioni lunghe in memoria medium-term
+- ❌ **Controllo integrità semantica**: Identificare contraddizioni nella memoria long-term (es: "nato il 12 luglio" vs "compleanno 15 agosto")
 
 ---
 
@@ -116,10 +120,16 @@
 ### Fase 3 - Advanced Features (4-6 settimane)
 
 **Memoria Avanzata:**
-- [ ] Auto-apprendimento migliorato
-- [ ] Indicizzazione automatica email importanti
-- [ ] Indicizzazione automatica contenuti web
-- [ ] Sintesi e consolidamento memoria
+- [x] Auto-apprendimento da conversazioni (ConversationLearner)
+- [x] Indicizzazione automatica email importanti
+- [x] Indicizzazione automatica contenuti web
+- [x] Sintesi e consolidamento memoria (MemoryConsolidator)
+- [x] Riassunto automatico conversazioni lunghe in memoria medium-term (ConversationSummarizer)
+- [ ] **Controllo integrità semantica**: Sistema per identificare contraddizioni nella memoria long-term
+  - [ ] Rilevamento contraddizioni su date/eventi (es: "nato il 12 luglio" vs "compleanno 15 agosto")
+  - [ ] Rilevamento contraddizioni su preferenze/fatti personali
+  - [ ] Notifica all'utente quando viene rilevata una contraddizione
+  - [ ] Suggerimento di correzione o chiarimento
 
 **Ricerca e Discovery:**
 - [ ] Ricerca cross-sessione
