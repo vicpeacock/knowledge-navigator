@@ -161,7 +161,7 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
             try:
                 content = item.get("content", "")
                 if not content:
-                    logger.debug("Skipping knowledge item: empty content")
+                    logger.info("⚠️ Skipping knowledge item: empty content")
                     continue
                 
                 # Add type information to content
@@ -169,7 +169,7 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                 formatted_content = f"[{knowledge_type.upper()}] {content}"
                 
                 importance = item.get("importance", 0.6)
-                logger.debug(f"Processing knowledge item: type={knowledge_type}, importance={importance}, content={content[:50]}...")
+                logger.info(f"📝 Processing knowledge item: type={knowledge_type}, importance={importance}, content={content[:50]}...")
                 
                 # Check if similar knowledge already exists
                 existing = await self._check_duplicate_knowledge(content, importance)
@@ -178,7 +178,7 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                     continue
                 
                 # Index in long-term memory (non-blocking)
-                logger.debug(f"Attempting to index knowledge: type={knowledge_type}, importance={importance}, content={content[:50]}...")
+                logger.info(f"📝 Attempting to index knowledge: type={knowledge_type}, importance={importance}, content={content[:50]}...")
                 await self.memory_manager.add_long_term_memory(
                     db=db,
                     content=formatted_content,
