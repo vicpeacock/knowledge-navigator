@@ -96,8 +96,8 @@ class SemanticIntegrityChecker:
                 
                 if should_check:
                     logger.info(f"Analyzing potential contradiction with LLM (language-agnostic)...")
-                    logger.debug(f"  New: '{clean_content[:100]}...'")
-                    logger.debug(f"  Existing: '{clean_memory[:100]}...'")
+                    logger.info(f"  New: '{clean_content[:100]}...'")
+                    logger.info(f"  Existing: '{clean_memory[:100]}...'")
                     # Use LLM for semantic analysis (works in any language)
                     contradiction = await self._analyze_with_llm(
                         clean_content,
@@ -105,7 +105,7 @@ class SemanticIntegrityChecker:
                         threshold
                     )
                     
-                    logger.debug(f"LLM analysis result: is_contradiction={contradiction.get('is_contradiction')}, confidence={contradiction.get('confidence', 0):.2f}, threshold={threshold:.2f}")
+                    logger.info(f"LLM analysis result: is_contradiction={contradiction.get('is_contradiction')}, confidence={contradiction.get('confidence', 0):.2f}, threshold={threshold:.2f}")
                     
                     if contradiction.get("is_contradiction") and contradiction.get("confidence", 0) >= threshold:
                         contradiction["new_memory"] = clean_content
@@ -113,7 +113,7 @@ class SemanticIntegrityChecker:
                         contradictions.append(contradiction)
                         logger.warning(f"✅ Contradiction confirmed: {contradiction.get('explanation', 'No explanation')[:100]}...")
                     else:
-                        logger.debug(f"❌ No contradiction (is_contradiction={contradiction.get('is_contradiction')}, confidence={contradiction.get('confidence', 0):.2f} < threshold={threshold:.2f})")
+                        logger.info(f"❌ No contradiction (is_contradiction={contradiction.get('is_contradiction')}, confidence={contradiction.get('confidence', 0):.2f} < threshold={threshold:.2f})")
             
             return {
                 "has_contradiction": len(contradictions) > 0,
@@ -289,7 +289,7 @@ Rispondi SOLO con JSON (nessun altro testo):
     "contradiction_type": "direct|temporal|numerical|status|preference|relationship|none"
 }}"""
 
-            logger.debug(f"Calling LLM for contradiction analysis (model: {self.ollama_client.model}, base_url: {self.ollama_client.base_url})")
+            logger.info(f"Calling LLM for contradiction analysis (model: {self.ollama_client.model}, base_url: {self.ollama_client.base_url})")
             response = await self.ollama_client.generate_with_context(
                 prompt=prompt,
                 session_context=[],
@@ -300,7 +300,7 @@ Rispondi SOLO con JSON (nessun altro testo):
                 return_raw=False,
             )
             
-            logger.debug(f"LLM raw response (first 500 chars): {response[:500]}")
+            logger.info(f"LLM raw response (first 500 chars): {response[:500]}")
             
             # Parse JSON response
             try:
@@ -308,10 +308,10 @@ Rispondi SOLO con JSON (nessun altro testo):
                 json_match = re.search(r'\{.*\}', response, re.DOTALL)
                 if json_match:
                     parsed = json.loads(json_match.group())
-                    logger.debug(f"Parsed JSON: {parsed}")
+                    logger.info(f"Parsed JSON: {parsed}")
                 else:
                     parsed = json.loads(response)
-                    logger.debug(f"Parsed JSON (direct): {parsed}")
+                    logger.info(f"Parsed JSON (direct): {parsed}")
                 
                 return {
                     "is_contradiction": parsed.get("is_contradiction", False),
