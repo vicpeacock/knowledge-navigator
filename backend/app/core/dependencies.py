@@ -24,13 +24,21 @@ def get_ollama_client() -> OllamaClient:
     """Get main Ollama client (for chat)"""
     return _ollama_client
 
-def get_ollama_background_client() -> OllamaClient:
-    """Get background Ollama client (for background tasks)"""
+def get_ollama_background_client():
+    """Get background LLM client (for background tasks) - can be Ollama or llama.cpp"""
     from app.core.config import settings
-    return OllamaClient(
-        base_url=settings.ollama_background_base_url,
-        model=settings.ollama_background_model
-    )
+    
+    if settings.use_llama_cpp_background:
+        from app.core.llama_cpp_client import LlamaCppClient
+        return LlamaCppClient(
+            base_url=settings.ollama_background_base_url,
+            model=settings.ollama_background_model
+        )
+    else:
+        return OllamaClient(
+            base_url=settings.ollama_background_base_url,
+            model=settings.ollama_background_model
+        )
 
 
 def get_mcp_client() -> MCPClient:
