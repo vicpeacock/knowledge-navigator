@@ -261,31 +261,26 @@ Rispondi in formato JSON:
     "which_correct": "existing" | "new" | "both" | "unknown"
 }}"""
 
-            # Use a comprehensive prompt that guides LLM to detect logical contradictions
-            prompt = f"""Analizza se queste due informazioni si contraddicono logicamente.
+            # Simplified prompt for phi3:mini (smaller model, needs shorter prompts)
+            prompt = f"""Do these two statements contradict each other logically?
 
-INFORMAZIONE ESISTENTE: "{existing_memory}"
-INFORMAZIONE NUOVA: "{new_memory}"
+EXISTING: "{existing_memory}"
+NEW: "{new_memory}"
 
-Verifica se ci sono CONTRADDIZIONI LOGICHE tra le due informazioni. Considera:
+Check for logical contradictions:
+- Direct opposites (e.g., "single" vs "married")
+- Different dates for same event (e.g., "born July 12" vs "born August 15")
+- Different numbers for same property (e.g., "age 30" vs "age 35")
+- Mutually exclusive states (e.g., "works at A" vs "works at B" at same time)
+- Opposite preferences (e.g., "likes X" vs "dislikes X")
 
-1. **Contraddizioni dirette**: Affermazioni opposte (es: "single" vs "sposato", "ama X" vs "non ama X")
-2. **Contraddizioni temporali**: Date/eventi incompatibili (es: "nato il 12 luglio" vs "compleanno 15 agosto")
-3. **Contraddizioni numeriche**: Valori incompatibili per la stessa proprietà (es: "età 30" vs "età 35" nella stessa data)
-4. **Contraddizioni di stato**: Stati mutuamente esclusivi (es: "lavora in A" vs "lavora in B" contemporaneamente)
-5. **Contraddizioni di preferenza**: Preferenze opposte (es: "preferisce X" vs "preferisce Y" per la stessa cosa)
-6. **Contraddizioni di relazione**: Relazioni incompatibili (es: "single" vs "ha moglie")
+NOT contradictions: complementary info, additional details, different time periods.
 
-IMPORTANTE:
-- NON sono contraddizioni: informazioni complementari, dettagli aggiuntivi, informazioni su periodi diversi
-- SONO contraddizioni: affermazioni che si escludono a vicenda logicamente
-- Considera il CONTESTO: "lavora in A nel 2020" e "lavora in B nel 2024" NON sono contraddizioni
-
-Rispondi SOLO con JSON (nessun altro testo):
+Respond ONLY with JSON (no other text):
 {{
     "is_contradiction": true/false,
     "confidence": 0.0-1.0,
-    "explanation": "breve spiegazione del tipo di contraddizione o perché non c'è contraddizione",
+    "explanation": "brief explanation",
     "contradiction_type": "direct|temporal|numerical|status|preference|relationship|none"
 }}"""
 
