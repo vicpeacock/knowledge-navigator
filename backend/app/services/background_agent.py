@@ -72,19 +72,26 @@ class BackgroundAgent:
                 logger.warning(f"⚠️ Contradiction detected for knowledge: {knowledge_item.get('content', '')[:50]}...")
                 logger.warning(f"   Confidence: {contradiction_info.get('confidence', 0):.2f}, Count: {len(contradiction_info.get('contradictions', []))}")
                 
-                # Create notification (always HIGH urgency for contradictions)
+                # STEP 1: Write to status update (create notification in database)
+                # This is the "status update" - stored in database for Main to process
                 notification = await self.notification_service.create_notification(
                     type="contradiction",
-                    urgency="high",
+                    urgency="high",  # Initial urgency - Main will decide final urgency
                     content={
                         "new_knowledge": knowledge_item,
                         "contradictions": contradiction_info.get("contradictions", []),
                         "confidence": contradiction_info.get("confidence", 0.0),
+                        "status_update": True,  # Flag to indicate this should appear in status update
                     },
                     session_id=session_id,
                 )
                 
-                logger.info(f"✅ Created contradiction notification {notification.id} for session {session_id}")
+                logger.info(f"✅ Created contradiction notification {notification.id} for session {session_id} (status update written)")
+                
+                # STEP 2: Notify Main asynchronously (Main will decide notification type)
+                # The Main process will check for new notifications when generating response
+                # and decide the final urgency level and format
+                logger.info(f"📢 Contradiction notification sent to Main for processing (session {session_id})")
             else:
                 logger.info(f"No contradictions found for knowledge: {knowledge_item.get('content', '')[:50]}... (confidence: {contradiction_info.get('confidence', 0):.2f})")
                 
