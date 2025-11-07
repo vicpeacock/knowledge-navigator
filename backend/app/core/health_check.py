@@ -77,22 +77,12 @@ class HealthCheckService:
         """Check ChromaDB connection"""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                # ChromaDB v1.0.0+ uses API v2
-                # Try v2 first, fallback to v1 for older versions
+                # ChromaDB v1.0.0+ uses API v2 (v1 is deprecated and returns 410)
                 response = await client.get(
                     f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v2/heartbeat"
                 )
                 if response.status_code == 200:
                     return {"healthy": True, "message": "ChromaDB connection successful"}
-                elif response.status_code == 410:
-                    # v1 endpoint deprecated, try v2
-                    response = await client.get(
-                        f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v2/heartbeat"
-                    )
-                    if response.status_code == 200:
-                        return {"healthy": True, "message": "ChromaDB connection successful"}
-                    else:
-                        return {"healthy": False, "error": f"ChromaDB returned status {response.status_code}"}
                 else:
                     return {"healthy": False, "error": f"ChromaDB returned status {response.status_code}"}
         except Exception as e:
