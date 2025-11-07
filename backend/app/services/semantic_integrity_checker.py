@@ -122,11 +122,13 @@ class SemanticIntegrityChecker:
     async def _find_similar_memories(self, content: str, n_results: int = 10) -> List[str]:
         """Find similar memories using semantic search"""
         try:
+            logger.info(f"Searching for similar memories to: '{content[:100]}...'")
             # Use long-term memory retrieval with high similarity threshold
             similar = await self.memory_manager.retrieve_long_term_memory(
                 content,
                 n_results=n_results,
             )
+            logger.info(f"Found {len(similar)} similar memories: {[s[:50] + '...' if len(s) > 50 else s for s in similar[:3]]}")
             return similar
         except Exception as e:
             logger.error(f"Error finding similar memories: {e}", exc_info=True)
