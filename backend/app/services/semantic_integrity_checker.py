@@ -133,30 +133,32 @@ class SemanticIntegrityChecker:
     
     def _extract_entities(self, text: str) -> Dict[str, Any]:
         """
-        Extract entities and semantic concepts from text.
-        Uses regex patterns and keyword matching for common entity types.
+        Extract basic entities from text (language-agnostic).
+        Only extracts dates and numbers - semantic analysis is done by LLM.
         
         Returns:
             Dict with extracted entities: {
-                "dates": [...], 
-                "numbers": [...], 
-                "keywords": [...],
-                "concepts": [...]  # Semantic concepts (work, location, preferences, etc.)
+                "dates": [...],  # Extracted dates (various formats)
+                "numbers": [...],  # Extracted numbers
             }
         """
         entities = {
             "dates": [],
             "numbers": [],
-            "keywords": [],
-            "concepts": [],  # Semantic concepts for contradiction detection
         }
         
-        # Extract dates (various formats) - use full match to get complete dates
+        # Extract dates (various formats) - language-agnostic patterns
+        # These patterns work for many languages (Italian, English, etc.)
         date_patterns = [
             (r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', lambda m: m.group(0)),  # DD/MM/YYYY or DD-MM-YYYY
-            (r'\d{1,2}\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{2,4}', lambda m: m.group(0)),  # "12 luglio 1966"
-            (r'(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{1,2},?\s+\d{2,4}', lambda m: m.group(0)),  # "luglio 12, 1966"
-            (r'\d{1,2}\s+(gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic)\s+\d{2,4}', lambda m: m.group(0)),  # "12 lug 1966"
+            # Italian month names
+            (r'\d{1,2}\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{2,4}', lambda m: m.group(0)),
+            (r'(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{1,2},?\s+\d{2,4}', lambda m: m.group(0)),
+            (r'\d{1,2}\s+(gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic)\s+\d{2,4}', lambda m: m.group(0)),
+            # English month names
+            (r'\d{1,2}\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{2,4}', lambda m: m.group(0)),
+            (r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{2,4}', lambda m: m.group(0)),
+            (r'\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{2,4}', lambda m: m.group(0)),
         ]
         
         for pattern, extractor in date_patterns:
@@ -164,137 +166,53 @@ class SemanticIntegrityChecker:
             for match in matches:
                 entities["dates"].append(extractor(match))
         
-        # Extract numbers (integers and decimals)
+        # Extract numbers (integers and decimals) - universal
         number_pattern = r'\b\d+(?:\.\d+)?\b'
         numbers = re.findall(number_pattern, text)
         entities["numbers"] = [float(n) if '.' in n else int(n) for n in numbers]
-        
-        # Extract keywords and semantic concepts
-        text_lower = text.lower()
-        
-        # Personal info keywords
-        personal_keywords = [
-            'nato', 'compleanno', 'nascita', 'data di nascita', 'born',
-            'altezza', 'peso', 'età', 'age', 'height', 'weight',
-            'indirizzo', 'città', 'paese', 'address', 'city', 'country',
-            'residenza', 'residence', 'domicilio',
-        ]
-        
-        # Work/professional keywords
-        work_keywords = [
-            'lavoro', 'azienda', 'posizione', 'ruolo', 'job', 'work', 'company', 'position', 'role',
-            'impiego', 'occupazione', 'professione', 'employment', 'occupation', 'profession',
-            'dipendente', 'freelance', 'autonomo', 'employee', 'self-employed',
-        ]
-        
-        # Preferences keywords
-        preference_keywords = [
-            'preferisco', 'preferisce', 'preferenza', 'preferisci', 'preferiamo', 'preferiscono',
-            'prefers', 'preference', 'prefer',
-            'ama', 'non ama', 'piace', 'non piace', 'loves', 'hates', 'likes', 'dislikes',
-            'favorisce', 'favors', 'evita', 'avoids',
-        ]
-        
-        # Relationship keywords
-        relationship_keywords = [
-            'sposo', 'sposa', 'moglie', 'marito', 'spouse', 'wife', 'husband',
-            'figlio', 'figlia', 'son', 'daughter', 'child',
-            'genitore', 'parent', 'madre', 'padre', 'mother', 'father',
-        ]
-        
-        # Status keywords (for contradictions like "single" vs "married")
-        status_keywords = [
-            'single', 'celibe', 'nubile', 'sposato', 'married', 'divorziato', 'divorced',
-            'fidanzato', 'engaged', 'convivente', 'cohabiting',
-        ]
-        
-        # Collect all keywords - use word boundaries to avoid partial matches
-        all_keywords = personal_keywords + work_keywords + preference_keywords + relationship_keywords + status_keywords
-        for keyword in all_keywords:
-            # Use word boundaries to avoid matching "son" in "sono" or "son" in "person"
-            pattern = r'\b' + re.escape(keyword) + r'\b'
-            if re.search(pattern, text_lower):
-                entities["keywords"].append(keyword)
-        
-        # Extract semantic concepts (categorize the type of information)
-        concepts = []
-        if any(kw in text_lower for kw in personal_keywords):
-            concepts.append("personal_info")
-        if any(kw in text_lower for kw in work_keywords):
-            concepts.append("work_info")
-        if any(kw in text_lower for kw in preference_keywords):
-            concepts.append("preference")
-        if any(kw in text_lower for kw in relationship_keywords):
-            concepts.append("relationship")
-        if any(kw in text_lower for kw in status_keywords):
-            concepts.append("status")
-        
-        entities["concepts"] = list(set(concepts))  # Remove duplicates
         
         return entities
     
     def _entities_conflict(self, new_entities: Dict[str, Any], existing_entities: Dict[str, Any]) -> bool:
         """
-        Check if extracted entities conflict.
-        This is a fast pre-filter - the LLM will do the deep semantic analysis.
+        Check if extracted entities suggest a potential conflict.
+        This is a lightweight pre-filter - the LLM will do the deep semantic analysis.
         Returns True if there's a potential conflict worth checking with LLM.
+        
+        Since we removed language-specific keywords, we only check:
+        - Different dates (might indicate contradiction)
+        - Different numbers (might indicate contradiction)
+        - If both have dates/numbers, it's worth checking with LLM
         """
-        # Check if they share semantic concepts (same type of information)
-        new_concepts = set(new_entities.get("concepts", []))
-        existing_concepts = set(existing_entities.get("concepts", []))
-        
-        if not new_concepts.intersection(existing_concepts):
-            # Different types of information - unlikely to conflict
-            return False
-        
-        # They share concepts - check for potential conflicts
-        
-        # Check dates conflict (for same concept type)
+        # If both have dates and they're different, potential conflict
         if new_entities.get("dates") and existing_entities.get("dates"):
             new_dates = set(new_entities["dates"])
             existing_dates = set(existing_entities["dates"])
             if new_dates and existing_dates and not new_dates.intersection(existing_dates):
-                # Different dates for same concept type - potential conflict
+                # Different dates - potential conflict (LLM will determine if it's a real contradiction)
                 return True
         
-        # Check numbers conflict (for same keyword context)
+        # If both have numbers and they're different, potential conflict
+        # (but this is less reliable without context, so we're more conservative)
         if new_entities.get("numbers") and existing_entities.get("numbers"):
-            new_keywords = set(new_entities.get("keywords", []))
-            existing_keywords = set(existing_entities.get("keywords", []))
-            
-            if new_keywords.intersection(existing_keywords):
-                # Same keywords but different numbers - potential conflict
-                new_nums = set(new_entities["numbers"])
-                existing_nums = set(existing_entities["numbers"])
-                if new_nums and existing_nums and not new_nums.intersection(existing_nums):
+            new_nums = set(new_entities["numbers"])
+            existing_nums = set(existing_entities["numbers"])
+            if new_nums and existing_nums and not new_nums.intersection(existing_nums):
+                # Different numbers - might be a conflict (LLM will analyze context)
+                # But we're more conservative here since numbers alone don't mean much
+                # Only flag if there are also dates (suggests same type of info)
+                if new_entities.get("dates") or existing_entities.get("dates"):
                     return True
         
-        # Check for mutually exclusive keywords (e.g., "single" vs "married")
-        mutually_exclusive_pairs = [
-            (["single", "celibe", "nubile"], ["married", "sposato", "sposa", "moglie", "marito"]),
-            (["divorced", "divorziato"], ["married", "sposato"]),
-            (["loves", "ama", "piace"], ["hates", "non ama", "non piace", "dislikes"]),
-        ]
-        
-        new_keywords = set(new_entities.get("keywords", []))
-        existing_keywords = set(existing_entities.get("keywords", []))
-        
-        for group1, group2 in mutually_exclusive_pairs:
-            has_group1_new = any(kw in new_keywords for kw in group1)
-            has_group2_existing = any(kw in existing_keywords for kw in group2)
-            has_group2_new = any(kw in new_keywords for kw in group2)
-            has_group1_existing = any(kw in existing_keywords for kw in group1)
-            
-            if (has_group1_new and has_group2_existing) or (has_group2_new and has_group1_existing):
-                # Mutually exclusive keywords found - definite conflict
-                return True
-        
-        # If they share concepts and keywords, worth checking with LLM
-        # (even if no obvious conflict, semantic analysis might find one)
-        if new_concepts.intersection(existing_concepts) and new_keywords.intersection(existing_keywords):
+        # If both have dates or both have numbers, it's worth checking with LLM
+        # (semantic similarity search already filtered similar memories)
+        if (new_entities.get("dates") and existing_entities.get("dates")) or \
+           (new_entities.get("numbers") and existing_entities.get("numbers")):
             return True
         
-        return False
+        # Default: let LLM decide based on semantic similarity
+        # If memories are semantically similar (found by search), check them
+        return True
     
     async def _analyze_with_llm(
         self,
