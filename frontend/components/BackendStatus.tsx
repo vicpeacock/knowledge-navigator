@@ -26,7 +26,9 @@ export function BackendStatus({ children }: BackendStatusProps) {
         timeout: 5000, // 5 second timeout
       })
       
-      if (response.status === 200 && response.data?.status === 'healthy') {
+      // Check if backend is responding (even if some services are unhealthy)
+      if (response.status === 200 && response.data) {
+        // Backend is online if it responds (all_healthy can be false but backend is still functional)
         setBackendStatus('online')
       } else {
         setBackendStatus('offline')
