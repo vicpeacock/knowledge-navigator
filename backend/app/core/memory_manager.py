@@ -1,3 +1,13 @@
+import numpy as np
+
+# Compatibilità NumPy 2.x: alcune librerie (es. ChromaDB<=0.4.x) usano alias rimossi
+if not hasattr(np, "float_"):
+    np.float_ = np.float64  # type: ignore[attr-defined]
+if not hasattr(np, "int_"):
+    np.int_ = np.int64  # type: ignore[attr-defined]
+if not hasattr(np, "uint"):
+    np.uint = np.uint64  # type: ignore[attr-defined]
+
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 from typing import List, Dict, Any, Optional
