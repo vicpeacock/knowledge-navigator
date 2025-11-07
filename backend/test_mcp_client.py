@@ -6,9 +6,12 @@ Tests the MCP client directly without going through the chatbot
 import asyncio
 import sys
 import os
+import pytest
 
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+pytestmark = pytest.mark.skip(reason="Test di integrazione MCP da eseguire manualmente")
 
 from app.core.mcp_client import MCPClient
 from app.core.config import settings

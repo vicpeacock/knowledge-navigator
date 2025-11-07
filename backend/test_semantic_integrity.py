@@ -4,11 +4,14 @@ Simulates adding new knowledge that contradicts existing memories
 """
 import asyncio
 from uuid import uuid4
+import pytest
 from app.db.database import AsyncSessionLocal
 from app.core.memory_manager import MemoryManager
 from app.services.background_agent import BackgroundAgent
 from app.services.notification_service import NotificationService
 from app.core.dependencies import get_ollama_background_client
+
+pytestmark = pytest.mark.skip(reason="Test di integrazione sull'integrità semantica: eseguirlo manualmente")
 
 async def test_contradiction():
     """Test contradiction detection"""

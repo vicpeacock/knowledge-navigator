@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Test database connection"""
 import asyncio
+import pytest
 from app.db.database import AsyncSessionLocal
 from sqlalchemy import text
+
+pytestmark = pytest.mark.skip(reason="Test manuale di connessione DB: va eseguito solo all'occorrenza")
 
 async def test():
     try:

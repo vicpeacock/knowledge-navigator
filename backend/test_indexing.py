@@ -4,9 +4,12 @@ Script di test per verificare l'indicizzazione dei contenuti web
 import asyncio
 import sys
 from pathlib import Path
+import pytest
 
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent))
+
+pytestmark = pytest.mark.skip(reason="Test di integrazione per l'indicizzazione: eseguirlo manualmente quando richiesto")
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from app.core.config import settings

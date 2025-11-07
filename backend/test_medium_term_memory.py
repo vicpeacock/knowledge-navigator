@@ -8,7 +8,9 @@ import asyncio
 import sys
 import os
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timedelta
+import random
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,6 +24,9 @@ from app.core.memory_manager import MemoryManager
 from app.core.ollama_client import OllamaClient
 from app.services.conversation_summarizer import ConversationSummarizer
 from app.core.config import settings
+
+
+pytestmark = pytest.mark.skip(reason="Test di integrazione per medium-term memory: eseguire solo manualmente")
 
 
 async def test_medium_term_memory():

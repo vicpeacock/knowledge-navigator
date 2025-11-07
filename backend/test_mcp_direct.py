@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""
-Direct test of MCP library with Docker MCP Gateway
-"""
+"""Direct MCP API tests"""
 import asyncio
 import sys
+import os
+import pytest
 from contextlib import AsyncExitStack
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 import logging
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+pytestmark = pytest.mark.skip(reason="Test MCP diretto manuale: richiede ambiente dedicato")
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
