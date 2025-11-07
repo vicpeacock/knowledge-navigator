@@ -47,11 +47,8 @@
 - ❌ Notifiche push frontend
 
 **WhatsApp Integration (Fase 1 - ⏸️ Temporaneamente Disabilitata):**
-- ⏸️ Integrazione WhatsApp (Selenium + pywhatkit) - DISABILITATA
-- ⏸️ Lettura messaggi - DISABILITATA
-- ⏸️ Integrazione nelle risposte (tool get_whatsapp_messages) - DISABILITATA
-- ⏸️ Invio messaggi - DISABILITATA
-- 📝 **Nota**: L'integrazione WhatsApp è stata temporaneamente disabilitata a causa di problemi con l'estrazione delle date. Sarà riabilitata in futuro utilizzando WhatsApp Business API invece di Selenium/Web scraping.
+- ⏹️ Integrazione WhatsApp (Selenium + pywhatkit) **rimossa** dalla codebase
+- 📝 **Nota**: ripartiremo da zero con l'implementazione basata su WhatsApp Business API; nessun supporto WhatsApp è disponibile fino a quel refactoring.
 
 **Miglioramenti Memoria (Fase 2):**
 - ✅ Indicizzazione email in memoria (completata in Fase 1)
@@ -88,9 +85,9 @@
 - [x] Toggle "Web Search" (force_web_search) - UI e API per forzare ricerca web
 - [x] Test suite completa per indicizzazione web (9/9 test passati)
 
-**WhatsApp** ⏸️ Temporaneamente Disabilitata
-- [x] Setup integrazione WhatsApp (Selenium/Web scraping - problemi con date extraction)
-- [ ] **Pianificato**: Riimplementazione con WhatsApp Business API
+**WhatsApp** ⏹️ In attesa di nuova implementazione
+- [x] Rimozione integrazione Selenium/Web scraping
+- [ ] **Pianificato**: Implementazione con WhatsApp Business API
 - [ ] **Pianificato**: Lettura messaggi con Business API
 - [ ] **Pianificato**: Integrazione nelle risposte (tool get_whatsapp_messages)
 

@@ -62,7 +62,6 @@ async def restore_integrations():
             calendar_count = sum(1 for i in integrations if i.service_type == "calendar")
             email_count = sum(1 for i in integrations if i.service_type == "email")
             mcp_count = sum(1 for i in integrations if i.service_type == "mcp_server")
-            whatsapp_count = sum(1 for i in integrations if i.service_type == "whatsapp")
             
             print(f"\n📦 Per tipo:")
             if calendar_count > 0:
@@ -71,8 +70,6 @@ async def restore_integrations():
                 print(f"   📧 Email: {email_count}")
             if mcp_count > 0:
                 print(f"   🔌 MCP Server: {mcp_count}")
-            if whatsapp_count > 0:
-                print(f"   💬 WhatsApp: {whatsapp_count}")
             
             print("\n✅ Verifica completata!")
             
