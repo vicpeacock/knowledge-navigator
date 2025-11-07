@@ -15,11 +15,12 @@ fi
 lsof -ti:$PORT | xargs kill -9 2>/dev/null
 sleep 2
 
-# Avviare llama-server
+# Avviare llama-server con nohup per proteggerlo da SIGHUP
 echo "🚀 Avviando llama-server con Phi-3-mini su porta $PORT..."
 cd "$(dirname "$MODEL_PATH")"
 
-llama-server \
+# Usa nohup per proteggere il processo da SIGHUP (chiusura terminale, sleep Mac, etc.)
+nohup llama-server \
   -m "$(basename "$MODEL_PATH")" \
   --port $PORT \
   --host 127.0.0.1 \
@@ -29,6 +30,9 @@ llama-server \
   > "$LOG_FILE" 2>&1 &
 
 PID=$!
+# Disown il processo per rimuoverlo dalla job table della shell
+disown $PID
+
 echo "✅ llama-server avviato (PID: $PID)"
 echo "📝 Log: $LOG_FILE"
 echo "🌐 API: http://localhost:$PORT/v1/chat/completions"
