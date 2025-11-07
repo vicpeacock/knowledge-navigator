@@ -55,7 +55,10 @@ class HealthCheckService:
                 if not status.get("healthy", False):
                     logger.warning(f"  - {service}: {status.get('error', 'Unknown error')}")
         
-        return self.health_status
+        return {
+            "all_healthy": all_healthy,
+            "services": self.health_status,
+        }
     
     async def _check_postgres(self) -> Dict[str, Any]:
         """Check PostgreSQL connection"""
