@@ -64,6 +64,33 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(langgraph_app, "ToolManager", PlanningToolManager)
 
+    plan_calls: List[str] = []
+
+    async def fake_analyze(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        plan_calls.append("called")
+        return {
+            "needs_plan": True,
+            "reason": "Analisi automatica della richiesta email",
+            "steps": [
+                {
+                    "description": "Ho bisogno della tua conferma prima di leggere l'ultima email ricevuta.",
+                    "action": "wait_user",
+                },
+                {
+                    "description": "Recupero l'ultima email per analizzare il mittente.",
+                    "action": "tool",
+                    "tool": "get_emails",
+                    "inputs": {"max_results": 1, "include_body": True},
+                },
+                {
+                    "description": "Rispondo all'utente con le informazioni sul mittente.",
+                    "action": "respond",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(langgraph_app, "analyze_message_for_plan", fake_analyze)
+
     async def fake_summary(*args: Any, **kwargs: Any) -> str:
         return "Ho letto l'ultima email e ti ho riportato le informazioni principali."
 
@@ -128,7 +155,7 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
     assert "informazioni principali" in followup_response
     assert result_followup["plan_metadata"] is None
     assert PlanningToolManager.executed and PlanningToolManager.executed[0]["tool"] == "get_emails"
-    # Il planner heuristico evita ulteriori analisi
+    assert len(plan_calls) == 1
     notifications_followup = result_followup["chat_response"].high_urgency_notifications
     statuses_followup = [n["content"].get("status") for n in notifications_followup]
     assert "completed" in statuses_followup or "partial" in statuses_followup
