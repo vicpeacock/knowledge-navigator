@@ -212,7 +212,7 @@ class IntegrityAgent:
         ...
 ```
 
-#### 3.2 Main Agent
+#### 3.2 Main Agent (Chat Agent)
 
 **Ruolo**: Genera risposte chat e gestisce interazioni utente
 
@@ -560,4 +560,32 @@ class EventType(str, Enum):
 2. **Prototipo**: Implementare Orchestrator + 2 agenti base
 3. **Migrazione Incrementale**: Convertire agenti esistenti uno alla volta
 4. **Testing**: Test estensivi per coordinamento e comunicazione
+
+### Stato della pipeline LangGraph
+
+- [x] Pianificazione con LLM dedicato + logging nel pannello status
+- [x] Persistenza piano (`pending_plan` in session metadata) e resume su conferma
+- [ ] Loop tool fully migrated (attuale: mix pipeline legacy + LangGraph)
+
+### Approccio Pianificazione
+
+1. Analizza la richiesta con planner dedicato; se è semplice, `needs_plan=false`.
+2. Se servono tool o conferme, `needs_plan=true` con JSON di step (`tool/respond/wait_user`).
+3. Step `wait_user` bloccano la pipeline finché l’utente conferma.
+4. Step `tool` invocano `ToolManager`; i risultati vengono sintetizzati dall’LLM principale (`summarize_plan_results`).
+5. Piano completato → notifiche `completed`; in caso di sospensione → `waiting_confirmation`.
+
+### Glossario Stato/Node
+
+- **planner_client**: LLM dedicato alla generazione del piano.
+
+### Logging / Monitoring
+
+- `planning.generated`, `planning.waiting_confirmation`, `planning.completed`       
+- `planning.analysis`: risultato del planner LLM (reason + bozza step)
+
+### TODO / Evolutions
+
+- Caching planner / fallback multi-modello
+- Pianificazione come nodo separato nel grafo o agente indipendente
 
