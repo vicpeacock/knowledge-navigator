@@ -21,8 +21,13 @@ class LangGraphChatState(TypedDict, total=False):
     retrieved_memory: List[str]
     memory_used: Dict[str, Any]
     messages: List[Dict[str, str]]
+    tool_calls: List[Dict[str, Any]]
+    tool_results: List[Dict[str, Any]]
+    notifications: List[Dict[str, Any]]
     routing_decision: str
-    chat_response: ChatResponse
+    response: Optional[str]
+    chat_response: Optional[ChatResponse]
+    done: bool
 
 
 async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
@@ -40,12 +45,12 @@ async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
 async def orchestrator_node(state: LangGraphChatState) -> LangGraphChatState:
     """Per ora instrada sempre verso il main agent."""
 
-    state["routing_decision"] = "main"
+    state["routing_decision"] = "tool_loop"
     return state
 
 
-async def main_agent_node(state: LangGraphChatState) -> LangGraphChatState:
-    """Esegue la pipeline principale riutilizzando la logica legacy."""
+async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
+    """Stub iniziale del ciclo tool/LLM: delega alla pipeline principale."""
 
     chat_response = await run_main_agent_pipeline(
         db=state["db"],
@@ -57,23 +62,73 @@ async def main_agent_node(state: LangGraphChatState) -> LangGraphChatState:
         memory_used=state["memory_used"],
     )
     state["chat_response"] = chat_response
+    state["response"] = chat_response.response
+    state["done"] = True
+    return state
+
+
+async def knowledge_agent_node(state: LangGraphChatState) -> LangGraphChatState:
+    """Segnaposto per ConversationLearner (per ora no-op)."""
+
+    return state
+
+
+async def integrity_agent_node(state: LangGraphChatState) -> LangGraphChatState:
+    """Segnaposto per SemanticIntegrityChecker (per ora no-op)."""
+
+    return state
+
+
+async def notification_collector_node(state: LangGraphChatState) -> LangGraphChatState:
+    """Segnaposto per NotificationService (per ora no-op)."""
+
+    return state
+
+
+async def response_formatter_node(state: LangGraphChatState) -> LangGraphChatState:
+    """Garantisce che un ChatResponse sia presente nello stato finale."""
+
+    if "chat_response" not in state or state["chat_response"] is None:
+        state["chat_response"] = ChatResponse(
+            response=state.get("response", ""),
+            session_id=state["session_id"],
+            memory_used=state.get("memory_used", {}),
+            tools_used=[],
+            tool_details=[],
+            notifications_count=len(state.get("notifications", [])),
+            high_urgency_notifications=state.get("notifications", []),
+        )
     return state
 
 
 def _routing_router(state: LangGraphChatState) -> str:
-    return "main_agent"
+    return "tool_loop"
 
 
 def build_langgraph_app() -> StateGraph:
     graph = StateGraph(LangGraphChatState)
     graph.add_node("event_handler", event_handler_node)
     graph.add_node("orchestrator", orchestrator_node)
-    graph.add_node("main_agent", main_agent_node)
+    graph.add_node("tool_loop", tool_loop_node)
+    graph.add_node("knowledge_agent", knowledge_agent_node)
+    graph.add_node("integrity_agent", integrity_agent_node)
+    graph.add_node("notification_collector", notification_collector_node)
+    graph.add_node("response_formatter", response_formatter_node)
 
     graph.set_entry_point("event_handler")
     graph.add_edge("event_handler", "orchestrator")
-    graph.add_conditional_edges("orchestrator", _routing_router, {"main_agent": "main_agent"})
-    graph.add_edge("main_agent", END)
+    graph.add_conditional_edges(
+        "orchestrator",
+        _routing_router,
+        {
+            "tool_loop": "tool_loop",
+        },
+    )
+    graph.add_edge("tool_loop", "knowledge_agent")
+    graph.add_edge("knowledge_agent", "integrity_agent")
+    graph.add_edge("integrity_agent", "notification_collector")
+    graph.add_edge("notification_collector", "response_formatter")
+    graph.add_edge("response_formatter", END)
     return graph.compile()
 
 
@@ -98,6 +153,10 @@ async def run_langgraph_chat(
         "retrieved_memory": retrieved_memory,
         "memory_used": memory_used,
         "messages": [],
+        "tool_calls": [],
+        "tool_results": [],
+        "notifications": [],
+        "done": False,
     }
     final_state = await app.ainvoke(state)
     return final_state["chat_response"]
