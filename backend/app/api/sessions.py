@@ -609,9 +609,11 @@ async def chat(
             session_id=session_id,
             request=request,
             ollama=ollama,
+            memory_manager=memory,
             session_context=session_context,
             retrieved_memory=retrieved_memory,
             memory_used=memory_used,
+            previous_messages=all_messages_dict,
         )
     
     # Initialize tool manager
