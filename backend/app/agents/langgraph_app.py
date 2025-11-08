@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any, Dict, List, Optional, TypedDict
 from uuid import UUID
 
@@ -9,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ollama_client import OllamaClient
 from app.models.schemas import ChatRequest, ChatResponse
 from app.agents.main_agent import run_main_agent_pipeline
+from app.services.memory_manager import MemoryManager
 
 
 class LangGraphChatState(TypedDict, total=False):
@@ -17,6 +20,7 @@ class LangGraphChatState(TypedDict, total=False):
     request: ChatRequest
     db: AsyncSession
     ollama: OllamaClient
+    memory_manager: MemoryManager
     session_context: List[Dict[str, str]]
     retrieved_memory: List[str]
     memory_used: Dict[str, Any]
@@ -24,6 +28,7 @@ class LangGraphChatState(TypedDict, total=False):
     tool_calls: List[Dict[str, Any]]
     tool_results: List[Dict[str, Any]]
     notifications: List[Dict[str, Any]]
+    previous_messages: List[Dict[str, str]]
     routing_decision: str
     response: Optional[str]
     chat_response: Optional[ChatResponse]
@@ -68,7 +73,85 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
 
 
 async def knowledge_agent_node(state: LangGraphChatState) -> LangGraphChatState:
-    """Segnaposto per ConversationLearner (per ora no-op)."""
+    """Aggiorna la memoria breve e avvia auto-learning in background se necessario."""
+
+    request = state["request"]
+    if not request.use_memory:
+        return state
+
+    memory_manager = state.get("memory_manager")
+    if memory_manager is None:
+        return state
+
+    response_text = state.get("response")
+    if not response_text:
+        chat_response = state.get("chat_response")
+        if chat_response:
+            response_text = chat_response.response
+
+    if not response_text:
+        return state
+
+    logger = logging.getLogger(__name__)
+
+    # Update short-term memory with the latest exchange
+    try:
+        new_context = {
+            "last_user_message": request.message,
+            "last_assistant_message": response_text,
+            "message_count": len(state.get("previous_messages", [])) + 2,
+        }
+        await memory_manager.update_short_term_memory(
+            state["db"],
+            state["session_id"],
+            new_context,
+        )
+        state.setdefault("memory_used", {})["short_term"] = True
+    except Exception:  # pragma: no cover - log warning
+        logger.warning("Errore nell'aggiornamento della memoria breve", exc_info=True)
+
+    # Prepare recent conversation window for knowledge extraction
+    previous_messages = state.get("previous_messages", [])
+    recent_messages = previous_messages[-8:]
+    recent_messages.append({"role": "user", "content": request.message})
+    recent_messages.append({"role": "assistant", "content": response_text})
+
+    if len(recent_messages) < 2:
+        logger.info("⏭️ Skip auto-learning: conversazione insufficiente (%s messaggi)", len(recent_messages))
+        return state
+
+    try:
+        from app.services.conversation_learner import ConversationLearner
+        from app.db.database import AsyncSessionLocal
+
+        learner = ConversationLearner(memory_manager=memory_manager, ollama_client=state["ollama"])
+
+        async def _extract_knowledge_background() -> None:
+            async with AsyncSessionLocal() as db_session:
+                try:
+                    logger.info("🔍 Estrazione conoscenza da %s messaggi", len(recent_messages))
+                    knowledge_items = await learner.extract_knowledge_from_conversation(
+                        db=db_session,
+                        session_id=state["session_id"],
+                        messages=recent_messages,
+                        min_importance=0.6,
+                    )
+
+                    if knowledge_items:
+                        stats = await learner.index_extracted_knowledge(
+                            db=db_session,
+                            knowledge_items=knowledge_items,
+                            session_id=state["session_id"],
+                        )
+                        logger.info("✅ Auto-learning completato: %s elementi indicizzati", stats.get("indexed", 0))
+                    else:
+                        logger.info("ℹ️ Nessuna conoscenza estratta (soglia importanza non superata)")
+                except Exception:
+                    logger.warning("Errore nell'auto-learning in background", exc_info=True)
+
+        asyncio.create_task(_extract_knowledge_background())
+    except Exception:
+        logger.warning("Impossibile avviare auto-learning", exc_info=True)
 
     return state
 
@@ -138,9 +221,11 @@ async def run_langgraph_chat(
     session_id: UUID,
     request: ChatRequest,
     ollama: OllamaClient,
+    memory_manager: MemoryManager,
     session_context: List[Dict[str, str]],
     retrieved_memory: List[str],
     memory_used: Dict[str, Any],
+    previous_messages: Optional[List[Dict[str, str]]] = None,
 ) -> ChatResponse:
     app = build_langgraph_app()
     state: LangGraphChatState = {
@@ -149,6 +234,7 @@ async def run_langgraph_chat(
         "request": request,
         "db": db,
         "ollama": ollama,
+        "memory_manager": memory_manager,
         "session_context": session_context,
         "retrieved_memory": retrieved_memory,
         "memory_used": memory_used,
@@ -156,6 +242,7 @@ async def run_langgraph_chat(
         "tool_calls": [],
         "tool_results": [],
         "notifications": [],
+        "previous_messages": previous_messages or [],
         "done": False,
     }
     final_state = await app.ainvoke(state)
