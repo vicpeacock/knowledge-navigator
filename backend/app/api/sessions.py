@@ -604,7 +604,10 @@ async def chat(
     
     # LangGraph branch
     if settings.use_langgraph_prototype:
-        return await run_langgraph_chat(
+        existing_metadata = dict(session.session_metadata or {})
+        pending_plan = existing_metadata.get("pending_plan")
+
+        langgraph_result = await run_langgraph_chat(
             db=db,
             session_id=session_id,
             request=request,
@@ -614,7 +617,35 @@ async def chat(
             retrieved_memory=retrieved_memory,
             memory_used=memory_used,
             previous_messages=all_messages_dict,
+            pending_plan=pending_plan,
         )
+
+        chat_response = langgraph_result["chat_response"]
+        new_plan_metadata = langgraph_result.get("plan_metadata")
+
+        if new_plan_metadata:
+            existing_metadata["pending_plan"] = new_plan_metadata
+        else:
+            existing_metadata.pop("pending_plan", None)
+
+        session.session_metadata = existing_metadata
+
+        if not langgraph_result.get("assistant_message_saved", False):
+            assistant_message = MessageModel(
+                session_id=session_id,
+                role="assistant",
+                content=chat_response.response,
+                session_metadata={
+                    "memory_used": chat_response.memory_used,
+                    "tools_used": chat_response.tools_used,
+                },
+            )
+            db.add(assistant_message)
+
+        await db.commit()
+        await db.refresh(session)
+
+        return chat_response
     
     # Initialize tool manager
     from app.core.tool_manager import ToolManager

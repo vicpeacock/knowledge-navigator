@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, TypedDict
 from uuid import UUID
 
@@ -9,9 +11,334 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ollama_client import OllamaClient
-from app.models.schemas import ChatRequest, ChatResponse
+from app.models.schemas import ChatRequest, ChatResponse, ToolExecutionDetail
 from app.agents.main_agent import run_main_agent_pipeline
 from app.core.memory_manager import MemoryManager
+from app.core.tool_manager import ToolManager
+
+
+class PlanStep(TypedDict, total=False):
+    id: int
+    description: str
+    action: str  # tool | respond | wait_user
+    tool: Optional[str]
+    inputs: Dict[str, Any]
+    status: str
+    result_preview: Optional[str]
+    error: Optional[str]
+
+
+class LangGraphResult(TypedDict):
+    chat_response: ChatResponse
+    plan_metadata: Optional[Dict[str, Any]]
+    assistant_message_saved: bool
+
+
+ACK_REGEX = re.compile(
+    r"^(ok|okay|va bene|va bene\s*si|va bene\s*sì|va pure|vai pure|procedi|continua|fai pure|perfetto|d'accordo|si|sì|si grazie|sì grazie|si, grazie|sì, grazie|ok grazie|ok, grazie|certo|certo, grazie|thanks|grazie|yes please|yes, please|go ahead|do it|per favore|esegui|fallo)([!.]*)$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def is_acknowledgement(message: str) -> bool:
+    if not message:
+        return False
+    normalized = _normalize_text(message)
+    if not normalized:
+        return False
+    if len(normalized) > 40:
+        return False
+    if normalized in {"ok", "okay", "va bene", "va bene si", "va bene sì", "si", "sì", "si grazie", "sì grazie", "si, grazie", "sì, grazie", "grazie", "certo", "perfetto", "d'accordo", "procedi", "continua", "vai pure", "fai pure"}:
+        return True
+    return bool(ACK_REGEX.match(normalized))
+
+
+def should_force_web_search(request: ChatRequest, acknowledgement: bool) -> bool:
+    if not request.force_web_search:
+        return False
+    if acknowledgement:
+        return False
+    message = _normalize_text(request.message)
+    if not message:
+        return False
+    if len(message) < 20 and "?" not in request.message:
+        return False
+    keywords = [
+        "cerca",
+        "cercare",
+        "ricerca",
+        "web",
+        "internet",
+        "google",
+        "news",
+        "aggiornamenti",
+        "informazioni",
+        "ultime",
+        "notizie",
+    ]
+    return any(keyword in message for keyword in keywords)
+
+
+def build_tool_catalog(tools: List[Dict[str, Any]]) -> str:
+    catalog_lines = []
+    for tool in tools:
+        name = tool.get("name", "")
+        description = tool.get("description", "")
+        catalog_lines.append(f"- {name}: {description}")
+    return "\n".join(catalog_lines)
+
+
+def safe_json_loads(raw: str) -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        try:
+            cleaned = raw.strip().strip("`")
+            return json.loads(cleaned)
+        except Exception:
+            return None
+
+
+def normalize_plan_steps(plan_payload: List[Dict[str, Any]], available_tool_names: List[str]) -> List[PlanStep]:
+    normalized_steps: List[PlanStep] = []
+    for idx, raw_step in enumerate(plan_payload, start=1):
+        if not isinstance(raw_step, dict):
+            continue
+        action = raw_step.get("action") or ("tool" if raw_step.get("tool") else "respond")
+        action = str(action).lower()
+        if action not in {"tool", "respond", "wait_user"}:
+            action = "tool" if raw_step.get("tool") else "respond"
+
+        tool_name = raw_step.get("tool")
+        if tool_name and tool_name not in available_tool_names:
+            tool_name = None
+            if action == "tool":
+                action = "respond"
+
+        inputs = raw_step.get("inputs")
+        if not isinstance(inputs, dict):
+            inputs = {}
+
+        description = raw_step.get("description") or raw_step.get("step") or ""
+        description = str(description).strip()
+
+        normalized_steps.append(
+            PlanStep(
+                id=idx,
+                description=description,
+                action=action,
+                tool=tool_name,
+                inputs=inputs,
+                status=raw_step.get("status", "pending"),
+                result_preview=raw_step.get("result_preview"),
+                error=raw_step.get("error"),
+            )
+        )
+    return normalized_steps
+
+
+async def analyze_message_for_plan(
+    ollama: OllamaClient,
+    request: ChatRequest,
+    available_tools: List[Dict[str, Any]],
+    session_context: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    tool_catalog = build_tool_catalog(available_tools)
+    analysis_prompt = (
+        "Devi analizzare la richiesta dell'utente e decidere se richiede un piano multi-step. "
+        "Hai a disposizione i seguenti tool:\n"
+        f"{tool_catalog if tool_catalog else '- Nessun tool disponibile'}\n\n"
+        "Rispondi SEMPRE nel seguente JSON (senza testo aggiuntivo):\n"
+        "{\n"
+        "  \"needs_plan\": true|false,\n"
+        "  \"reason\": \"spiega perché\",\n"
+        "  \"steps\": [\n"
+        "     {\n"
+        "        \"description\": \"testo\",\n"
+        "        \"action\": \"tool|respond|wait_user\",\n"
+        "        \"tool\": \"nome_tool_o_null\",\n"
+        "        \"inputs\": { ... }\n"
+        "     }\n"
+        "  ]\n"
+        "}\n\n"
+        "Genera un piano solo se servono più azioni o conferme."
+    )
+
+    system_prompt = (
+        "Sei un pianificatore che valuta se la richiesta dell'utente richiede più passaggi. "
+        "Se la richiesta è semplice, imposta needs_plan=false e steps=[]."
+    )
+
+    try:
+        response = await ollama.generate(
+            prompt=analysis_prompt + f"\n\nRichiesta utente:\n{request.message}",
+            context=session_context[-3:] if session_context else None,
+            system=system_prompt,
+        )
+        content = response.get("message", {}).get("content", "")
+        parsed = safe_json_loads(content)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        logging.getLogger(__name__).warning("Planner analysis failed", exc_info=True)
+
+    return {"needs_plan": False, "reason": "fallback", "steps": []}
+
+
+async def summarize_plan_results(
+    ollama: OllamaClient,
+    request: ChatRequest,
+    session_context: List[Dict[str, str]],
+    retrieved_memory: List[str],
+    plan: List[PlanStep],
+    execution_summaries: List[str],
+) -> str:
+    plan_summary_lines = []
+    for step in plan:
+        status = step.get("status", "pending")
+        line = f"Step {step.get('id', '?')}: {step.get('description', '')} [status: {status}]"
+        if step.get("result_preview"):
+            line += f"\nRisultato: {step['result_preview']}"
+        if step.get("error"):
+            line += f"\nErrore: {step['error']}"
+        plan_summary_lines.append(line)
+
+    execution_text = "\n".join(execution_summaries)
+
+    prompt = (
+        "Hai completato i passaggi pianificati per l'utente."
+        "\nRiassumi cosa hai fatto e fornisci la risposta finale in italiano, "
+        "citando risultati dei tool quando rilevanti."
+        "\n\nPiano eseguito:\n"
+        f"{chr(10).join(plan_summary_lines)}"
+        "\n\nDettagli esecuzione:\n"
+        f"{execution_text if execution_text else 'Nessun dettaglio aggiuntivo.'}"
+        "\n\nRichiesta originale:\n"
+        f"{request.message}"
+    )
+
+    response = await ollama.generate_with_context(
+        prompt=prompt,
+        session_context=session_context,
+        retrieved_memory=retrieved_memory if retrieved_memory else None,
+        tools=None,
+        tools_description=None,
+    )
+    if isinstance(response, dict):
+        return response.get("content", "")
+    return str(response)
+
+
+async def execute_plan_steps(
+    state: LangGraphChatState,
+    plan: List[PlanStep],
+    start_index: int,
+) -> Dict[str, Any]:
+    logger = logging.getLogger(__name__)
+
+    tool_manager = ToolManager(db=state["db"])
+    session_id = state["session_id"]
+    db = state["db"]
+
+    execution_summaries: List[str] = []
+    tool_results: List[Dict[str, Any]] = []
+    tools_used: List[str] = []
+    tool_details: List[ToolExecutionDetail] = []
+
+    index = start_index
+    acknowledgement = state.get("acknowledgement", False)
+    waiting_for_user = False
+
+    while index < len(plan):
+        step = plan[index]
+        action = step.get("action", "tool")
+
+        if step.get("status") == "complete":
+            index += 1
+            continue
+
+        if action == "wait_user":
+            if acknowledgement and step.get("status") == "waiting":
+                step["status"] = "complete"
+                index += 1
+                continue
+            if acknowledgement and step.get("status") != "waiting":
+                step["status"] = "complete"
+                index += 1
+                continue
+            step["status"] = "waiting"
+            waiting_for_user = True
+            break
+
+        if action == "respond":
+            step["status"] = "complete"
+            index += 1
+            break
+
+        tool_name = step.get("tool")
+        if not tool_name:
+            step["status"] = "complete"
+            index += 1
+            continue
+
+        try:
+            logger.info("Executing planned tool %s", tool_name)
+            result = await tool_manager.execute_tool(
+                tool_name,
+                step.get("inputs", {}),
+                db=db,
+                session_id=session_id,
+            )
+            step["status"] = "complete"
+            preview = json.dumps(result, ensure_ascii=False)[:500]
+            step["result_preview"] = preview
+            execution_summaries.append(f"Tool {tool_name}: {preview}")
+            tool_results.append({"tool": tool_name, "parameters": step.get("inputs", {}), "result": result})
+            tools_used.append(tool_name)
+            success = True
+            error = None
+            if isinstance(result, dict):
+                if result.get("error"):
+                    success = False
+                    error = result.get("error")
+            tool_details.append(
+                ToolExecutionDetail(
+                    tool_name=tool_name,
+                    parameters=step.get("inputs", {}),
+                    result=result if isinstance(result, dict) else {"output": result},
+                    success=success,
+                    error=error,
+                )
+            )
+        except Exception as exc:  # pragma: no cover - tool failure
+            logger.warning("Planned tool %s failed: %s", tool_name, exc, exc_info=True)
+            step["status"] = "error"
+            step["error"] = str(exc)
+            execution_summaries.append(f"Tool {tool_name} errore: {exc}")
+            tool_details.append(
+                ToolExecutionDetail(
+                    tool_name=tool_name,
+                    parameters=step.get("inputs", {}),
+                    result={"error": str(exc)},
+                    success=False,
+                    error=str(exc),
+                )
+            )
+        index += 1
+
+    return {
+        "plan": plan,
+        "next_index": index,
+        "waiting_for_user": waiting_for_user,
+        "execution_summaries": execution_summaries,
+        "tool_results": tool_results,
+        "tools_used": tools_used,
+        "tool_details": tool_details,
+    }
 
 
 class LangGraphChatState(TypedDict, total=False):
@@ -29,9 +356,16 @@ class LangGraphChatState(TypedDict, total=False):
     tool_results: List[Dict[str, Any]]
     notifications: List[Dict[str, Any]]
     previous_messages: List[Dict[str, str]]
+    acknowledgement: bool
+    plan: List[PlanStep]
+    plan_index: int
+    plan_dirty: bool
+    plan_completed: bool
+    plan_origin: Optional[str]
     routing_decision: str
     response: Optional[str]
     chat_response: Optional[ChatResponse]
+    assistant_message_saved: bool
     done: bool
 
 
@@ -55,12 +389,111 @@ async def orchestrator_node(state: LangGraphChatState) -> LangGraphChatState:
 
 
 async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
-    """Stub iniziale del ciclo tool/LLM: delega alla pipeline principale."""
+    """Gestisce pianificazione, esecuzione tool e fallback legacy."""
+
+    logger = logging.getLogger(__name__)
+    request = state["request"]
+    acknowledgement = state.get("acknowledgement", False)
+
+    plan = state.get("plan", []) or []
+    plan_index = state.get("plan_index", 0)
+    state.setdefault("plan_dirty", False)
+    state.setdefault("plan_completed", not plan)
+    state.setdefault("assistant_message_saved", False)
+
+    tool_manager = ToolManager(db=state["db"])
+    available_tools = await tool_manager.get_available_tools()
+    available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
+
+    # Se non abbiamo un piano corrente e il messaggio non è solo conferma, valutiamo la necessità di un piano
+    if not plan and not acknowledgement:
+        analysis = await analyze_message_for_plan(
+            state["ollama"],
+            request,
+            available_tools,
+            state.get("session_context", []),
+        )
+        state["plan_analysis"] = analysis  # utile per debugging/test
+        if analysis.get("needs_plan") and analysis.get("steps"):
+            plan = normalize_plan_steps(analysis.get("steps", []), available_tool_names)
+            if plan:
+                logger.info("Generated plan with %s steps", len(plan))
+                state["plan"] = plan
+                state["plan_index"] = 0
+                state["plan_dirty"] = True
+                state["plan_completed"] = False
+                state["plan_origin"] = request.message
+            else:
+                logger.info("Plan analysis returned no valid steps")
+
+    # Esegui piano se presente
+    if plan:
+        execution = await execute_plan_steps(state, plan, state.get("plan_index", 0))
+        state["plan"] = execution["plan"]
+        state["plan_index"] = execution["next_index"]
+        state["plan_dirty"] = True
+
+        # Accumula risultati tool
+        if execution["tool_results"]:
+            state.setdefault("tool_results", []).extend(execution["tool_results"])
+
+        waiting = execution["waiting_for_user"]
+        remaining_steps = any(
+            step.get("status") not in {"complete", "waiting"}
+            for step in execution["plan"]
+        )
+
+        if waiting:
+            waiting_step = execution["plan"][max(0, min(state["plan_index"], len(execution["plan"]) - 1))]
+            response_text = waiting_step.get("description", "Dimmi come procedere.")
+            state["response"] = response_text
+            state["chat_response"] = ChatResponse(
+                response=response_text,
+                session_id=state["session_id"],
+                memory_used=state.get("memory_used", {}),
+                tools_used=[tr["tool"] for tr in execution["tool_results"]],
+                tool_details=execution["tool_details"],
+                notifications_count=len(state.get("notifications", [])),
+                high_urgency_notifications=state.get("notifications", []),
+            )
+            state["plan_completed"] = False
+            state["assistant_message_saved"] = False
+            return state
+
+        # Piano eseguito (o nessun ulteriore step)
+        final_text = await summarize_plan_results(
+            state["ollama"],
+            request,
+            state.get("session_context", []),
+            state.get("retrieved_memory", []),
+            execution["plan"],
+            execution["execution_summaries"],
+        )
+
+        state["response"] = final_text
+        state["chat_response"] = ChatResponse(
+            response=final_text,
+            session_id=state["session_id"],
+            memory_used=state.get("memory_used", {}),
+            tools_used=execution["tools_used"],
+            tool_details=execution["tool_details"],
+            notifications_count=len(state.get("notifications", [])),
+            high_urgency_notifications=state.get("notifications", []),
+        )
+        state["plan_completed"] = not remaining_steps
+        state["assistant_message_saved"] = False
+        return state
+
+    # Fallback legacy pipeline con heuristica per web search
+    force_web = should_force_web_search(request, acknowledgement)
+    effective_request = request
+    if force_web != request.force_web_search:
+        effective_request = request.model_copy(update={"force_web_search": force_web})
 
     chat_response = await run_main_agent_pipeline(
         db=state["db"],
         session_id=state["session_id"],
-        request=state["request"],
+        request=effective_request,
         ollama=state["ollama"],
         session_context=state["session_context"],
         retrieved_memory=list(state["retrieved_memory"]),
@@ -68,7 +501,18 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
     )
     state["chat_response"] = chat_response
     state["response"] = chat_response.response
-    state["done"] = True
+    state["plan_completed"] = True
+    state["assistant_message_saved"] = True
+    state.setdefault("tool_results", [])
+    if chat_response.tool_details:
+        for detail in chat_response.tool_details:
+            state["tool_results"].append(
+                {
+                    "tool": detail.tool_name,
+                    "parameters": detail.parameters,
+                    "result": detail.result,
+                }
+            )
     return state
 
 
@@ -226,8 +670,15 @@ async def run_langgraph_chat(
     retrieved_memory: List[str],
     memory_used: Dict[str, Any],
     previous_messages: Optional[List[Dict[str, str]]] = None,
-) -> ChatResponse:
+    pending_plan: Optional[Dict[str, Any]] = None,
+) -> LangGraphResult:
     app = build_langgraph_app()
+    acknowledgement = is_acknowledgement(request.message)
+    plan_steps = []
+    plan_index = 0
+    if pending_plan:
+        plan_steps = pending_plan.get("steps", [])
+        plan_index = pending_plan.get("current_step", 0)
     state: LangGraphChatState = {
         "event": {"role": "user", "content": request.message},
         "session_id": session_id,
@@ -243,8 +694,34 @@ async def run_langgraph_chat(
         "tool_results": [],
         "notifications": [],
         "previous_messages": previous_messages or [],
+        "acknowledgement": acknowledgement,
+        "plan": plan_steps,
+        "plan_index": plan_index,
+        "plan_dirty": False,
+        "plan_completed": not plan_steps,
+        "assistant_message_saved": False,
         "done": False,
     }
     final_state = await app.ainvoke(state)
-    return final_state["chat_response"]
+    chat_response = final_state["chat_response"]
+
+    plan_metadata: Optional[Dict[str, Any]] = None
+    if final_state.get("plan_dirty"):
+        plan_list = final_state.get("plan", []) or []
+        if plan_list and not final_state.get("plan_completed"):
+            plan_metadata = {
+                "steps": plan_list,
+                "current_step": final_state.get("plan_index", 0),
+                "origin": final_state.get("plan_origin"),
+            }
+        else:
+            plan_metadata = None
+    elif pending_plan and not final_state.get("plan_completed"):
+        plan_metadata = pending_plan
+
+    return LangGraphResult(
+        chat_response=chat_response,
+        plan_metadata=plan_metadata,
+        assistant_message_saved=final_state.get("assistant_message_saved", False),
+    )
 
