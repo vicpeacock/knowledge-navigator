@@ -2,18 +2,25 @@
 from app.core.ollama_client import OllamaClient
 from app.core.mcp_client import MCPClient
 from app.core.memory_manager import MemoryManager
+from app.core.config import settings
 
 # Global instances
 _ollama_client: OllamaClient = None
+_planner_client: OllamaClient = None
 _mcp_client: MCPClient = None
 _memory_manager: MemoryManager = None
 
 
 def init_clients():
     """Initialize global clients"""
-    global _ollama_client, _mcp_client, _memory_manager
+    global _ollama_client, _planner_client, _mcp_client, _memory_manager
     if _ollama_client is None:
         _ollama_client = OllamaClient()
+    if _planner_client is None:
+        _planner_client = OllamaClient(
+            base_url=settings.ollama_planner_base_url,
+            model=settings.ollama_planner_model,
+        )
     if _mcp_client is None:
         _mcp_client = MCPClient()
     if _memory_manager is None:
@@ -24,9 +31,14 @@ def get_ollama_client() -> OllamaClient:
     """Get main Ollama client (for chat)"""
     return _ollama_client
 
+
+def get_planner_client() -> OllamaClient:
+    """Get dedicated planner LLM client"""
+    return _planner_client
+
+
 def get_ollama_background_client():
     """Get background LLM client (for background tasks) - can be Ollama or llama.cpp"""
-    from app.core.config import settings
     
     if settings.use_llama_cpp_background:
         from app.core.llama_cpp_client import LlamaCppClient

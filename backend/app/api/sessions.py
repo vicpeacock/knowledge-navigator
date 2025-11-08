@@ -20,7 +20,11 @@ from app.models.schemas import (
     ChatResponse,
     MemoryInfo,
 )
-from app.core.dependencies import get_ollama_client, get_memory_manager
+from app.core.dependencies import (
+    get_ollama_client,
+    get_memory_manager,
+    get_planner_client,
+)
 from app.core.ollama_client import OllamaClient
 from app.core.memory_manager import MemoryManager
 from app.core.config import settings
@@ -434,6 +438,7 @@ async def chat(
     request: ChatRequest,
     db: AsyncSession = Depends(get_db),
     ollama: OllamaClient = Depends(get_ollama_client),
+    planner_client: OllamaClient = Depends(get_planner_client),
     memory: MemoryManager = Depends(get_memory_manager),
 ):
     """Send a message and get AI response"""
@@ -612,6 +617,7 @@ async def chat(
             session_id=session_id,
             request=request,
             ollama=ollama,
+            planner_client=planner_client,
             memory_manager=memory,
             session_context=session_context,
             retrieved_memory=retrieved_memory,

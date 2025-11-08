@@ -182,7 +182,7 @@ def log_planning_status(
 
 
 async def analyze_message_for_plan(
-    ollama: OllamaClient,
+    planner_client: OllamaClient,
     request: ChatRequest,
     available_tools: List[Dict[str, Any]],
     session_context: List[Dict[str, str]],
@@ -219,7 +219,8 @@ async def analyze_message_for_plan(
     )
 
     try:
-        response = await ollama.generate(
+        client = planner_client
+        response = await client.generate(
             prompt=analysis_prompt + f"\n\nRichiesta utente:\n{request.message}",
             context=session_context[-3:] if session_context else None,
             system=system_prompt,
@@ -392,6 +393,7 @@ class LangGraphChatState(TypedDict, total=False):
     request: ChatRequest
     db: AsyncSession
     ollama: OllamaClient
+    planner_client: OllamaClient
     memory_manager: MemoryManager
     session_context: List[Dict[str, str]]
     retrieved_memory: List[str]
@@ -452,8 +454,9 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
 
     # Se non abbiamo un piano corrente e il messaggio non è solo conferma, valutiamo la necessità di un piano
     if not plan and not acknowledgement:
+        planner_client = state.get("planner_client") or state["ollama"]
         analysis = await analyze_message_for_plan(
-            state["ollama"],
+            planner_client,
             request,
             available_tools,
             state.get("session_context", []),
@@ -744,6 +747,7 @@ async def run_langgraph_chat(
     session_id: UUID,
     request: ChatRequest,
     ollama: OllamaClient,
+    planner_client: OllamaClient,
     memory_manager: MemoryManager,
     session_context: List[Dict[str, str]],
     retrieved_memory: List[str],
@@ -764,6 +768,7 @@ async def run_langgraph_chat(
         "request": request,
         "db": db,
         "ollama": ollama,
+        "planner_client": planner_client,
         "memory_manager": memory_manager,
         "session_context": session_context,
         "retrieved_memory": retrieved_memory,
