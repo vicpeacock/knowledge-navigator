@@ -539,9 +539,9 @@ export default function IntegrationsPage() {
             <h2 className="text-2xl font-bold">MCP Server</h2>
           </div>
 
-          {mcpIntegrations.length > 0 ? (
-            <div className="space-y-4">
-              {mcpIntegrations.map((integration) => (
+          <div className="space-y-4">
+            {mcpIntegrations.length > 0 ? (
+              mcpIntegrations.map((integration) => (
                 <div key={integration.id} className="border rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div>
@@ -563,28 +563,20 @@ export default function IntegrationsPage() {
                   <div className="flex gap-2">
                     <button
                       onClick={async () => {
-                        // Toggle: if already open, close it; otherwise open it
                         const isCurrentlyOpen = selectedMcpIntegration === integration.id
-                        
                         if (isCurrentlyOpen) {
-                          // Close the panel
                           setSelectedMcpIntegration(null)
                           setMcpTools([])
                           setSelectedTools([])
                           return
                         }
-                        
-                        // Close other integrations first (if any) - but don't clear selectedTools yet
+
                         if (selectedMcpIntegration && selectedMcpIntegration !== integration.id) {
                           setSelectedMcpIntegration(null)
                           setMcpTools([])
-                          // Don't clear selectedTools here - it will be loaded from server
-                          // Small delay to allow state update
-                          await new Promise(resolve => setTimeout(resolve, 100))
+                          await new Promise((resolve) => setTimeout(resolve, 100))
                         }
-                        
-                        // Open this integration's tools panel
-                        // The useEffect will handle loading the tools automatically
+
                         setSelectedMcpIntegration(integration.id)
                       }}
                       className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
@@ -614,18 +606,6 @@ export default function IntegrationsPage() {
                         try {
                           const debug = await integrationsApi.mcp.debug(integration.id)
                           console.log('MCP Debug Info:', debug.data)
-                          
-                          // Show user-friendly message
-                          if (debug.data.connection_test?.reachable === false) {
-                            const suggestion = debug.data.connection_test.suggestion || ''
-                            console.error(`MCP Server not reachable: ${debug.data.connection_test.error || 'Connection failed'}\n${suggestion}`)
-                          } else if (debug.data.tools_list?.response) {
-                            const toolsResp = debug.data.tools_list.response
-                            const toolsCount = toolsResp?.result?.tools?.length || 0
-                            console.log(`MCP Connection successful! Tools count: ${toolsCount}`)
-                          } else {
-                            console.log(`MCP Debug: Connection test ${debug.data.connection_test?.reachable ? '✅ Reachable' : '❌ Not reachable'}`)
-                          }
                         } catch (error: any) {
                           console.error('MCP Debug failed:', error.response?.data?.detail || error.message)
                         }
@@ -637,19 +617,20 @@ export default function IntegrationsPage() {
                     </button>
                     <button
                       onClick={async () => {
-                        if (confirm('Are you sure you want to remove this MCP integration?')) {
-                          try {
-                            await integrationsApi.mcp.deleteIntegration(integration.id)
-                            // Reset state if removing the currently selected integration
-                            if (selectedMcpIntegration === integration.id) {
-                              setSelectedMcpIntegration(null)
-                              setMcpTools([])
-                              setSelectedTools([])
-                            }
-                            await loadIntegrations()
-                          } catch (error: any) {
-                            console.error('Error:', error.response?.data?.detail || error.message)
+                        if (!confirm('Are you sure you want to remove this MCP integration?')) {
+                          return
+                        }
+
+                        try {
+                          await integrationsApi.mcp.deleteIntegration(integration.id)
+                          if (selectedMcpIntegration === integration.id) {
+                            setSelectedMcpIntegration(null)
+                            setMcpTools([])
+                            setSelectedTools([])
                           }
+                          await loadIntegrations()
+                        } catch (error: any) {
+                          console.error('Error:', error.response?.data?.detail || error.message)
                         }
                       }}
                       className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
@@ -701,41 +682,29 @@ export default function IntegrationsPage() {
                             <button
                               onClick={async () => {
                                 try {
-                                  setIsSaving(true) // Prevent useEffect from interfering
-                                  
-                                  // Save the tools - keep a copy of what we're saving
-                                  const toolsToSave = [...selectedTools] // Make a copy to avoid state issues
-                                  console.log('Saving tools:', toolsToSave, 'count:', toolsToSave.length)
-                                  
+                                  setIsSaving(true)
+                                  const toolsToSave = [...selectedTools]
+
                                   if (toolsToSave.length === 0) {
                                     console.warn('No tools selected!')
                                     setIsSaving(false)
                                     return
                                   }
-                                  
+
                                   await integrationsApi.mcp.selectTools(integration.id, toolsToSave)
-                                  console.log('Tools saved to server successfully')
-                                  
-                                  // DON'T reload from server - just keep the current state
-                                  // The tools are already selected in the UI, and we just saved them
-                                  // Reloading would cause a race condition or timing issue
-                                  
-                                  // Update the integration count in the list without full reload
-                                  setMcpIntegrations(prev => prev.map(i => 
-                                    i.id === integration.id 
-                                      ? { ...i, selected_tools: toolsToSave }
-                                      : i
-                                  ))
-                                  
-                                  // Re-enable useEffect after state is updated
-                                  setIsSaving(false)
-                                  
-                                  // Show success message
+                                  setMcpIntegrations((prev) =>
+                                    prev.map((item) =>
+                                      item.id === integration.id
+                                        ? { ...item, selected_tools: toolsToSave }
+                                        : item
+                                    )
+                                  )
+
                                   console.log(`Selected ${toolsToSave.length} tools successfully!`)
                                 } catch (error: any) {
                                   console.error('Error saving tools:', error)
-                                  setIsSaving(false) // Re-enable useEffect even on error
-                                  console.error('Error:', error.response?.data?.detail || error.message)
+                                } finally {
+                                  setIsSaving(false)
                                 }
                               }}
                               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -744,7 +713,6 @@ export default function IntegrationsPage() {
                             </button>
                             <button
                               onClick={async () => {
-                                // Cancel: reload tools to restore selected state from server
                                 try {
                                   const toolsResponse = await integrationsApi.mcp.getTools(integration.id)
                                   setSelectedTools(toolsResponse.data.selected_tools || [])
@@ -765,46 +733,86 @@ export default function IntegrationsPage() {
                     </div>
                   )}
                 </div>
-              ))}
-              
-              <div className="mt-4 p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-                <h3 className="font-semibold mb-3">Connect New MCP Server</h3>
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Server URL</label>
-                    <input
-                      type="text"
-                      value={mcpServerUrl}
-                      onChange={(e) => setMcpServerUrl(e.target.value)}
-                      placeholder="http://host.docker.internal:8080 or http://localhost:8080"
-                      className="w-full p-2 border rounded-md bg-gray-50 dark:bg-gray-700"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Name (optional)</label>
-                    <input
-                      type="text"
-                      value={mcpServerName}
-                      onChange={(e) => setMcpServerName(e.target.value)}
-                      placeholder="MCP Server"
-                      className="w-full p-2 border rounded-md bg-gray-50 dark:bg-gray-700"
-                    />
-                  </div>
-                  <button
-                    onClick={async () => {
-                      setConnectingMCP(true)
-                      try {
-                        const response = await integrationsApi.mcp.connect(mcpServerUrl, mcpServerName)
-                        await loadIntegrations()
-                        
-                        // Auto-open tool selection for the new integration after state updates
-                        const toolCount = response.data.count || 0
-                        if (response.data.integration_id && response.data.available_tools && toolCount > 0) {
-                          setTimeout(() => {
-                            setSelectedMcpIntegration(response.data.integration_id)
-                            setMcpTools(response.data.available_tools || [])
-                            setSelectedTools([])
-                          console.log(`Connected successfully! Found ${toolCount} tools. Please select which tools to enable.`)
+              ))
+            ) : (
+              <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <p className="text-sm text-gray-700 dark:text-gray-200">
+                  Nessun server MCP connesso. Aggiungine uno utilizzando il form sottostante.
+                </p>
+              </div>
+            )}
+
+            <div className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+              <h3 className="font-semibold mb-3">Connect New MCP Server</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Server URL</label>
+                  <input
+                    type="text"
+                    value={mcpServerUrl}
+                    onChange={(e) => setMcpServerUrl(e.target.value)}
+                    placeholder="http://host.docker.internal:8080 or http://localhost:8080"
+                    className="w-full p-2 border rounded-md bg-gray-50 dark:bg-gray-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Name (optional)</label>
+                  <input
+                    type="text"
+                    value={mcpServerName}
+                    onChange={(e) => setMcpServerName(e.target.value)}
+                    placeholder="MCP Server"
+                    className="w-full p-2 border rounded-md bg-gray-50 dark:bg-gray-700"
+                  />
+                </div>
+                <button
+                  onClick={async () => {
+                    setConnectingMCP(true)
+                    try {
+                      const response = await integrationsApi.mcp.connect(mcpServerUrl, mcpServerName)
+                      await loadIntegrations()
+
+                      const toolCount = response.data.count || 0
+                      if (response.data.integration_id && response.data.available_tools) {
+                        setTimeout(() => {
+                          setSelectedMcpIntegration(response.data.integration_id)
+                          setMcpTools(response.data.available_tools || [])
+                          setSelectedTools([])
                         }, 200)
-                      } else if (toolCount === 0) {
-                        console.warn(`
+                        addStatusMessage('success', `MCP collegato (${toolCount} tool${toolCount === 1 ? '' : 's'})`)
+                      }
+
+                      if (toolCount === 0) {
+                        console.warn('Il server MCP collegato non ha tool disponibili.')
+                      }
+                    } catch (error: any) {
+                      console.error('Error connecting MCP:', error.response?.data?.detail || error.message)
+                      addStatusMessage('error', `Errore connessione MCP: ${error.response?.data?.detail || error.message}`)
+                    } finally {
+                      setConnectingMCP(false)
+                    }
+                  }}
+                  disabled={connectingMCP}
+                  className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {connectingMCP ? (
+                    <>
+                      <RefreshCw size={18} className="animate-spin" />
+                      Connessione in corso...
+                    </>
+                  ) : (
+                    <>
+                      <ExternalLink size={18} />
+                      Connetti nuovo MCP
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+ 
