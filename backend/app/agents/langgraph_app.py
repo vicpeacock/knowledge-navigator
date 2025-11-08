@@ -181,69 +181,6 @@ def log_planning_status(
     state.setdefault("notifications", []).append(entry)
 
 
-def generate_heuristic_plan(
-    request: ChatRequest,
-    available_tool_names: List[str],
-) -> Optional[Dict[str, Any]]:
-    text = _normalize_text(request.message)
-    if not text:
-        return None
-
-    email_keywords = ["email", "e-mail", "mail", "posta", "gmail"]
-    if any(keyword in text for keyword in email_keywords) and "get_emails" in available_tool_names:
-        steps: List[Dict[str, Any]] = []
-        steps.append(
-            {
-                "description": "Prima di leggere l'ultima email ho bisogno della tua conferma.",
-                "action": "wait_user",
-            }
-        )
-        steps.append(
-            {
-                "description": "Recupero l'ultima email ricevuta per analizzarne il mittente.",
-                "action": "tool",
-                "tool": "get_emails",
-                "inputs": {
-                    "max_results": 1,
-                    "include_body": True,
-                },
-            }
-        )
-        steps.append(
-            {
-                "description": "Analizzo i dati ottenuti e ti fornisco informazioni sul mittente dell'ultima email.",
-                "action": "respond",
-            }
-        )
-        return {
-            "reason": "Richiesta email riconosciuta",
-            "steps": steps,
-        }
-
-    calendar_keywords = ["calendario", "evento", "riunione", "appuntamento", "meeting"]
-    if any(keyword in text for keyword in calendar_keywords) and "get_calendar_events" in available_tool_names:
-        steps = [
-            {
-                "description": "Recupero gli eventi di calendario rilevanti per la richiesta.",
-                "action": "tool",
-                "tool": "get_calendar_events",
-                "inputs": {
-                    "query": request.message,
-                },
-            },
-            {
-                "description": "Analizzo gli eventi trovati e rispondo all'utente.",
-                "action": "respond",
-            },
-        ]
-        return {
-            "reason": "Richiesta calendario riconosciuta",
-            "steps": steps,
-        }
-
-    return None
-
-
 async def analyze_message_for_plan(
     ollama: OllamaClient,
     request: ChatRequest,
@@ -252,10 +189,16 @@ async def analyze_message_for_plan(
 ) -> Dict[str, Any]:
     tool_catalog = build_tool_catalog(available_tools)
     analysis_prompt = (
-        "Devi analizzare la richiesta dell'utente e decidere se richiede un piano multi-step. "
-        "Hai a disposizione i seguenti tool:\n"
+        "Analizza la richiesta dell'utente e valuta se per soddisfarla servono più azioni coordinate."\
+        " Hai questi tool disponibili (studia attentamente le loro descrizioni e scegli SEMPRE quelli più pertinenti al compito):\n"
         f"{tool_catalog if tool_catalog else '- Nessun tool disponibile'}\n\n"
-        "Rispondi SEMPRE nel seguente JSON (senza testo aggiuntivo):\n"
+        "Linee guida obbligatorie:\n"
+        "1. Se per rispondere devi consultare dati da integrazioni (email, calendario, file, ecc.), questo richiede un piano multi-step e l'uso esplicito del relativo tool.\n"
+        "2. Preferisci tool specialistici alle ricerche generiche: usa web_search solo quando l'informazione richiesta arriva dal web pubblico o non esistono tool dedicati.\n"
+        "3. Quando accedi a dati sensibili (email, calendario, file personali) includi uno step \"wait_user\" per richiedere conferma esplicita prima di eseguire il tool.\n"
+        "4. Ogni piano deve descrivere in modo chiaro gli step successivi (max 5) con \"action\" tra tool/respond/wait_user, il tool da chiamare e i parametri essenziali.\n"
+        "5. Se puoi rispondere immediatamente senza strumenti esterni, imposta needs_plan=false e steps=[].\n\n"
+        "Rispondi SEMPRE con JSON valido, senza testo extra:\n"
         "{\n"
         "  \"needs_plan\": true|false,\n"
         "  \"reason\": \"spiega perché\",\n"
@@ -267,13 +210,12 @@ async def analyze_message_for_plan(
         "        \"inputs\": { ... }\n"
         "     }\n"
         "  ]\n"
-        "}\n\n"
-        "Genera un piano solo se servono più azioni o conferme."
+        "}\n"
     )
 
     system_prompt = (
-        "Sei un pianificatore che valuta se la richiesta dell'utente richiede più passaggi. "
-        "Se la richiesta è semplice, imposta needs_plan=false e steps=[]."
+        "Sei un pianificatore strategico. Identifica quando la richiesta richiede l'uso di strumenti o conferme, quindi produci un piano strutturato che li orchestria."\
+        " Se una risposta diretta è sufficiente, restituisci needs_plan=false. In caso contrario, needs_plan=true e steps deve includere almeno un'azione tool seguita da una risposta finale."
     )
 
     try:
@@ -510,11 +452,24 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
 
     # Se non abbiamo un piano corrente e il messaggio non è solo conferma, valutiamo la necessità di un piano
     if not plan and not acknowledgement:
-        heuristic_plan = generate_heuristic_plan(request, available_tool_names)
-        if heuristic_plan:
-            plan = normalize_plan_steps(heuristic_plan.get("steps", []), available_tool_names)
+        analysis = await analyze_message_for_plan(
+            state["ollama"],
+            request,
+            available_tools,
+            state.get("session_context", []),
+        )
+        state["plan_analysis"] = analysis  # utile per debugging/test
+        log_planning_status(
+            state,
+            status="analysis",
+            reason=str(analysis.get("reason", "")),
+            plan=normalize_plan_steps(analysis.get("steps", []), available_tool_names),
+        )
+
+        if analysis.get("needs_plan") and analysis.get("steps"):
+            plan = normalize_plan_steps(analysis.get("steps", []), available_tool_names)
             if plan:
-                logger.info("Heuristic plan generated with %s steps", len(plan))
+                logger.info("Generated plan with %s steps", len(plan))
                 state["plan"] = plan
                 state["plan_index"] = 0
                 state["plan_dirty"] = True
@@ -523,38 +478,11 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 log_planning_status(
                     state,
                     status="generated",
-                    reason=str(heuristic_plan.get("reason", "")),
+                    reason=str(analysis.get("reason", "")),
                     plan=plan,
                 )
-
-        if plan:
-            # Heuristic plan already generated, skip LLM analysis
-            pass
-        else:
-            analysis = await analyze_message_for_plan(
-                state["ollama"],
-                request,
-                available_tools,
-                state.get("session_context", []),
-            )
-            state["plan_analysis"] = analysis  # utile per debugging/test
-            if analysis.get("needs_plan") and analysis.get("steps"):
-                plan = normalize_plan_steps(analysis.get("steps", []), available_tool_names)
-                if plan:
-                    logger.info("Generated plan with %s steps", len(plan))
-                    state["plan"] = plan
-                    state["plan_index"] = 0
-                    state["plan_dirty"] = True
-                    state["plan_completed"] = False
-                    state["plan_origin"] = request.message
-                    log_planning_status(
-                        state,
-                        status="generated",
-                        reason=str(analysis.get("reason", "")),
-                        plan=plan,
-                    )
-                else:
-                    logger.info("Plan analysis returned no valid steps")
+            else:
+                logger.info("Plan analysis returned no valid steps")
 
     # Esegui piano se presente
     if plan:
