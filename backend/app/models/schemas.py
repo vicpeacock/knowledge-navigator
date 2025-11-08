@@ -169,6 +169,8 @@ class ChatResponse(BaseModel):
     memory_used: Dict[str, Any] = {}
     tools_used: List[str] = []  # Kept for backward compatibility
     tool_details: List[ToolExecutionDetail] = []  # Detailed information about tool executions
+    notifications_count: int = 0
+    high_urgency_notifications: List[Dict[str, Any]] = []
 
 
 # Memory Info Schema
