@@ -35,6 +35,25 @@ Un assistente AI personale che integra calendario, email, memoria multi-livello 
 - **Tailwind CSS**: Styling
 - **react-markdown**: Rendering markdown nelle risposte
 
+## Struttura della Repository
+
+```
+docs/
+  backend/           Documentazione tecnica specifica del backend (architetture, design notes)
+  *.md               Guide operative e reference per setup, integrazioni e troubleshooting
+tests/
+  backend/unit/      Test automatici del backend (pytest)
+  backend/langgraph/ Test del grafo conversazionale e dei nuovi planner
+  backend/manual/    Script di verifica manuale / debug (marcati come skipped)
+tools/
+  backend/           Utility Python per manutenzione (check DB, restore, setup env)
+  infra/             Script shell per avvio/stop servizi e auto-versioning
+others/
+  logs/              Output log consolidati
+  uploads/           File caricati durante i test o l'utilizzo locale
+backend/, frontend/  Codice applicativo invariato
+```
+
 ## Setup
 
 ### Prerequisiti

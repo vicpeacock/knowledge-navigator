@@ -25,7 +25,7 @@ Il sistema estrae automaticamente conoscenze importanti dalle conversazioni e le
 ```bash
 cd backend
 source venv/bin/activate
-python test_core_improvements.py
+python ../tests/backend/manual/test_core_improvements.py
 ```
 
 ### 2. Ricerca Semantica Avanzata (Hybrid Search) ✅
@@ -79,7 +79,7 @@ Esegui il test completo:
 ```bash
 cd backend
 source venv/bin/activate
-python test_core_improvements.py
+python ../tests/backend/manual/test_core_improvements.py
 ```
 
 **Output atteso:**

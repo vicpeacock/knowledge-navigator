@@ -11,17 +11,17 @@ Il progetto include una suite completa di test automatizzati per l'indicizzazion
 ```bash
 cd backend
 source venv/bin/activate
-PYTHONPATH=/Users/pallotta/Personal\ AI\ Assistant/backend pytest tests/test_web_indexer.py -v
+PYTHONPATH=/Users/pallotta/Personal\ AI\ Assistant/backend pytest ../../tests/backend/unit/test_web_indexer.py -v
 ```
 
 ### Test Email Indexer (10/10 test passati)
 ```bash
-PYTHONPATH=/Users/pallotta/Personal\ AI\ Assistant/backend pytest tests/test_email_indexer.py -v
+PYTHONPATH=/Users/pallotta/Personal\ AI\ Assistant/backend pytest ../../tests/backend/unit/test_email_indexer.py -v
 ```
 
 ### Eseguire Tutti i Test
 ```bash
-PYTHONPATH=/Users/pallotta/Personal\ AI\ Assistant/backend pytest tests/test_web_indexer.py tests/test_email_indexer.py -v
+PYTHONPATH=/Users/pallotta/Personal\ AI\ Assistant/backend pytest ../../tests/backend/unit/test_web_indexer.py ../../tests/backend/unit/test_email_indexer.py -v
 ```
 
 ## 📋 Test da Eseguire
