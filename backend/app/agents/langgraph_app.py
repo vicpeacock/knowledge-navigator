@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ollama_client import OllamaClient
 from app.models.schemas import ChatRequest, ChatResponse
 from app.agents.main_agent import run_main_agent_pipeline
-from app.services.memory_manager import MemoryManager
+from app.core.memory_manager import MemoryManager
 
 
 class LangGraphChatState(TypedDict, total=False):
