@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     ollama_background_model: str = "Phi-3-mini-4k-instruct-q4"  # Modello llama.cpp (Phi-3-mini quantizzato Q4)
     use_llama_cpp_background: bool = True  # Se True, usa llama.cpp invece di Ollama per background
 
+    # Planner LLM (dedicato alla generazione del piano)
+    ollama_planner_base_url: Optional[str] = None  # Se None, usa ollama_background_base_url o ollama_base_url
+    ollama_planner_model: Optional[str] = None  # Se None, usa ollama_background_model o ollama_model
+
     # MCP Gateway (default, can be overridden per integration)
     # Default: localhost:8080 (if backend runs on host)
     # Use host.docker.internal:8080 if backend runs inside Docker
@@ -79,4 +83,14 @@ settings = Settings()
 
 # Create upload directory if it doesn't exist
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
+
+# Populate planner defaults dinamically
+if settings.ollama_planner_base_url is None:
+    settings.ollama_planner_base_url = (
+        settings.ollama_background_base_url or settings.ollama_base_url
+    )
+if settings.ollama_planner_model is None:
+    settings.ollama_planner_model = (
+        settings.ollama_background_model or settings.ollama_model
+    )
 

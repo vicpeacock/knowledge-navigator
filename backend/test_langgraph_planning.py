@@ -108,11 +108,14 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
         force_web_search=False,
     )
 
+    planner_stub = object()
+
     result_initial = await langgraph_app.run_langgraph_chat(
         db=db,  # type: ignore[arg-type]
         session_id=session_id,
         request=request_initial,
         ollama=object(),  # type: ignore[arg-type]
+        planner_client=planner_stub,  # type: ignore[arg-type]
         memory_manager=object(),  # type: ignore[arg-type]
         session_context=[],
         retrieved_memory=[],
@@ -143,6 +146,7 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
         session_id=session_id,
         request=request_confirm,
         ollama=object(),  # type: ignore[arg-type]
+        planner_client=planner_stub,  # type: ignore[arg-type]
         memory_manager=object(),  # type: ignore[arg-type]
         session_context=[{"role": "assistant", "content": initial_response}],
         retrieved_memory=[],

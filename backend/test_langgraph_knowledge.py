@@ -110,11 +110,14 @@ async def test_langgraph_knowledge_node_updates_memory(monkeypatch: pytest.Monke
     request = ChatRequest(message="Ciao", session_id=session_id, use_memory=True)
 
     # Act
+    planner_stub = object()
+
     result = await langgraph_app.run_langgraph_chat(
         db=db,  # type: ignore[arg-type]
         session_id=session_id,
         request=request,
         ollama=object(),  # type: ignore[arg-type]
+        planner_client=planner_stub,  # type: ignore[arg-type]
         memory_manager=dummy_memory,  # type: ignore[arg-type]
         session_context=[],
         retrieved_memory=[],
