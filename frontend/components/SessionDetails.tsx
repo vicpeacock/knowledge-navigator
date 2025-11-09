@@ -106,6 +106,13 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
   return (
     <div className="bg-white dark:bg-gray-800 p-4 border-b border-gray-200 dark:border-gray-700">
       <div className="mb-3 flex items-center gap-3">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors text-sm"
+        >
+          <Home size={16} />
+          <span>Home</span>
+        </Link>
         <button
           type="button"
           onClick={() => setShowAgentActivity((prev) => !prev)}
@@ -114,13 +121,6 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
         >
           <Network size={18} />
         </button>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors text-sm"
-        >
-          <Home size={16} />
-          <span>Home</span>
-        </Link>
       </div>
       {showAgentActivity && (
         <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/70 p-4 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
