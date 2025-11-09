@@ -116,7 +116,7 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
         <button
           type="button"
           onClick={() => setShowAgentActivity((prev) => !prev)}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-300"
+          className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-300"
           title={showAgentActivity ? 'Nascondi attività agenti' : 'Mostra attività agenti'}
         >
           <Network size={18} />
