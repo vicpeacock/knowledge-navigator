@@ -5,16 +5,24 @@ import json
 import logging
 import re
 from typing import Any, Dict, List, Optional, TypedDict
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from langgraph.graph import END, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ollama_client import OllamaClient
+from app.models.notifications import (
+    Notification,
+    NotificationChannel,
+    NotificationPayload,
+    NotificationPriority,
+    NotificationSource,
+)
 from app.models.schemas import ChatRequest, ChatResponse, ToolExecutionDetail
 from app.agents.main_agent import run_main_agent_pipeline
 from app.core.memory_manager import MemoryManager
 from app.core.tool_manager import ToolManager
+from app.services.notification_center import NotificationCenter
 
 
 class PlanStep(TypedDict, total=False):
@@ -156,6 +164,30 @@ def serialize_plan_for_notification(plan: List[PlanStep]) -> List[Dict[str, Any]
     return serialized
 
 
+def _ensure_notification_center(state: LangGraphChatState) -> NotificationCenter:
+    center = state.get("notification_center")
+    if not center:
+        center = NotificationCenter()
+        state["notification_center"] = center
+    return center
+
+
+def _snapshot_notifications(state: LangGraphChatState) -> None:
+    center = state.get("notification_center")
+    if not center:
+        state["notifications"] = []
+        state["high_urgency_notifications"] = []
+        return
+
+    all_notifications = center.as_transport()
+    high_notifications = center.as_transport(min_priority=NotificationPriority.MEDIUM)
+    if not high_notifications:
+        high_notifications = all_notifications
+
+    state["notifications"] = all_notifications
+    state["high_urgency_notifications"] = high_notifications
+
+
 def log_planning_status(
     state: LangGraphChatState,
     *,
@@ -164,21 +196,38 @@ def log_planning_status(
     plan: Optional[List[PlanStep]] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> None:
-    entry: Dict[str, Any] = {
-        "type": "planning",
-        "urgency": "medium",
-        "content": {
-            "status": status,
-            "status_update": True,
-        },
-    }
+    center = _ensure_notification_center(state)
+
+    priority = NotificationPriority.MEDIUM
+    if status in {"waiting_confirmation", "failed"}:
+        priority = NotificationPriority.HIGH
+    elif status in {"analysis"}:
+        priority = NotificationPriority.LOW
+
+    payload_data: Dict[str, Any] = {"status": status, "status_update": True}
     if reason:
-        entry["content"]["reason"] = reason
+        payload_data["reason"] = reason
     if plan:
-        entry["content"]["plan"] = serialize_plan_for_notification(plan)
+        payload_data["plan"] = serialize_plan_for_notification(plan)
     if extra:
-        entry["content"].update(extra)
-    state.setdefault("notifications", []).append(entry)
+        payload_data.update(extra)
+
+    notification = Notification(
+        id=str(uuid4()),
+        type="planning.status",
+        priority=priority,
+        channel=NotificationChannel.IMMEDIATE,
+        source=NotificationSource(agent="planner", feature="tool_loop"),
+        payload=NotificationPayload(
+            title="Aggiornamento piano",
+            message=f"Stato pianificazione: {status}",
+            summary=reason,
+            data=payload_data,
+        ),
+        tags=["planning"],
+    )
+    center.publish(notification)
+    _snapshot_notifications(state)
 
 
 async def analyze_message_for_plan(
@@ -402,6 +451,8 @@ class LangGraphChatState(TypedDict, total=False):
     tool_calls: List[Dict[str, Any]]
     tool_results: List[Dict[str, Any]]
     notifications: List[Dict[str, Any]]
+    high_urgency_notifications: List[Dict[str, Any]]
+    notification_center: NotificationCenter
     previous_messages: List[Dict[str, str]]
     acknowledgement: bool
     plan: List[PlanStep]
@@ -514,14 +565,17 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 plan=execution["plan"],
                 extra={"message": response_text},
             )
+            _snapshot_notifications(state)
+            notifications = state.get("notifications", [])
+            high_priority_notifications = state.get("high_urgency_notifications", [])
             state["chat_response"] = ChatResponse(
                 response=response_text,
                 session_id=state["session_id"],
                 memory_used=state.get("memory_used", {}),
                 tools_used=[tr["tool"] for tr in execution["tool_results"]],
                 tool_details=execution["tool_details"],
-                notifications_count=len(state.get("notifications", [])),
-                high_urgency_notifications=state.get("notifications", []),
+                notifications_count=len(notifications),
+                high_urgency_notifications=high_priority_notifications,
             )
             state["plan_completed"] = False
             state["assistant_message_saved"] = False
@@ -547,14 +601,17 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 "tools_used": execution["tools_used"],
             },
         )
+        _snapshot_notifications(state)
+        notifications = state.get("notifications", [])
+        high_priority_notifications = state.get("high_urgency_notifications", [])
         state["chat_response"] = ChatResponse(
             response=final_text,
             session_id=state["session_id"],
             memory_used=state.get("memory_used", {}),
             tools_used=execution["tools_used"],
             tool_details=execution["tool_details"],
-            notifications_count=len(state.get("notifications", [])),
-            high_urgency_notifications=state.get("notifications", []),
+            notifications_count=len(notifications),
+            high_urgency_notifications=high_priority_notifications,
         )
         state["plan_completed"] = not remaining_steps
         state["assistant_message_saved"] = False
@@ -589,6 +646,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     "result": detail.result,
                 }
             )
+    _snapshot_notifications(state)
     if acknowledgement and plan:
         log_planning_status(
             state,
@@ -689,8 +747,9 @@ async def integrity_agent_node(state: LangGraphChatState) -> LangGraphChatState:
 
 
 async def notification_collector_node(state: LangGraphChatState) -> LangGraphChatState:
-    """Segnaposto per NotificationService (per ora no-op)."""
+    """Aggrega le notifiche raccolte dagli agenti specializzati."""
 
+    _snapshot_notifications(state)
     return state
 
 
@@ -698,14 +757,17 @@ async def response_formatter_node(state: LangGraphChatState) -> LangGraphChatSta
     """Garantisce che un ChatResponse sia presente nello stato finale."""
 
     if "chat_response" not in state or state["chat_response"] is None:
+        _snapshot_notifications(state)
+        notifications = state.get("notifications", [])
+        high_priority_notifications = state.get("high_urgency_notifications", [])
         state["chat_response"] = ChatResponse(
             response=state.get("response", ""),
             session_id=state["session_id"],
             memory_used=state.get("memory_used", {}),
             tools_used=[],
             tool_details=[],
-            notifications_count=len(state.get("notifications", [])),
-            high_urgency_notifications=state.get("notifications", []),
+            notifications_count=len(notifications),
+            high_urgency_notifications=high_priority_notifications,
         )
     return state
 
@@ -777,6 +839,8 @@ async def run_langgraph_chat(
         "tool_calls": [],
         "tool_results": [],
         "notifications": [],
+        "high_urgency_notifications": [],
+        "notification_center": NotificationCenter(),
         "previous_messages": previous_messages or [],
         "acknowledgement": acknowledgement,
         "plan": plan_steps,
