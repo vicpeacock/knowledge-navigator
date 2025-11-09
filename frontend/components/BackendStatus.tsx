@@ -16,8 +16,12 @@ interface BackendStatusProps {
 }
 
 export function BackendStatus({ children }: BackendStatusProps) {
-  const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking')
+  type Status = 'checking' | 'online' | 'offline' | 'degraded'
+  const [backendStatus, setBackendStatus] = useState<Status>('checking')
   const [retryCount, setRetryCount] = useState(0)
+  const [unhealthyMandatory, setUnhealthyMandatory] = useState<
+    Array<{ service: string; error?: string; message?: string }>
+  >([])
 
   const checkBackend = async () => {
     try {
@@ -28,8 +32,26 @@ export function BackendStatus({ children }: BackendStatusProps) {
       
       // Check if backend is responding (even if some services are unhealthy)
       if (response.status === 200 && response.data) {
-        // Backend is online if it responds (all_healthy can be false but backend is still functional)
-        setBackendStatus('online')
+        const data = response.data
+
+        const mandatoryIssues =
+          data?.unhealthy_mandatory_services ??
+          Object.entries(data?.services ?? {})
+            .filter(([, status]: [string, any]) => status?.mandatory && !status?.healthy)
+            .map(([service, status]: [string, any]) => ({
+              service,
+              error: status?.error,
+              message: status?.message,
+            }))
+
+        setUnhealthyMandatory(mandatoryIssues)
+
+        if (mandatoryIssues.length > 0) {
+          setBackendStatus('degraded')
+        } else {
+          setBackendStatus('online')
+          setRetryCount(0)
+        }
       } else {
         setBackendStatus('offline')
       }
@@ -44,7 +66,7 @@ export function BackendStatus({ children }: BackendStatusProps) {
     
     // Retry every 5 seconds if offline
     const interval = setInterval(() => {
-      if (backendStatus === 'offline') {
+      if (backendStatus === 'offline' || backendStatus === 'degraded') {
         checkBackend()
         setRetryCount(prev => prev + 1)
       }
@@ -103,6 +125,66 @@ export function BackendStatus({ children }: BackendStatusProps) {
               <li>• Controlla che la porta 8000 sia libera</li>
               <li>• Verifica i log del backend per errori</li>
             </ul>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (backendStatus === 'degraded') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="max-w-xl w-full bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 text-center space-y-6">
+          <div>
+            <svg
+              className="mx-auto h-16 w-16 text-yellow-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              Servizi non disponibili
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">
+              Il backend risponde ma alcuni servizi critici sono offline. Riattivali prima di continuare.
+            </p>
+          </div>
+
+          <div className="bg-gray-100 dark:bg-gray-700 rounded-lg p-4 text-left space-y-2">
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Servizi da risolvere:
+            </p>
+            <ul className="space-y-2">
+              {unhealthyMandatory.map(item => (
+                <li key={item.service} className="text-sm text-gray-600 dark:text-gray-300">
+                  <span className="font-semibold text-gray-800 dark:text-gray-100">{item.service}</span>
+                  {item.error ? ` — ${item.error}` : item.message ? ` — ${item.message}` : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="space-y-3">
+            <button
+              onClick={checkBackend}
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              {backendStatus === 'checking' ? 'Verifica in corso...' : 'Riprova'}
+            </button>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Suggerimenti:
+              <br />• Avvia ChromaDB (`docker compose up -d chromadb`)
+              <br />• Avvia il background LLM se richiesto (`tools/infra/start_llama_background.sh`)
+            </p>
           </div>
         </div>
       </div>
