@@ -138,3 +138,14 @@ async def test_langgraph_knowledge_node_updates_memory(monkeypatch: pytest.Monke
     assert context["message_count"] == 3
     assert created_tasks, "L'auto-learning dovrebbe essere schedulato"
     assert dummy_learner.extract_called is True
+    assert any(
+        (
+            evt.get("agent_id") == "knowledge_agent" and evt.get("status") == "completed"
+        )
+        if isinstance(evt, dict)
+        else (
+            getattr(evt, "agent_id", None) == "knowledge_agent"
+            and getattr(evt, "status", None) == "completed"
+        )
+        for evt in chat_response.agent_activity
+    ), "La telemetria dovrebbe includere il nodo di conoscenza"

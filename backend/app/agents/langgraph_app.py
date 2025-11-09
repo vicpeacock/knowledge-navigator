@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, TypedDict
 from uuid import UUID, uuid4
 
@@ -162,6 +163,42 @@ def serialize_plan_for_notification(plan: List[PlanStep]) -> List[Dict[str, Any]
             }
         )
     return serialized
+
+
+_AGENT_REGISTRY: Dict[str, str] = {
+    "event_handler": "Event Handler",
+    "orchestrator": "Orchestrator",
+    "tool_loop": "Tool Loop",
+    "planner": "Planner",
+    "knowledge_agent": "Knowledge Agent",
+    "integrity_agent": "Integrity Agent",
+    "notification_collector": "Notification Collector",
+    "response_formatter": "Response Formatter",
+}
+
+
+def log_agent_activity(
+    state: LangGraphChatState,
+    *,
+    agent_id: str,
+    status: str,
+    message: Optional[str] = None,
+    agent_name: Optional[str] = None,
+) -> None:
+    """Append a telemetry event describing the activity of an agent node."""
+
+    if status not in {"started", "completed", "waiting", "error"}:
+        logging.getLogger(__name__).debug("Ignoring unsupported agent status %s", status)
+        return
+
+    entry = {
+        "agent_id": agent_id,
+        "agent_name": agent_name or _AGENT_REGISTRY.get(agent_id, agent_id.replace("_", " ").title()),
+        "status": status,
+        "message": message,
+        "timestamp": datetime.now(UTC),
+    }
+    state.setdefault("agent_activity", []).append(entry)
 
 
 def _ensure_notification_center(state: LangGraphChatState) -> NotificationCenter:
@@ -465,311 +502,429 @@ class LangGraphChatState(TypedDict, total=False):
     chat_response: Optional[ChatResponse]
     assistant_message_saved: bool
     done: bool
+    agent_activity: List[Dict[str, Any]]
 
 
 async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
     """Normalizza l'evento in arrivo e aggiorna la history."""
 
-    messages = state.get("messages", [])
-    event = state.get("event", {})
-    role = event.get("role", "user")
-    content = event.get("content", "")
-    messages.append({"role": role, "content": content})
-    state["messages"] = messages
-    return state
+    log_agent_activity(state, agent_id="event_handler", status="started")
+    try:
+        messages = state.get("messages", [])
+        event = state.get("event", {})
+        role = event.get("role", "user")
+        content = event.get("content", "")
+        messages.append({"role": role, "content": content})
+        state["messages"] = messages
+        log_agent_activity(state, agent_id="event_handler", status="completed")
+        return state
+    except Exception as exc:
+        log_agent_activity(
+            state,
+            agent_id="event_handler",
+            status="error",
+            message=str(exc),
+        )
+        raise
 
 
 async def orchestrator_node(state: LangGraphChatState) -> LangGraphChatState:
     """Per ora instrada sempre verso il main agent."""
 
-    state["routing_decision"] = "tool_loop"
-    return state
+    log_agent_activity(state, agent_id="orchestrator", status="started")
+    try:
+        state["routing_decision"] = "tool_loop"
+        log_agent_activity(state, agent_id="orchestrator", status="completed")
+        return state
+    except Exception as exc:
+        log_agent_activity(
+            state,
+            agent_id="orchestrator",
+            status="error",
+            message=str(exc),
+        )
+        raise
 
 
 async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
     """Gestisce pianificazione, esecuzione tool e fallback legacy."""
 
+    log_agent_activity(state, agent_id="tool_loop", status="started")
     logger = logging.getLogger(__name__)
     request = state["request"]
     acknowledgement = state.get("acknowledgement", False)
 
-    plan = state.get("plan", []) or []
-    plan_index = state.get("plan_index", 0)
-    state.setdefault("plan_dirty", False)
-    state.setdefault("plan_completed", not plan)
-    state.setdefault("assistant_message_saved", False)
+    try:
+        plan = state.get("plan", []) or []
+        plan_index = state.get("plan_index", 0)
+        state.setdefault("plan_dirty", False)
+        state.setdefault("plan_completed", not plan)
+        state.setdefault("assistant_message_saved", False)
 
-    tool_manager = ToolManager(db=state["db"])
-    available_tools = await tool_manager.get_available_tools()
-    available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
+        tool_manager = ToolManager(db=state["db"])
+        available_tools = await tool_manager.get_available_tools()
+        available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
 
-    # Se non abbiamo un piano corrente e il messaggio non è solo conferma, valutiamo la necessità di un piano
-    if not plan and not acknowledgement:
-        planner_client = state.get("planner_client") or state["ollama"]
-        analysis = await analyze_message_for_plan(
-            planner_client,
-            request,
-            available_tools,
-            state.get("session_context", []),
-        )
-        state["plan_analysis"] = analysis  # utile per debugging/test
-        log_planning_status(
-            state,
-            status="analysis",
-            reason=str(analysis.get("reason", "")),
-            plan=normalize_plan_steps(analysis.get("steps", []), available_tool_names),
-        )
-
-        if analysis.get("needs_plan") and analysis.get("steps"):
-            plan = normalize_plan_steps(analysis.get("steps", []), available_tool_names)
-            if plan:
-                logger.info("Generated plan with %s steps", len(plan))
-                state["plan"] = plan
-                state["plan_index"] = 0
-                state["plan_dirty"] = True
-                state["plan_completed"] = False
-                state["plan_origin"] = request.message
-                log_planning_status(
-                    state,
-                    status="generated",
-                    reason=str(analysis.get("reason", "")),
-                    plan=plan,
+        # Se non abbiamo un piano corrente e il messaggio non è solo conferma, valutiamo la necessità di un piano
+        if not plan and not acknowledgement:
+            planner_client = state.get("planner_client") or state["ollama"]
+            log_agent_activity(state, agent_id="planner", status="started")
+            try:
+                analysis = await analyze_message_for_plan(
+                    planner_client,
+                    request,
+                    available_tools,
+                    state.get("session_context", []),
                 )
+            except Exception as exc:
+                log_agent_activity(
+                    state,
+                    agent_id="planner",
+                    status="error",
+                    message=str(exc),
+                )
+                raise
             else:
-                logger.info("Plan analysis returned no valid steps")
-
-    # Esegui piano se presente
-    if plan:
-        execution = await execute_plan_steps(state, plan, state.get("plan_index", 0))
-        state["plan"] = execution["plan"]
-        state["plan_index"] = execution["next_index"]
-        state["plan_dirty"] = True
-
-        # Accumula risultati tool
-        if execution["tool_results"]:
-            state.setdefault("tool_results", []).extend(execution["tool_results"])
-
-        waiting = execution["waiting_for_user"]
-        remaining_steps = any(
-            step.get("status") not in {"complete", "waiting"}
-            for step in execution["plan"]
-        )
-
-        if waiting:
-            waiting_step = execution["plan"][max(0, min(state["plan_index"], len(execution["plan"]) - 1))]
-            response_text = waiting_step.get("description", "Dimmi come procedere.")
-            state["response"] = response_text
+                log_agent_activity(state, agent_id="planner", status="completed")
+            state["plan_analysis"] = analysis  # utile per debugging/test
             log_planning_status(
                 state,
-                status="waiting_confirmation",
+                status="analysis",
+                reason=str(analysis.get("reason", "")),
+                plan=normalize_plan_steps(analysis.get("steps", []), available_tool_names),
+            )
+
+            if analysis.get("needs_plan") and analysis.get("steps"):
+                plan = normalize_plan_steps(analysis.get("steps", []), available_tool_names)
+                if plan:
+                    logger.info("Generated plan with %s steps", len(plan))
+                    state["plan"] = plan
+                    state["plan_index"] = 0
+                    state["plan_dirty"] = True
+                    state["plan_completed"] = False
+                    state["plan_origin"] = request.message
+                    log_planning_status(
+                        state,
+                        status="generated",
+                        reason=str(analysis.get("reason", "")),
+                        plan=plan,
+                    )
+                else:
+                    logger.info("Plan analysis returned no valid steps")
+
+        # Esegui piano se presente
+        if plan:
+            execution = await execute_plan_steps(state, plan, state.get("plan_index", 0))
+            state["plan"] = execution["plan"]
+            state["plan_index"] = execution["next_index"]
+            state["plan_dirty"] = True
+
+            # Accumula risultati tool
+            if execution["tool_results"]:
+                state.setdefault("tool_results", []).extend(execution["tool_results"])
+
+            waiting = execution["waiting_for_user"]
+            remaining_steps = any(
+                step.get("status") not in {"complete", "waiting"}
+                for step in execution["plan"]
+            )
+
+            if waiting:
+                waiting_step = execution["plan"][max(0, min(state["plan_index"], len(execution["plan"]) - 1))]
+                response_text = waiting_step.get("description", "Dimmi come procedere.")
+                state["response"] = response_text
+                log_planning_status(
+                    state,
+                    status="waiting_confirmation",
+                    plan=execution["plan"],
+                    extra={"message": response_text},
+                )
+                log_agent_activity(
+                    state,
+                    agent_id="tool_loop",
+                    status="waiting",
+                    message=response_text,
+                )
+                _snapshot_notifications(state)
+                notifications = state.get("notifications", [])
+                high_priority_notifications = state.get("high_urgency_notifications", [])
+                state["chat_response"] = ChatResponse(
+                    response=response_text,
+                    session_id=state["session_id"],
+                    memory_used=state.get("memory_used", {}),
+                    tools_used=[tr["tool"] for tr in execution["tool_results"]],
+                    tool_details=execution["tool_details"],
+                    notifications_count=len(notifications),
+                    high_urgency_notifications=high_priority_notifications,
+                    agent_activity=state.get("agent_activity", []),
+                )
+                state["plan_completed"] = False
+                state["assistant_message_saved"] = False
+                return state
+
+            # Piano eseguito (o nessun ulteriore step)
+            final_text = await summarize_plan_results(
+                state["ollama"],
+                request,
+                state.get("session_context", []),
+                state.get("retrieved_memory", []),
+                execution["plan"],
+                execution["execution_summaries"],
+            )
+
+            state["response"] = final_text
+            log_planning_status(
+                state,
+                status="completed" if not remaining_steps else "partial",
                 plan=execution["plan"],
-                extra={"message": response_text},
+                extra={
+                    "summary": final_text,
+                    "tools_used": execution["tools_used"],
+                },
             )
             _snapshot_notifications(state)
             notifications = state.get("notifications", [])
             high_priority_notifications = state.get("high_urgency_notifications", [])
             state["chat_response"] = ChatResponse(
-                response=response_text,
+                response=final_text,
                 session_id=state["session_id"],
                 memory_used=state.get("memory_used", {}),
-                tools_used=[tr["tool"] for tr in execution["tool_results"]],
+                tools_used=execution["tools_used"],
                 tool_details=execution["tool_details"],
                 notifications_count=len(notifications),
                 high_urgency_notifications=high_priority_notifications,
+                agent_activity=state.get("agent_activity", []),
             )
-            state["plan_completed"] = False
+            state["plan_completed"] = not remaining_steps
             state["assistant_message_saved"] = False
+            log_agent_activity(state, agent_id="tool_loop", status="completed")
             return state
 
-        # Piano eseguito (o nessun ulteriore step)
-        final_text = await summarize_plan_results(
-            state["ollama"],
-            request,
-            state.get("session_context", []),
-            state.get("retrieved_memory", []),
-            execution["plan"],
-            execution["execution_summaries"],
-        )
+        # Fallback legacy pipeline con heuristica per web search
+        force_web = should_force_web_search(request, acknowledgement)
+        effective_request = request
+        if force_web != request.force_web_search:
+            effective_request = request.model_copy(update={"force_web_search": force_web})
 
-        state["response"] = final_text
-        log_planning_status(
-            state,
-            status="completed" if not remaining_steps else "partial",
-            plan=execution["plan"],
-            extra={
-                "summary": final_text,
-                "tools_used": execution["tools_used"],
-            },
-        )
-        _snapshot_notifications(state)
-        notifications = state.get("notifications", [])
-        high_priority_notifications = state.get("high_urgency_notifications", [])
-        state["chat_response"] = ChatResponse(
-            response=final_text,
+        chat_response = await run_main_agent_pipeline(
+            db=state["db"],
             session_id=state["session_id"],
-            memory_used=state.get("memory_used", {}),
-            tools_used=execution["tools_used"],
-            tool_details=execution["tool_details"],
-            notifications_count=len(notifications),
-            high_urgency_notifications=high_priority_notifications,
+            request=effective_request,
+            ollama=state["ollama"],
+            session_context=state["session_context"],
+            retrieved_memory=list(state["retrieved_memory"]),
+            memory_used=state["memory_used"],
         )
-        state["plan_completed"] = not remaining_steps
-        state["assistant_message_saved"] = False
-        return state
-
-    # Fallback legacy pipeline con heuristica per web search
-    force_web = should_force_web_search(request, acknowledgement)
-    effective_request = request
-    if force_web != request.force_web_search:
-        effective_request = request.model_copy(update={"force_web_search": force_web})
-
-    chat_response = await run_main_agent_pipeline(
-        db=state["db"],
-        session_id=state["session_id"],
-        request=effective_request,
-        ollama=state["ollama"],
-        session_context=state["session_context"],
-        retrieved_memory=list(state["retrieved_memory"]),
-        memory_used=state["memory_used"],
-    )
-    state["chat_response"] = chat_response
-    state["response"] = chat_response.response
-    state["plan_completed"] = True
-    state["assistant_message_saved"] = True
-    state.setdefault("tool_results", [])
-    if chat_response.tool_details:
-        for detail in chat_response.tool_details:
-            state["tool_results"].append(
-                {
-                    "tool": detail.tool_name,
-                    "parameters": detail.parameters,
-                    "result": detail.result,
-                }
+        state["chat_response"] = chat_response.model_copy(
+            update={"agent_activity": state.get("agent_activity", [])}
+        )
+        state["response"] = chat_response.response
+        state["plan_completed"] = True
+        state["assistant_message_saved"] = True
+        state.setdefault("tool_results", [])
+        if chat_response.tool_details:
+            for detail in chat_response.tool_details:
+                state["tool_results"].append(
+                    {
+                        "tool": detail.tool_name,
+                        "parameters": detail.parameters,
+                        "result": detail.result,
+                    }
+                )
+        _snapshot_notifications(state)
+        if acknowledgement and plan:
+            log_planning_status(
+                state,
+                status="acknowledged_no_plan",
+                plan=plan,
             )
-    _snapshot_notifications(state)
-    if acknowledgement and plan:
-        log_planning_status(
+        log_agent_activity(state, agent_id="tool_loop", status="completed")
+        return state
+    except Exception as exc:
+        log_agent_activity(
             state,
-            status="acknowledged_no_plan",
-            plan=plan,
+            agent_id="tool_loop",
+            status="error",
+            message=str(exc),
         )
-    return state
+        raise
 
 
 async def knowledge_agent_node(state: LangGraphChatState) -> LangGraphChatState:
     """Aggiorna la memoria breve e avvia auto-learning in background se necessario."""
 
-    request = state["request"]
-    if not request.use_memory:
-        return state
-
-    memory_manager = state.get("memory_manager")
-    if memory_manager is None:
-        return state
-
-    response_text = state.get("response")
-    if not response_text:
-        chat_response = state.get("chat_response")
-        if chat_response:
-            response_text = chat_response.response
-
-    if not response_text:
-        return state
-
-    logger = logging.getLogger(__name__)
-
-    # Update short-term memory with the latest exchange
+    log_agent_activity(state, agent_id="knowledge_agent", status="started")
     try:
-        new_context = {
-            "last_user_message": request.message,
-            "last_assistant_message": response_text,
-            "message_count": len(state.get("previous_messages", [])) + 2,
-        }
-        await memory_manager.update_short_term_memory(
-            state["db"],
-            state["session_id"],
-            new_context,
-        )
-        state.setdefault("memory_used", {})["short_term"] = True
-    except Exception:  # pragma: no cover - log warning
-        logger.warning("Errore nell'aggiornamento della memoria breve", exc_info=True)
+        request = state["request"]
+        if not request.use_memory:
+            log_agent_activity(state, agent_id="knowledge_agent", status="completed")
+            return state
 
-    # Prepare recent conversation window for knowledge extraction
-    previous_messages = state.get("previous_messages", [])
-    recent_messages = previous_messages[-8:]
-    recent_messages.append({"role": "user", "content": request.message})
-    recent_messages.append({"role": "assistant", "content": response_text})
+        memory_manager = state.get("memory_manager")
+        if memory_manager is None:
+            log_agent_activity(state, agent_id="knowledge_agent", status="completed")
+            return state
 
-    if len(recent_messages) < 2:
-        logger.info("⏭️ Skip auto-learning: conversazione insufficiente (%s messaggi)", len(recent_messages))
-        return state
+        response_text = state.get("response")
+        if not response_text:
+            chat_response = state.get("chat_response")
+            if chat_response:
+                response_text = chat_response.response
 
-    try:
-        from app.services.conversation_learner import ConversationLearner
-        from app.db.database import AsyncSessionLocal
+        if not response_text:
+            log_agent_activity(state, agent_id="knowledge_agent", status="completed")
+            return state
 
-        learner = ConversationLearner(memory_manager=memory_manager, ollama_client=state["ollama"])
+        logger = logging.getLogger(__name__)
 
-        async def _extract_knowledge_background() -> None:
-            async with AsyncSessionLocal() as db_session:
-                try:
-                    logger.info("🔍 Estrazione conoscenza da %s messaggi", len(recent_messages))
-                    knowledge_items = await learner.extract_knowledge_from_conversation(
-                        db=db_session,
-                        session_id=state["session_id"],
-                        messages=recent_messages,
-                        min_importance=0.6,
-                    )
+        # Update short-term memory with the latest exchange
+        try:
+            new_context = {
+                "last_user_message": request.message,
+                "last_assistant_message": response_text,
+                "message_count": len(state.get("previous_messages", [])) + 2,
+            }
+            await memory_manager.update_short_term_memory(
+                state["db"],
+                state["session_id"],
+                new_context,
+            )
+            state.setdefault("memory_used", {})["short_term"] = True
+        except Exception:  # pragma: no cover - log warning
+            logger.warning("Errore nell'aggiornamento della memoria breve", exc_info=True)
 
-                    if knowledge_items:
-                        stats = await learner.index_extracted_knowledge(
+        # Prepare recent conversation window for knowledge extraction
+        previous_messages = state.get("previous_messages", [])
+        recent_messages = previous_messages[-8:]
+        recent_messages.append({"role": "user", "content": request.message})
+        recent_messages.append({"role": "assistant", "content": response_text})
+
+        if len(recent_messages) < 2:
+            logger.info(
+                "⏭️ Skip auto-learning: conversazione insufficiente (%s messaggi)",
+                len(recent_messages),
+            )
+            log_agent_activity(state, agent_id="knowledge_agent", status="completed")
+            return state
+
+        try:
+            from app.services.conversation_learner import ConversationLearner
+            from app.db.database import AsyncSessionLocal
+
+            learner = ConversationLearner(memory_manager=memory_manager, ollama_client=state["ollama"])
+
+            async def _extract_knowledge_background() -> None:
+                async with AsyncSessionLocal() as db_session:
+                    try:
+                        logger.info("🔍 Estrazione conoscenza da %s messaggi", len(recent_messages))
+                        knowledge_items = await learner.extract_knowledge_from_conversation(
                             db=db_session,
-                            knowledge_items=knowledge_items,
                             session_id=state["session_id"],
+                            messages=recent_messages,
+                            min_importance=0.6,
                         )
-                        logger.info("✅ Auto-learning completato: %s elementi indicizzati", stats.get("indexed", 0))
-                    else:
-                        logger.info("ℹ️ Nessuna conoscenza estratta (soglia importanza non superata)")
-                except Exception:
-                    logger.warning("Errore nell'auto-learning in background", exc_info=True)
 
-        asyncio.create_task(_extract_knowledge_background())
-    except Exception:
-        logger.warning("Impossibile avviare auto-learning", exc_info=True)
+                        if knowledge_items:
+                            stats = await learner.index_extracted_knowledge(
+                                db=db_session,
+                                knowledge_items=knowledge_items,
+                                session_id=state["session_id"],
+                            )
+                            logger.info(
+                                "✅ Auto-learning completato: %s elementi indicizzati",
+                                stats.get("indexed", 0),
+                            )
+                        else:
+                            logger.info(
+                                "ℹ️ Nessuna conoscenza estratta (soglia importanza non superata)"
+                            )
+                    except Exception:
+                        logger.warning("Errore nell'auto-learning in background", exc_info=True)
 
+            asyncio.create_task(_extract_knowledge_background())
+        except Exception:
+            logger.warning("Impossibile avviare auto-learning", exc_info=True)
+    except Exception as exc:
+        log_agent_activity(
+            state,
+            agent_id="knowledge_agent",
+            status="error",
+            message=str(exc),
+        )
+        raise
+
+    log_agent_activity(state, agent_id="knowledge_agent", status="completed")
     return state
 
 
 async def integrity_agent_node(state: LangGraphChatState) -> LangGraphChatState:
     """Segnaposto per SemanticIntegrityChecker (per ora no-op)."""
 
-    return state
+    log_agent_activity(state, agent_id="integrity_agent", status="started")
+    try:
+        log_agent_activity(state, agent_id="integrity_agent", status="completed")
+        return state
+    except Exception as exc:
+        log_agent_activity(
+            state,
+            agent_id="integrity_agent",
+            status="error",
+            message=str(exc),
+        )
+        raise
 
 
 async def notification_collector_node(state: LangGraphChatState) -> LangGraphChatState:
     """Aggrega le notifiche raccolte dagli agenti specializzati."""
 
-    _snapshot_notifications(state)
-    return state
+    log_agent_activity(state, agent_id="notification_collector", status="started")
+    try:
+        _snapshot_notifications(state)
+        log_agent_activity(state, agent_id="notification_collector", status="completed")
+        return state
+    except Exception as exc:
+        log_agent_activity(
+            state,
+            agent_id="notification_collector",
+            status="error",
+            message=str(exc),
+        )
+        raise
 
 
 async def response_formatter_node(state: LangGraphChatState) -> LangGraphChatState:
     """Garantisce che un ChatResponse sia presente nello stato finale."""
 
-    if "chat_response" not in state or state["chat_response"] is None:
-        _snapshot_notifications(state)
-        notifications = state.get("notifications", [])
-        high_priority_notifications = state.get("high_urgency_notifications", [])
-        state["chat_response"] = ChatResponse(
-            response=state.get("response", ""),
-            session_id=state["session_id"],
-            memory_used=state.get("memory_used", {}),
-            tools_used=[],
-            tool_details=[],
-            notifications_count=len(notifications),
-            high_urgency_notifications=high_priority_notifications,
+    log_agent_activity(state, agent_id="response_formatter", status="started")
+    try:
+        if "chat_response" not in state or state["chat_response"] is None:
+            _snapshot_notifications(state)
+            notifications = state.get("notifications", [])
+            high_priority_notifications = state.get("high_urgency_notifications", [])
+            state["chat_response"] = ChatResponse(
+                response=state.get("response", ""),
+                session_id=state["session_id"],
+                memory_used=state.get("memory_used", {}),
+                tools_used=[],
+                tool_details=[],
+                notifications_count=len(notifications),
+                high_urgency_notifications=high_priority_notifications,
+                agent_activity=state.get("agent_activity", []),
+            )
+        else:
+            state["chat_response"] = state["chat_response"].model_copy(
+                update={"agent_activity": state.get("agent_activity", [])}
+            )
+        log_agent_activity(state, agent_id="response_formatter", status="completed")
+        return state
+    except Exception as exc:
+        log_agent_activity(
+            state,
+            agent_id="response_formatter",
+            status="error",
+            message=str(exc),
         )
-    return state
+        raise
 
 
 def _routing_router(state: LangGraphChatState) -> str:
@@ -849,6 +1004,7 @@ async def run_langgraph_chat(
         "plan_completed": not plan_steps,
         "assistant_message_saved": False,
         "done": False,
+        "agent_activity": [],
     }
     final_state = await app.ainvoke(state)
     chat_response = final_state["chat_response"]

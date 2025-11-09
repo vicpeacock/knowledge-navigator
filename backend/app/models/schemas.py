@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+from typing import Optional, List, Dict, Any, Literal
+from datetime import UTC, datetime
 from uuid import UUID
 
 
@@ -163,6 +163,25 @@ class ToolExecutionDetail(BaseModel):
     error: Optional[str] = None
 
 
+class AgentActivityEvent(BaseModel):
+    """Telemetry event describing the activity of a LangGraph agent node."""
+
+    agent_id: str = Field(..., description="Stable identifier of the agent/node.")
+    agent_name: str = Field(..., description="Human readable label for the agent.")
+    status: Literal["started", "completed", "waiting", "error"] = Field(
+        ...,
+        description="Execution status reported for the agent.",
+    )
+    message: Optional[str] = Field(
+        default=None,
+        description="Optional contextual message (e.g. reason for waiting).",
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Instant when the telemetry event was produced.",
+    )
+
+
 class ChatResponse(BaseModel):
     response: str
     session_id: UUID
@@ -171,6 +190,7 @@ class ChatResponse(BaseModel):
     tool_details: List[ToolExecutionDetail] = []  # Detailed information about tool executions
     notifications_count: int = 0
     high_urgency_notifications: List[Dict[str, Any]] = []
+    agent_activity: List[AgentActivityEvent] = []
 
 
 # Memory Info Schema

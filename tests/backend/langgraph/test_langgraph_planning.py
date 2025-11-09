@@ -133,6 +133,26 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
     statuses_initial = [n["content"].get("status") for n in notifications_initial]
     assert "generated" in statuses_initial
     assert "waiting_confirmation" in statuses_initial
+    activity_initial = result_initial["chat_response"].agent_activity
+    match = (
+        lambda evt, agent_id, status: (
+            (
+                evt.get("agent_id") == agent_id
+                and evt.get("status") == status
+            )
+            if isinstance(evt, dict)
+            else (
+                getattr(evt, "agent_id", None) == agent_id
+                and getattr(evt, "status", None) == status
+            )
+        )
+    )
+    assert any(
+        match(evt, "planner", "completed") for evt in activity_initial
+    ), "Il planner dovrebbe avere telemetria completata"
+    assert any(
+        match(evt, "tool_loop", "waiting") for evt in activity_initial
+    ), "La tool_loop dovrebbe essere in attesa della conferma utente"
 
     request_confirm = ChatRequest(
         message="Sì, grazie",
@@ -163,3 +183,7 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
     notifications_followup = result_followup["chat_response"].high_urgency_notifications
     statuses_followup = [n["content"].get("status") for n in notifications_followup]
     assert "completed" in statuses_followup or "partial" in statuses_followup
+    activity_followup = result_followup["chat_response"].agent_activity
+    assert any(
+        match(evt, "tool_loop", "completed") for evt in activity_followup
+    ), "La tool_loop dovrebbe completare il piano dopo la conferma"
