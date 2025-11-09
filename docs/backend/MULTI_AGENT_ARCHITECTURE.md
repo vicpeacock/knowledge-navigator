@@ -398,6 +398,51 @@ class Agent(ABC):
 6. Risultato finale inviato al frontend
 ```
 
+## Sistema di Notifiche Coordinato
+
+### Notification Center (hub in-memory)
+
+- Ogni nodo/agente produce notifiche strutturate (`Notification`) con:
+  - `type`, `priority`, `channel`, `tags`
+  - `source` (`agent`, `feature`, `reference_id`)
+  - `payload` (`title`, `message`, `summary`, `data`, `actions`)
+- Le notifiche sono normalizzate da `NotificationCenter` e rese disponibili in forma serializzabile (`to_transport_dict`).
+- Le priorità (`critical`, `high`, `medium`, `low`, `info`) definiscono i canali:
+  - `blocking`: blocca la UI (es. servizi critici down)
+  - `immediate`: feed in-session (es. aggiornamenti pianificazione)
+  - `async`: inbox da consultare successivamente
+  - `digest`: riepiloghi periodici
+  - `log`: solo telemetria interna
+
+### Cooperazione tra agenti
+
+| Tipo evento                           | Agente (producer)                  | Contenuto notifica                                               | Priorità/canale            |
+|--------------------------------------|------------------------------------|------------------------------------------------------------------|----------------------------|
+| Stato pianificazione                 | Planner / Tool Loop                | Fasi del piano, richiesta conferme, esito step                   | `medium/high` → `immediate`|
+| Contraddizioni / anomalie servizi    | Integrity Checker, Service Health  | Disallineamenti dati, servizi offline                            | `high/critical` → `blocking`|
+| Aggiornamenti conoscenza             | Knowledge / Learner                | Nuove fonti, gap informativi, suggerimenti di studio             | `medium` → `async/digest`  |
+| Eventi calendario e comunicazioni    | Calendar Sentinel, Communication Watcher | Inviti, email urgenti, deleghe completate                         | `high/medium` → `immediate/async` |
+| Benessere e routine                  | Wellbeing Agent (futuro)           | Reminder pause, deviazioni dalla routine                         | `low` → `digest/async`     |
+
+### Pipeline nel grafo LangGraph
+
+1. Ogni nodo (`tool_loop`, `knowledge_agent`, `integrity_agent`, ecc.) pubblica notifiche nel `NotificationCenter`.
+2. `notification_collector_node` consolida le notifiche e produce due viste:
+   - `notifications` (tutte)
+   - `high_urgency_notifications` (priorità ≥ `high`)
+3. `response_formatter_node` serializza il conteggio e la lista urgente dentro `ChatResponse`.
+4. Frontend/UI:
+   - Mostra badge con `notifications_count`
+   - Pannello "Status Updates" popolato con `high_urgency_notifications`
+   - Eventuali canali `blocking` attivano la health-gate esistente
+
+### Estensioni previste
+
+- **Persistenza**: scrivere notifiche critiche nel DB per audit e ripristino dopo refresh.
+- **Routing canali**: mappare `channel` su diversi surface (toast, inbox, email).
+- **Azioni suggerite**: `NotificationAction` consente di offrire bottoni contestuali (es. “Apri email”, “Conferma delega”).
+- **Policy utente**: preferenze personalizzate per silenziare categorie/tag.
+
 ### Esempio 2: Contraddizione Rilevata
 
 ```
