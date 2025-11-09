@@ -15,6 +15,16 @@ class HealthCheckService:
     
     def __init__(self):
         self.health_status: Dict[str, Dict[str, Any]] = {}
+        # Mandatory services required for the application to operate correctly.
+        # Background LLM can be disabled (fire-and-forget tasks), so we treat it as optional by default.
+        self.mandatory_services = {
+            "postgres",
+            "chromadb",
+            "ollama_main",
+        }
+        # Allow forcing background model as mandatory if needed via env flag.
+        if settings.use_llama_cpp_background and getattr(settings, "require_background_llm", False):
+            self.mandatory_services.add("ollama_background")
     
     async def check_all_services(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -28,36 +38,61 @@ class HealthCheckService:
         
         # Check PostgreSQL
         postgres_status = await self._check_postgres()
+        postgres_status["mandatory"] = "postgres" in self.mandatory_services
         self.health_status["postgres"] = postgres_status
         
         # Check ChromaDB
         chromadb_status = await self._check_chromadb()
+        chromadb_status["mandatory"] = "chromadb" in self.mandatory_services
         self.health_status["chromadb"] = chromadb_status
         
         # Check Ollama Main
         ollama_main_status = await self._check_ollama_main()
+        ollama_main_status["mandatory"] = "ollama_main" in self.mandatory_services
         self.health_status["ollama_main"] = ollama_main_status
         
         # Check Ollama Background
         ollama_background_status = await self._check_ollama_background()
+        ollama_background_status["mandatory"] = "ollama_background" in self.mandatory_services
         self.health_status["ollama_background"] = ollama_background_status
         
         # Summary
-        all_healthy = all(
-            status.get("healthy", False) 
-            for status in self.health_status.values()
+        all_services_healthy = all(status.get("healthy", False) for status in self.health_status.values())
+        all_mandatory_healthy = all(
+            status.get("healthy", False)
+            for name, status in self.health_status.items()
+            if status.get("mandatory", False)
         )
+        unhealthy_services = [
+            {"service": name, **status}
+            for name, status in self.health_status.items()
+            if not status.get("healthy", False)
+        ]
+        unhealthy_mandatory = [
+            service for service in unhealthy_services if service.get("mandatory", False)
+        ]
         
-        logger.info(f"✅ Health check completed. All services healthy: {all_healthy}")
-        if not all_healthy:
+        logger.info(
+            "✅ Health check completed. Mandatory services healthy: %s (all services healthy: %s)",
+            all_mandatory_healthy,
+            all_services_healthy,
+        )
+        if not all_mandatory_healthy:
             logger.warning("⚠️  Some services are not healthy:")
-            for service, status in self.health_status.items():
-                if not status.get("healthy", False):
-                    logger.warning(f"  - {service}: {status.get('error', 'Unknown error')}")
+            for service in unhealthy_services:
+                logger.warning(
+                    "  - %s%s: %s",
+                    service["service"],
+                    " (mandatory)" if service.get("mandatory") else "",
+                    service.get("error", "Unknown error"),
+                )
         
         return {
-            "all_healthy": all_healthy,
+            "all_healthy": all_services_healthy,
+            "all_mandatory_healthy": all_mandatory_healthy,
             "services": self.health_status,
+            "unhealthy_services": unhealthy_services,
+            "unhealthy_mandatory_services": unhealthy_mandatory,
         }
     
     async def _check_postgres(self) -> Dict[str, Any]:
@@ -77,16 +112,24 @@ class HealthCheckService:
         """Check ChromaDB connection"""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                # ChromaDB v1.0.0+ uses API v2 (v1 is deprecated and returns 410)
-                response = await client.get(
-                    f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v2/heartbeat"
-                )
+                heartbeat_url = f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v2/heartbeat"
+                response = await client.get(heartbeat_url)
+
+                if response.status_code == 404:
+                    # Older Chroma versions only expose v1 heartbeat
+                    fallback_url = f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v1/heartbeat"
+                    response = await client.get(fallback_url)
+                    heartbeat_url = fallback_url
+
                 if response.status_code == 200:
-                    return {"healthy": True, "message": "ChromaDB connection successful"}
-                else:
-                    return {"healthy": False, "error": f"ChromaDB returned status {response.status_code}"}
+                    return {
+                        "healthy": True,
+                        "message": f"ChromaDB connection successful ({heartbeat_url})",
+                        "heartbeat_url": heartbeat_url,
+                    }
+                return {"healthy": False, "error": f"ChromaDB returned status {response.status_code}"}
         except Exception as e:
-            logger.error(f"❌ ChromaDB health check failed: {e}")
+            logger.error("❌ ChromaDB health check failed: %s", e)
             return {"healthy": False, "error": str(e)}
     
     async def _check_ollama_main(self) -> Dict[str, Any]:
@@ -199,14 +242,27 @@ class HealthCheckService:
     
     def get_status_summary(self) -> Dict[str, Any]:
         """Get summary of health status"""
-        all_healthy = all(
-            status.get("healthy", False) 
+        all_services_healthy = all(status.get("healthy", False) for status in self.health_status.values())
+        all_mandatory_healthy = all(
+            status.get("healthy", False)
             for status in self.health_status.values()
+            if status.get("mandatory", False)
         )
+        unhealthy_services = [
+            {"service": name, **status}
+            for name, status in self.health_status.items()
+            if not status.get("healthy", False)
+        ]
+        unhealthy_mandatory = [
+            service for service in unhealthy_services if service.get("mandatory", False)
+        ]
         
         return {
-            "all_healthy": all_healthy,
+            "all_healthy": all_services_healthy,
+            "all_mandatory_healthy": all_mandatory_healthy,
             "services": self.health_status,
+            "unhealthy_services": unhealthy_services,
+            "unhealthy_mandatory_services": unhealthy_mandatory,
         }
 
 

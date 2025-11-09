@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     ollama_background_base_url: str = "http://127.0.0.1:11435"  # Per llama.cpp: aggiungere /v1 automaticamente (usa 127.0.0.1 invece di localhost per evitare problemi IPv6)
     ollama_background_model: str = "Phi-3-mini-4k-instruct-q4"  # Modello llama.cpp (Phi-3-mini quantizzato Q4)
     use_llama_cpp_background: bool = True  # Se True, usa llama.cpp invece di Ollama per background
+    require_background_llm: bool = False  # Se True, il background LLM è considerato mandatory
 
     # Planner LLM (dedicato alla generazione del piano)
     ollama_planner_base_url: Optional[str] = None  # Se None, usa ollama_background_base_url o ollama_base_url
