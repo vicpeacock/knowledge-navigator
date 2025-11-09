@@ -1,10 +1,26 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { sessionsApi } from '@/lib/api'
 import { Session } from '@/types'
-import { Edit2, X, Save, Archive, Trash2, RotateCcw, Home } from 'lucide-react'
+import {
+  Edit2,
+  X,
+  Save,
+  Archive,
+  Trash2,
+  RotateCcw,
+  Home,
+  Network,
+  Workflow,
+  Bot,
+  Brain,
+  ShieldCheck,
+  BellRing,
+  MessageSquare,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 interface SessionDetailsProps {
   session: Session
@@ -16,6 +32,21 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
   const [title, setTitle] = useState(session.title || '')
   const [description, setDescription] = useState(session.description || '')
   const [loading, setLoading] = useState(false)
+  const [showAgentActivity, setShowAgentActivity] = useState(false)
+
+  const agentNodes = useMemo(
+    () =>
+      [
+        { id: 'event_handler', label: 'Event Handler', icon: Workflow },
+        { id: 'planner', label: 'Planner', icon: Bot },
+        { id: 'tool_loop', label: 'Tool Loop', icon: Network },
+        { id: 'knowledge', label: 'Knowledge', icon: Brain },
+        { id: 'integrity', label: 'Integrity', icon: ShieldCheck },
+        { id: 'notification', label: 'Notifications', icon: BellRing },
+        { id: 'response', label: 'Response', icon: MessageSquare },
+      ] satisfies Array<{ id: string; label: string; icon: LucideIcon }>,
+    []
+  )
 
   const handleSave = async () => {
     setLoading(true)
@@ -74,7 +105,15 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
 
   return (
     <div className="bg-white dark:bg-gray-800 p-4 border-b border-gray-200 dark:border-gray-700">
-      <div className="mb-3">
+      <div className="mb-3 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setShowAgentActivity((prev) => !prev)}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-300"
+          title={showAgentActivity ? 'Nascondi attività agenti' : 'Mostra attività agenti'}
+        >
+          <Network size={18} />
+        </button>
         <Link
           href="/"
           className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors text-sm"
@@ -83,6 +122,26 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
           <span>Home</span>
         </Link>
       </div>
+      {showAgentActivity && (
+        <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/70 p-4 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            {agentNodes.map(({ id, label, icon: Icon }) => (
+              <div
+                key={id}
+                className="flex w-24 flex-col items-center gap-2 text-center text-xs text-blue-900 dark:text-blue-200"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-200 text-blue-700 dark:bg-blue-900/60 dark:text-blue-200">
+                  <Icon size={18} />
+                </span>
+                <span className="font-medium leading-tight">{label}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-xs text-blue-800/80 dark:text-blue-200/70">
+            Stato colore (placeholder): blu = idle, verde = attivo, arancione = in attesa, rosso = errore.
+          </p>
+        </div>
+      )}
       {isEditing ? (
         <div className="space-y-3">
           <div>
