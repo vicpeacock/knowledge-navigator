@@ -43,6 +43,16 @@ export interface ToolExecutionDetail {
   error?: string
 }
 
+export type AgentActivityStatus = 'started' | 'completed' | 'waiting' | 'error'
+
+export interface AgentActivityEvent {
+  agent_id: string
+  agent_name: string
+  status: AgentActivityStatus
+  message?: string
+  timestamp: string
+}
+
 export interface ChatResponse {
   response: string
   session_id: string
@@ -60,5 +70,6 @@ export interface ChatResponse {
     content: any
     id: string
   }>
+  agent_activity?: AgentActivityEvent[]
 }
 

@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import ChatInterface from '@/components/ChatInterface'
 import SessionList from '@/components/SessionList'
 import SessionDetails from '@/components/SessionDetails'
+import { AgentActivityProvider } from '@/components/AgentActivityContext'
 import { sessionsApi } from '@/lib/api'
 import { Session } from '@/types'
 
@@ -46,10 +47,12 @@ export default function SessionPage() {
     <div className="flex h-screen">
       <SessionList currentSessionId={sessionId} />
       <div className="flex-1 flex flex-col overflow-hidden">
-        {session && <SessionDetails session={session} onUpdate={loadSession} />}
-        <div className="flex-1 overflow-hidden flex flex-col">
-          <ChatInterface sessionId={sessionId} />
-        </div>
+        <AgentActivityProvider sessionId={sessionId}>
+          {session && <SessionDetails session={session} onUpdate={loadSession} />}
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <ChatInterface sessionId={sessionId} />
+          </div>
+        </AgentActivityProvider>
       </div>
     </div>
   )

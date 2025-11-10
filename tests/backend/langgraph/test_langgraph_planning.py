@@ -8,6 +8,7 @@ import pytest
 
 from app.agents import langgraph_app
 from app.models.schemas import ChatRequest, ChatResponse
+from app.services.agent_activity_stream import AgentActivityStream
 
 
 def test_should_force_web_search_acknowledgement_off() -> None:
@@ -109,6 +110,7 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
     )
 
     planner_stub = object()
+    activity_stream = AgentActivityStream()
 
     result_initial = await langgraph_app.run_langgraph_chat(
         db=db,  # type: ignore[arg-type]
@@ -116,6 +118,7 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
         request=request_initial,
         ollama=object(),  # type: ignore[arg-type]
         planner_client=planner_stub,  # type: ignore[arg-type]
+        agent_activity_stream=activity_stream,
         memory_manager=object(),  # type: ignore[arg-type]
         session_context=[],
         retrieved_memory=[],
@@ -167,6 +170,7 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
         request=request_confirm,
         ollama=object(),  # type: ignore[arg-type]
         planner_client=planner_stub,  # type: ignore[arg-type]
+        agent_activity_stream=activity_stream,
         memory_manager=object(),  # type: ignore[arg-type]
         session_context=[{"role": "assistant", "content": initial_response}],
         retrieved_memory=[],
