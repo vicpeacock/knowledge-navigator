@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.db.database import get_db
 from app.models.database import Integration
 from app.services.calendar_service import CalendarService
+from app.services.exceptions import IntegrationAuthError
 from app.services.date_parser import DateParser
 from cryptography.fernet import Fernet
 import base64
@@ -84,7 +85,11 @@ async def authorize_google_calendar(
         flow = calendar_service.create_google_oauth_flow(
             state=str(integration_id) if integration_id else None
         )
-        authorization_url, _ = flow.authorization_url(prompt='consent')
+        authorization_url, _ = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent',
+        )
         return {"authorization_url": authorization_url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating OAuth flow: {str(e)}")
@@ -102,7 +107,26 @@ async def oauth_callback(
     
     try:
         flow = calendar_service.create_google_oauth_flow(state=state)
-        flow.fetch_token(code=code)
+        try:
+            flow.fetch_token(code=code)
+        except (Warning, ValueError) as exc:
+            message = str(exc)
+            if "Scope has changed" in message:
+                # Extract new scope list from error message
+                try:
+                    new_scopes_part = message.split('to "')[1].split('"')[0]
+                    new_scopes = [scope for scope in new_scopes_part.split() if scope]
+                except Exception:  # pragma: no cover - fallback path
+                    new_scopes = []
+                if new_scopes:
+                    flow = calendar_service.create_google_oauth_flow(state=state, scopes=new_scopes)
+                    # Ensure oauthlib compares against updated scopes order
+                    flow.oauth2session.scope = new_scopes
+                    flow.fetch_token(code=code)
+                else:
+                    raise
+            else:
+                raise
         
         credentials = {
             "token": flow.credentials.token,
@@ -113,7 +137,8 @@ async def oauth_callback(
             "scopes": flow.credentials.scopes,
         }
         
-        # Encrypt and store in database
+        prior_refresh_token: Optional[str] = None
+        
         integration_id = None
         if state:
             try:
@@ -129,6 +154,18 @@ async def oauth_callback(
             )
             integration = result.scalar_one_or_none()
             if integration:
+                try:
+                    existing = _decrypt_credentials(
+                        integration.credentials_encrypted,
+                        settings.credentials_encryption_key,
+                    )
+                    prior_refresh_token = existing.get("refresh_token")
+                except Exception:
+                    prior_refresh_token = None
+
+                if not credentials.get("refresh_token") and prior_refresh_token:
+                    credentials["refresh_token"] = prior_refresh_token
+
                 encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
                 integration.credentials_encrypted = encrypted
                 await db.commit()
@@ -136,6 +173,11 @@ async def oauth_callback(
                 raise HTTPException(status_code=404, detail="Integration not found")
         else:
             # Create new integration
+            if not credentials.get("refresh_token"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="L'autorizzazione non ha fornito il refresh token. Concedi tutti i permessi richiesti e riprova."
+                )
             encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
             integration = Integration(
                 provider="google",
@@ -149,7 +191,16 @@ async def oauth_callback(
             integration_id = integration.id
         
         # Setup calendar service
-        await calendar_service.setup_google(credentials, str(integration_id))
+        try:
+            await calendar_service.setup_google(credentials, str(integration_id))
+        except IntegrationAuthError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "message": "Autorizzazione Google Calendar non valida.",
+                    "reason": exc.reason,
+                },
+            )
         
         # Redirect to frontend with success
         frontend_url = "http://localhost:3003"  # Can be made configurable
@@ -225,16 +276,33 @@ async def get_events(
                     settings.credentials_encryption_key
                 )
                 await calendar_service.setup_google(credentials, str(integration_id))
-            except:
-                pass  # Already setup
+            except IntegrationAuthError as exc:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "message": "Autorizzazione Google Calendar scaduta o revocata.",
+                        "reason": exc.reason,
+                    },
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
         
         # Fetch events
-        events = await calendar_service.get_google_events(
-            start_time=start_time,
-            end_time=end_time,
-            max_results=max_results,
-            integration_id=str(integration_id) if integration_id else None,
-        )
+        try:
+            events = await calendar_service.get_google_events(
+                start_time=start_time,
+                end_time=end_time,
+                max_results=max_results,
+                integration_id=str(integration_id) if integration_id else None,
+            )
+        except IntegrationAuthError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "message": "Autorizzazione Google Calendar scaduta o revocata.",
+                    "reason": exc.reason,
+                },
+            )
         
         return {
             "provider": provider,
@@ -289,16 +357,33 @@ async def query_events_natural(
                         settings.credentials_encryption_key
                     )
                     await calendar_service.setup_google(credentials, str(request.integration_id))
-                except:
-                    pass  # Already setup
+                except IntegrationAuthError as exc:
+                    raise HTTPException(
+                        status_code=401,
+                        detail={
+                            "message": "Autorizzazione Google Calendar scaduta o revocata.",
+                            "reason": exc.reason,
+                        },
+                    )
+                except Exception as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
             
             # Fetch events
-            events = await calendar_service.get_google_events(
-                start_time=start_time,
-                end_time=end_time,
-                max_results=50,
-                integration_id=str(request.integration_id) if request.integration_id else None,
-            )
+            try:
+                events = await calendar_service.get_google_events(
+                    start_time=start_time,
+                    end_time=end_time,
+                    max_results=50,
+                    integration_id=str(request.integration_id) if request.integration_id else None,
+                )
+            except IntegrationAuthError as exc:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "message": "Autorizzazione Google Calendar scaduta o revocata.",
+                        "reason": exc.reason,
+                    },
+                )
             
             return {
                 "query": request.query,

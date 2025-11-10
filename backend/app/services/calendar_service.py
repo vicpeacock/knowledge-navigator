@@ -1,4 +1,5 @@
-from typing import List, Dict, Any, Optional
+import os
+from typing import List, Dict, Any, Optional, Sequence
 from datetime import datetime, timezone, timedelta
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -19,6 +20,10 @@ import json
 from app.core.config import settings
 from app.services.exceptions import IntegrationAuthError
 
+# Allow oauthlib to accept extended scopes returned by Google when
+# include_granted_scopes=true (prevents warnings from becoming exceptions)
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+
 
 class CalendarService:
     """Service for managing calendar integrations (Google, Apple, Microsoft)"""
@@ -32,11 +37,27 @@ class CalendarService:
         return f"{provider}_{integration_id or 'default'}"
     
     # Google Calendar
-    def create_google_oauth_flow(self, state: Optional[str] = None) -> Flow:
+    def create_google_oauth_flow(
+        self,
+        state: Optional[str] = None,
+        scopes: Optional[Sequence[str]] = None,
+    ) -> Flow:
         """Create OAuth2 flow for Google Calendar"""
         if not settings.google_client_id or not settings.google_client_secret:
             raise ValueError("Google OAuth credentials not configured")
-        
+
+        scope_list = list(scopes or [
+            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+        ])
+        # Ensure calendar scopes are always included
+        for mandatory_scope in (
+            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+        ):
+            if mandatory_scope not in scope_list:
+                scope_list.append(mandatory_scope)
+
         flow = Flow.from_client_config(
             {
                 "web": {
@@ -47,10 +68,7 @@ class CalendarService:
                     "redirect_uris": [settings.google_redirect_uri_calendar],
                 }
             },
-            scopes=[
-                "https://www.googleapis.com/auth/calendar.readonly",
-                "https://www.googleapis.com/auth/calendar.events",
-            ],
+            scopes=scope_list,
             redirect_uri=settings.google_redirect_uri_calendar,
         )
         

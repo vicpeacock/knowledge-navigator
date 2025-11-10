@@ -35,6 +35,8 @@ export default function IntegrationsPage() {
   const [isSaving, setIsSaving] = useState(false) // Flag to prevent useEffect from interfering during save
   const [gmailNeedsReconnect, setGmailNeedsReconnect] = useState(false)
   const [gmailStatusMessage, setGmailStatusMessage] = useState<string | null>(null)
+  const [calendarNeedsReconnect, setCalendarNeedsReconnect] = useState(false)
+  const [calendarStatusMessage, setCalendarStatusMessage] = useState<string | null>(null)
   
   // Use global status panel
   const { addStatusMessage } = useStatus()
@@ -151,10 +153,10 @@ export default function IntegrationsPage() {
     }
   }
 
-  const connectGoogleCalendar = async () => {
+  const connectGoogleCalendar = async (integrationId?: string) => {
     setConnectingCalendar(true)
     try {
-      const response = await integrationsApi.calendar.authorize()
+      const response = await integrationsApi.calendar.authorize(integrationId)
       if (response.data?.authorization_url) {
         window.location.href = response.data.authorization_url
       } else {
@@ -285,8 +287,27 @@ export default function IntegrationsPage() {
       } else {
         addStatusMessage('info', 'Calendario: Connessione funzionante, nessun evento trovato')
       }
+      setCalendarNeedsReconnect(false)
+      setCalendarStatusMessage(null)
     } catch (error: any) {
-      console.error('Error testing calendar:', error.response?.data?.detail || error.message)
+      const detail = error.response?.data?.detail
+      const message =
+        typeof detail === 'object' && detail?.message
+          ? detail.message
+          : detail || error.message
+      console.error('Error testing calendar:', message)
+      if (error.response?.status === 401) {
+        setCalendarNeedsReconnect(true)
+        setCalendarStatusMessage(
+          message || 'Autorizzazione Google Calendar scaduta o revocata. Ricollega l’account.'
+        )
+        addStatusMessage(
+          'warning',
+          message || 'Autorizzazione Google Calendar scaduta o revocata. Ricollega l’account.'
+        )
+      } else {
+        addStatusMessage('error', `Calendario: errore nel test - ${message}`)
+      }
     }
   }
 
@@ -298,9 +319,14 @@ export default function IntegrationsPage() {
     )
   }
 
-  const hasGoogleCalendar = calendarIntegrations.some(
+  const googleCalendarIntegrations = calendarIntegrations.filter(
     (i) => i.provider === 'google' && i.enabled
   )
+  const primaryCalendarIntegration =
+    googleCalendarIntegrations.length > 0
+      ? googleCalendarIntegrations[googleCalendarIntegrations.length - 1]
+      : undefined
+  const hasGoogleCalendar = googleCalendarIntegrations.length > 0
   const gmailIntegrations = emailIntegrations.filter((i) => i.provider === 'google' && i.enabled)
   const gmailIntegration = gmailIntegrations.length > 0 ? gmailIntegrations[gmailIntegrations.length - 1] : undefined
   const hasGmailIntegration = gmailIntegrations.length > 0
@@ -360,6 +386,19 @@ export default function IntegrationsPage() {
                   <li>&ldquo;Mostrami gli appuntamenti di oggi&rdquo;</li>
                 </ul>
               </div>
+              {calendarNeedsReconnect && (
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700 rounded-lg">
+                  <p className="text-sm text-yellow-900 dark:text-yellow-200 font-medium">
+                    {calendarStatusMessage ||
+                      'Il token di autorizzazione Google Calendar è scaduto. Ricollega l’account per continuare a leggere gli eventi.'}
+                  </p>
+                </div>
+              )}
+              {googleCalendarIntegrations.length > 1 && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg text-sm text-amber-900 dark:text-amber-100">
+                  Sono presenti {googleCalendarIntegrations.length} integrazioni Google Calendar abilitate. Mantieni solo quella più recente e rimuovi le altre per evitare token scaduti.
+                </div>
+              )}
               <div className="flex gap-3">
                 <button
                   onClick={testCalendarConnection}
@@ -368,12 +407,11 @@ export default function IntegrationsPage() {
                   <RefreshCw size={18} />
                   Test Connessione
                 </button>
-                {calendarIntegrations.find(i => i.provider === 'google' && i.enabled) && (
+                {primaryCalendarIntegration && (
                   <button
                     onClick={() => {
-                      const integration = calendarIntegrations.find(i => i.provider === 'google' && i.enabled)
-                      if (integration?.id) {
-                        disconnectCalendar(integration.id)
+                      if (primaryCalendarIntegration?.id) {
+                        disconnectCalendar(primaryCalendarIntegration.id)
                       } else {
                         console.warn('Nessuna integrazione trovata')
                       }
@@ -384,6 +422,23 @@ export default function IntegrationsPage() {
                     Rimuovi
                   </button>
                 )}
+                <button
+                  onClick={() => connectGoogleCalendar(primaryCalendarIntegration?.id)}
+                  disabled={connectingCalendar}
+                  className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {connectingCalendar ? (
+                    <>
+                      <RefreshCw size={18} className="animate-spin" />
+                      Richiesta in corso...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={18} />
+                      Ricollega Calendar
+                    </>
+                  )}
+                </button>
                 <button
                   onClick={loadIntegrations}
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
@@ -401,7 +456,7 @@ export default function IntegrationsPage() {
                 </p>
               </div>
               <button
-                onClick={connectGoogleCalendar}
+              onClick={() => connectGoogleCalendar()}
                 disabled={connectingCalendar}
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
