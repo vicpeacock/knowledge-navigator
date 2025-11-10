@@ -16,19 +16,7 @@ except ImportError:
     ConfidentialClientApplication = None
 import httpx
 from app.core.config import settings
-
-
-class IntegrationAuthError(Exception):
-    """Raised when an integration requires the user to re-authorize."""
-
-    def __init__(self, provider: str, reason: str, detail: Optional[str] = None):
-        self.provider = provider
-        self.reason = reason
-        self.detail = detail or reason
-        message = f"{provider} auth error: {reason}"
-        if detail and detail != reason:
-            message += f" ({detail})"
-        super().__init__(message)
+from app.services.exceptions import IntegrationAuthError
 
 
 class EmailService:

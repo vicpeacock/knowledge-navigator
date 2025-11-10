@@ -3,7 +3,9 @@ from datetime import datetime, timezone, timedelta
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 try:
     import caldav
 except ImportError:
@@ -15,6 +17,7 @@ except ImportError:
 import httpx
 import json
 from app.core.config import settings
+from app.services.exceptions import IntegrationAuthError
 
 
 class CalendarService:
@@ -62,15 +65,26 @@ class CalendarService:
         integration_id: Optional[str] = None,
     ):
         """Setup Google Calendar integration with token"""
-        creds = Credentials.from_authorized_user_info(token_dict)
+        try:
+            creds = Credentials.from_authorized_user_info(token_dict)
+        except Exception as exc:
+            raise IntegrationAuthError("google_calendar", "invalid_credentials", str(exc)) from exc
         
-        # Refresh token if needed
-        if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+        try:
+            if creds.expired:
+                if creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    raise IntegrationAuthError("google_calendar", "refresh_token_missing")
+        except RefreshError as exc:
+            raise IntegrationAuthError("google_calendar", "token_refresh_failed", str(exc)) from exc
         
-        service = build("calendar", "v3", credentials=creds)
+        try:
+            service = build("calendar", "v3", credentials=creds)
+        except HttpError as exc:
+            raise IntegrationAuthError("google_calendar", "api_unavailable", str(exc)) from exc
+        
         self._services[self._get_service_key("google", integration_id)] = service
-        
         return service
     
     async def get_google_events(
@@ -86,7 +100,7 @@ class CalendarService:
         service = self._services.get(service_key)
         
         if not service:
-            raise ValueError(f"Google Calendar not configured for integration {integration_id}")
+            raise IntegrationAuthError("google_calendar", "service_not_initialized")
         
         # Default: next 7 days if no time specified
         if not start_time:
@@ -123,6 +137,12 @@ class CalendarService:
                 formatted_events.append(formatted)
             
             return formatted_events
+        except HttpError as exc:
+            if exc.resp.status in (401, 403):
+                raise IntegrationAuthError("google_calendar", "unauthorized", str(exc)) from exc
+            raise ValueError(f"Error fetching Google Calendar events: {str(exc)}") from exc
+        except IntegrationAuthError:
+            raise
         except Exception as e:
             raise ValueError(f"Error fetching Google Calendar events: {str(e)}")
     
