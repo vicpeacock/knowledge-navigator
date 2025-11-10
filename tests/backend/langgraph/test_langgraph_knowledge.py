@@ -8,6 +8,7 @@ import pytest
 
 from app.agents import langgraph_app
 from app.models.schemas import ChatRequest, ChatResponse
+from app.services.agent_activity_stream import AgentActivityStream
 
 
 class DummyMemoryManager:
@@ -111,6 +112,7 @@ async def test_langgraph_knowledge_node_updates_memory(monkeypatch: pytest.Monke
 
     # Act
     planner_stub = object()
+    activity_stream = AgentActivityStream()
 
     result = await langgraph_app.run_langgraph_chat(
         db=db,  # type: ignore[arg-type]
@@ -118,6 +120,7 @@ async def test_langgraph_knowledge_node_updates_memory(monkeypatch: pytest.Monke
         request=request,
         ollama=object(),  # type: ignore[arg-type]
         planner_client=planner_stub,  # type: ignore[arg-type]
+        agent_activity_stream=activity_stream,
         memory_manager=dummy_memory,  # type: ignore[arg-type]
         session_context=[],
         retrieved_memory=[],

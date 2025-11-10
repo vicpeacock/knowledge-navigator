@@ -1,19 +1,21 @@
 """Dependency functions for FastAPI"""
-from app.core.ollama_client import OllamaClient
+from app.core.config import settings
 from app.core.mcp_client import MCPClient
 from app.core.memory_manager import MemoryManager
-from app.core.config import settings
+from app.core.ollama_client import OllamaClient
+from app.services.agent_activity_stream import AgentActivityStream
 
 # Global instances
 _ollama_client: OllamaClient = None
 _planner_client: OllamaClient = None
 _mcp_client: MCPClient = None
 _memory_manager: MemoryManager = None
+_agent_activity_stream: AgentActivityStream = None
 
 
 def init_clients():
     """Initialize global clients"""
-    global _ollama_client, _planner_client, _mcp_client, _memory_manager
+    global _ollama_client, _planner_client, _mcp_client, _memory_manager, _agent_activity_stream
     if _ollama_client is None:
         _ollama_client = OllamaClient()
     if _planner_client is None:
@@ -25,6 +27,8 @@ def init_clients():
         _mcp_client = MCPClient()
     if _memory_manager is None:
         _memory_manager = MemoryManager()
+    if _agent_activity_stream is None:
+        _agent_activity_stream = AgentActivityStream()
 
 
 def get_ollama_client() -> OllamaClient:
@@ -59,4 +63,8 @@ def get_mcp_client() -> MCPClient:
 
 def get_memory_manager() -> MemoryManager:
     return _memory_manager
+
+
+def get_agent_activity_stream() -> AgentActivityStream:
+    return _agent_activity_stream
 

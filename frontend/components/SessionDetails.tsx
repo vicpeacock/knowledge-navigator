@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { sessionsApi } from '@/lib/api'
 import { Session } from '@/types'
+import clsx from 'clsx'
 import {
   Edit2,
   X,
@@ -14,6 +15,7 @@ import {
   Home,
   Network,
   Workflow,
+  Activity,
   Bot,
   Brain,
   ShieldCheck,
@@ -21,6 +23,7 @@ import {
   MessageSquare,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { useAgentActivity } from './AgentActivityContext'
 
 interface SessionDetailsProps {
   session: Session
@@ -34,19 +37,93 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
   const [loading, setLoading] = useState(false)
   const [showAgentActivity, setShowAgentActivity] = useState(false)
 
-  const agentNodes = useMemo(
+  const { agentStatuses, events, connectionState } = useAgentActivity()
+
+  const agentDefinitions = useMemo(
     () =>
-      [
-        { id: 'event_handler', label: 'Event Handler', icon: Workflow },
-        { id: 'planner', label: 'Planner', icon: Bot },
-        { id: 'tool_loop', label: 'Tool Loop', icon: Network },
-        { id: 'knowledge', label: 'Knowledge', icon: Brain },
-        { id: 'integrity', label: 'Integrity', icon: ShieldCheck },
-        { id: 'notification', label: 'Notifications', icon: BellRing },
-        { id: 'response', label: 'Response', icon: MessageSquare },
-      ] satisfies Array<{ id: string; label: string; icon: LucideIcon }>,
+      new Map<string, { label: string; icon: LucideIcon }>([
+        ['event_handler', { label: 'Event Handler', icon: Workflow }],
+        ['orchestrator', { label: 'Orchestrator', icon: Activity }],
+        ['planner', { label: 'Planner', icon: Bot }],
+        ['tool_loop', { label: 'Tool Loop', icon: Network }],
+        ['knowledge_agent', { label: 'Knowledge', icon: Brain }],
+        ['integrity_agent', { label: 'Integrity', icon: ShieldCheck }],
+        ['notification_collector', { label: 'Notifications', icon: BellRing }],
+        ['response_formatter', { label: 'Response', icon: MessageSquare }],
+      ]),
     []
   )
+
+  const statusColorMap: Record<string, string> = {
+    started: 'bg-emerald-500 text-white ring-2 ring-emerald-200 dark:ring-emerald-600/50',
+    waiting: 'bg-amber-500 text-white ring-2 ring-amber-200 dark:ring-amber-600/50',
+    error: 'bg-rose-500 text-white ring-2 ring-rose-200 dark:ring-rose-600/50',
+    completed: 'bg-blue-200 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200',
+    idle: 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+  }
+
+  const statusLabelMap: Record<string, string> = {
+    started: 'In esecuzione',
+    waiting: 'In attesa',
+    error: 'Errore',
+    completed: 'Completato',
+    idle: 'Idle',
+  }
+
+  const connectionBadge = useMemo(() => {
+    const color =
+      connectionState === 'open'
+        ? 'bg-emerald-500'
+        : connectionState === 'connecting'
+        ? 'bg-amber-500'
+        : 'bg-rose-500'
+    const label =
+      connectionState === 'open'
+        ? 'Streaming attivo'
+        : connectionState === 'connecting'
+        ? 'Connessione...'
+        : 'Streaming non disponibile'
+    return { color, label }
+  }, [connectionState])
+
+  const latestEvents = useMemo(() => {
+    return [...events]
+      .slice(-12)
+      .reverse()
+      .map((evt) => ({
+        key: `${evt.timestamp}|${evt.agent_id}|${evt.status}`,
+        time: new Date(evt.timestamp).toLocaleTimeString(),
+        agent: evt.agent_name,
+        status: statusLabelMap[evt.status] ?? evt.status,
+        message: evt.message,
+      }))
+  }, [events, statusLabelMap])
+
+  const renderAgentStatus = (agentId: string, status: typeof agentStatuses[number]) => {
+    const definition = agentDefinitions.get(agentId)
+    const Icon = definition?.icon ?? Activity
+    const bubbleClasses = clsx(
+      'flex h-12 w-12 items-center justify-center rounded-full text-sm transition-colors',
+      statusColorMap[status.status] ?? statusColorMap.idle
+    )
+    const label = definition?.label ?? status.agentName ?? agentId
+    const statusLabel = statusLabelMap[status.status] ?? status.status
+    return (
+      <div key={agentId} className="flex flex-col items-center gap-2 text-center text-xs text-blue-900 dark:text-blue-200">
+        <span className={bubbleClasses}>
+          <Icon size={18} />
+        </span>
+        <span className="font-medium leading-tight">{label}</span>
+        <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{statusLabel}</span>
+        {status.timestamp && (
+          <span className="text-[10px] text-slate-400 dark:text-slate-500">
+            {new Date(status.timestamp).toLocaleTimeString()}
+          </span>
+        )}
+        {status.message && <span className="text-[10px] text-slate-600 dark:text-slate-400">{status.message}</span>}
+      </div>
+    )
+  }
 
   const handleSave = async () => {
     setLoading(true)
@@ -124,22 +201,37 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
       </div>
       {showAgentActivity && (
         <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/70 p-4 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            {agentNodes.map(({ id, label, icon: Icon }) => (
-              <div
-                key={id}
-                className="flex w-24 flex-col items-center gap-2 text-center text-xs text-blue-900 dark:text-blue-200"
-              >
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-200 text-blue-700 dark:bg-blue-900/60 dark:text-blue-200">
-                  <Icon size={18} />
-                </span>
-                <span className="font-medium leading-tight">{label}</span>
-              </div>
-            ))}
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-blue-900 dark:text-blue-200">Agent Activity</h3>
+            <span className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+              <span className={clsx('h-2.5 w-2.5 rounded-full', connectionBadge.color)} />
+              {connectionBadge.label}
+            </span>
           </div>
-          <p className="mt-4 text-xs text-blue-800/80 dark:text-blue-200/70">
-            Stato colore (placeholder): blu = idle, verde = attivo, arancione = in attesa, rosso = errore.
-          </p>
+          <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-8">
+            {agentStatuses.map((status) => renderAgentStatus(status.agentId, status))}
+          </div>
+          <div className="mt-4">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-blue-900 dark:text-blue-200">
+              Ultimi eventi
+            </h4>
+            <div className="mt-2 max-h-36 overflow-y-auto rounded-lg border border-blue-100 bg-white/70 p-2 text-xs shadow-inner dark:border-blue-900/40 dark:bg-slate-900/60">
+              {latestEvents.length === 0 ? (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">In attesa di telemetria dagli agenti…</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {latestEvents.map((evt) => (
+                    <li key={evt.key} className="flex items-start gap-2 text-slate-700 dark:text-slate-200">
+                      <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">{evt.time}</span>
+                      <span className="font-semibold">{evt.agent}</span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">{evt.status}</span>
+                      {evt.message && <span className="text-[11px] text-slate-600 dark:text-slate-300">— {evt.message}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
         </div>
       )}
       {isEditing ? (

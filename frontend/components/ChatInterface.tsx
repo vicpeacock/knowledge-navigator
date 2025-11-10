@@ -11,6 +11,7 @@ import { format } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStatus } from './StatusPanel'
+import { useAgentActivity } from './AgentActivityContext'
 
 interface ChatInterfaceProps {
   sessionId: string
@@ -30,6 +31,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
   const [isUserAtBottom, setIsUserAtBottom] = useState(true)
   const [initialLoad, setInitialLoad] = useState(true)
   const { addStatusMessage } = useStatus()
+  const { ingestBatch } = useAgentActivity()
 
   // Load messages when sessionId changes or component mounts
   useEffect(() => {
@@ -346,6 +348,10 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         throw new Error('Invalid response format: no response text')
       }
       
+      if (response.data.agent_activity && Array.isArray(response.data.agent_activity)) {
+        ingestBatch(response.data.agent_activity)
+      }
+
       // Handle high urgency notifications (contradictions, etc.)
       if (response.data.high_urgency_notifications && response.data.high_urgency_notifications.length > 0) {
         response.data.high_urgency_notifications.forEach((notif: any) => {

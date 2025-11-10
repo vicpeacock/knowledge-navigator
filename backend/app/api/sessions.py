@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import asyncio
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
@@ -7,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import json as json_lib
 import logging
 import os
+from fastapi.responses import StreamingResponse
 
 from app.db.database import get_db
 from app.models.database import Session as SessionModel, Message as MessageModel
@@ -24,11 +26,13 @@ from app.core.dependencies import (
     get_ollama_client,
     get_memory_manager,
     get_planner_client,
+    get_agent_activity_stream,
 )
 from app.core.ollama_client import OllamaClient
 from app.core.memory_manager import MemoryManager
 from app.core.config import settings
 from app.agents import run_langgraph_chat
+from app.services.agent_activity_stream import AgentActivityStream
 
 router = APIRouter()
 
@@ -440,6 +444,7 @@ async def chat(
     ollama: OllamaClient = Depends(get_ollama_client),
     planner_client: OllamaClient = Depends(get_planner_client),
     memory: MemoryManager = Depends(get_memory_manager),
+    agent_activity_stream: AgentActivityStream = Depends(get_agent_activity_stream),
 ):
     """Send a message and get AI response"""
     # Verify session exists
@@ -618,6 +623,7 @@ async def chat(
             request=request,
             ollama=ollama,
             planner_client=planner_client,
+            agent_activity_stream=agent_activity_stream,
             memory_manager=memory,
             session_context=session_context,
             retrieved_memory=retrieved_memory,
@@ -1319,6 +1325,53 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
         tool_details=tool_details,
         notifications_count=notification_count,
         high_urgency_notifications=high_urgency_notifs,
+    )
+
+
+@router.get("/{session_id}/agent-activity/stream")
+async def stream_agent_activity(
+    session_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent_activity_stream: AgentActivityStream = Depends(get_agent_activity_stream),
+):
+    """
+    Server-Sent Events endpoint streaming real-time agent activity telemetry
+    for the requested session.
+    """
+
+    # Ensure session exists before establishing stream
+    result = await db.execute(
+        select(SessionModel.id).where(SessionModel.id == session_id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    async def event_generator():
+        snapshot_payload = agent_activity_stream.snapshot_sse_payload(session_id)
+        if snapshot_payload:
+            yield snapshot_payload
+
+        queue = await agent_activity_stream.register(session_id)
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                yield agent_activity_stream.as_sse_payload(event)
+        finally:
+            await agent_activity_stream.unregister(session_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+        },
     )
 
 

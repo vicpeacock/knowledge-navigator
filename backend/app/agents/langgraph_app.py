@@ -23,6 +23,7 @@ from app.models.schemas import ChatRequest, ChatResponse, ToolExecutionDetail
 from app.agents.main_agent import run_main_agent_pipeline
 from app.core.memory_manager import MemoryManager
 from app.core.tool_manager import ToolManager
+from app.services.agent_activity_stream import AgentActivityStream
 from app.services.notification_center import NotificationCenter
 
 
@@ -199,6 +200,11 @@ def log_agent_activity(
         "timestamp": datetime.now(UTC),
     }
     state.setdefault("agent_activity", []).append(entry)
+
+    manager = state.get("agent_activity_manager")
+    session_id = state.get("session_id")
+    if manager and session_id:
+        manager.publish(session_id, entry)
 
 
 def _ensure_notification_center(state: LangGraphChatState) -> NotificationCenter:
@@ -503,6 +509,7 @@ class LangGraphChatState(TypedDict, total=False):
     assistant_message_saved: bool
     done: bool
     agent_activity: List[Dict[str, Any]]
+    agent_activity_manager: AgentActivityStream
 
 
 async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
@@ -965,6 +972,7 @@ async def run_langgraph_chat(
     request: ChatRequest,
     ollama: OllamaClient,
     planner_client: OllamaClient,
+    agent_activity_stream: AgentActivityStream,
     memory_manager: MemoryManager,
     session_context: List[Dict[str, str]],
     retrieved_memory: List[str],
@@ -1005,6 +1013,7 @@ async def run_langgraph_chat(
         "assistant_message_saved": False,
         "done": False,
         "agent_activity": [],
+        "agent_activity_manager": agent_activity_stream,
     }
     final_state = await app.ainvoke(state)
     chat_response = final_state["chat_response"]
