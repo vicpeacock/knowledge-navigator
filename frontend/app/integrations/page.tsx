@@ -169,10 +169,10 @@ export default function IntegrationsPage() {
     }
   }
 
-  const connectGmail = async () => {
+  const connectGmail = async (integrationId?: string) => {
     setConnectingEmail(true)
     try {
-      const response = await integrationsApi.email.authorize()
+      const response = await integrationsApi.email.authorize(integrationId)
       if (response.data?.authorization_url) {
         window.location.href = response.data.authorization_url
       } else {
@@ -189,10 +189,6 @@ export default function IntegrationsPage() {
 
   const testGmailConnection = async () => {
     try {
-      const gmailIntegration = emailIntegrations.find(
-        (i) => i.provider === 'google' && i.enabled
-      )
-      
       if (!gmailIntegration) {
         console.warn('Nessuna integrazione Gmail trovata')
         return
@@ -305,6 +301,9 @@ export default function IntegrationsPage() {
   const hasGoogleCalendar = calendarIntegrations.some(
     (i) => i.provider === 'google' && i.enabled
   )
+  const gmailIntegrations = emailIntegrations.filter((i) => i.provider === 'google' && i.enabled)
+  const gmailIntegration = gmailIntegrations.length > 0 ? gmailIntegrations[gmailIntegrations.length - 1] : undefined
+  const hasGmailIntegration = gmailIntegrations.length > 0
 
   return (
     <div className="min-h-screen p-8 bg-gray-50 dark:bg-gray-900">
@@ -434,7 +433,7 @@ export default function IntegrationsPage() {
                 </p>
               </div>
             </div>
-            {emailIntegrations.some((i) => i.provider === 'google' && i.enabled) ? (
+            {hasGmailIntegration ? (
               <div className="flex items-center gap-2 text-green-600">
                 <CheckCircle size={24} />
                 <span className="font-semibold">Collegato</span>
@@ -447,7 +446,7 @@ export default function IntegrationsPage() {
             )}
           </div>
 
-          {emailIntegrations.some((i) => i.provider === 'google' && i.enabled) ? (
+          {hasGmailIntegration ? (
             <div className="space-y-4">
               <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
                 <p className="text-sm text-green-800 dark:text-green-200">
@@ -467,6 +466,11 @@ export default function IntegrationsPage() {
                   </p>
                 </div>
               )}
+              {gmailIntegrations.length > 1 && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg text-sm text-amber-900 dark:text-amber-100">
+                  Sono presenti {gmailIntegrations.length} integrazioni Gmail abilitate. Mantieni solo quella più recente e rimuovi le altre per evitare token scaduti.
+                </div>
+              )}
                   <div className="flex gap-3">
                     <button
                       onClick={testGmailConnection}
@@ -475,12 +479,11 @@ export default function IntegrationsPage() {
                       <RefreshCw size={18} />
                       Test Connessione
                     </button>
-                    {emailIntegrations.find(i => i.provider === 'google' && i.enabled) && (
+                    {gmailIntegration && (
                       <button
                         onClick={() => {
-                          const integration = emailIntegrations.find(i => i.provider === 'google' && i.enabled)
-                          if (integration?.id) {
-                            disconnectEmail(integration.id)
+                          if (gmailIntegration?.id) {
+                            disconnectEmail(gmailIntegration.id)
                           } else {
                             console.warn('Nessuna integrazione trovata')
                           }
@@ -492,7 +495,7 @@ export default function IntegrationsPage() {
                       </button>
                     )}
                     <button
-                      onClick={connectGmail}
+                      onClick={() => connectGmail(gmailIntegration?.id)}
                       disabled={connectingEmail}
                       className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
@@ -525,7 +528,7 @@ export default function IntegrationsPage() {
                 </p>
               </div>
               <button
-                onClick={connectGmail}
+                onClick={() => connectGmail()}
                 disabled={connectingEmail}
                 className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >

@@ -75,7 +75,11 @@ async def authorize_gmail(
         flow = email_service.create_gmail_oauth_flow(
             state=str(integration_id) if integration_id else None
         )
-        authorization_url, _ = flow.authorization_url(prompt='consent')
+        authorization_url, _ = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent',
+        )
         return {"authorization_url": authorization_url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating OAuth flow: {str(e)}")
@@ -104,7 +108,8 @@ async def oauth_callback(
             "scopes": flow.credentials.scopes,
         }
         
-        # Encrypt and store in database
+        prior_refresh_token: Optional[str] = None
+        
         integration_id = None
         if state:
             try:
@@ -119,12 +124,29 @@ async def oauth_callback(
             )
             integration = result.scalar_one_or_none()
             if integration:
+                try:
+                    existing = _decrypt_credentials(
+                        integration.credentials_encrypted,
+                        settings.credentials_encryption_key,
+                    )
+                    prior_refresh_token = existing.get("refresh_token")
+                except Exception:
+                    prior_refresh_token = None
+
+                if not credentials.get("refresh_token") and prior_refresh_token:
+                    credentials["refresh_token"] = prior_refresh_token
+
                 encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
                 integration.credentials_encrypted = encrypted
                 await db.commit()
             else:
                 raise HTTPException(status_code=404, detail="Integration not found")
         else:
+            if not credentials.get("refresh_token"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="L'autorizzazione non ha fornito il refresh token. Concedi tutti i permessi richiesti e riprova."
+                )
             encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
             integration = Integration(
                 provider="google",
