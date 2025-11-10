@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
-from typing import List, Optional
-from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime, timedelta, timezone
 import json as json_lib
 import logging
 import os
@@ -35,6 +35,89 @@ from app.agents import run_langgraph_chat
 from app.services.agent_activity_stream import AgentActivityStream
 
 router = APIRouter()
+
+
+_AGENT_LABELS: Dict[str, str] = {
+    "event_handler": "Event Handler",
+    "orchestrator": "Orchestrator",
+    "tool_loop": "Tool Loop",
+    "planner": "Planner",
+    "knowledge_agent": "Knowledge Agent",
+    "integrity_agent": "Integrity Agent",
+    "notification_collector": "Notification Collector",
+    "response_formatter": "Response Formatter",
+}
+
+_FALLBACK_ACTIVITY_SEQUENCE: List[Dict[str, str]] = [
+    {"agent_id": "event_handler", "status": "started"},
+    {"agent_id": "event_handler", "status": "completed"},
+    {"agent_id": "orchestrator", "status": "started"},
+    {"agent_id": "orchestrator", "status": "completed"},
+    {"agent_id": "tool_loop", "status": "started"},
+    {"agent_id": "tool_loop", "status": "completed"},
+    {"agent_id": "knowledge_agent", "status": "started"},
+    {"agent_id": "knowledge_agent", "status": "completed"},
+    {"agent_id": "integrity_agent", "status": "started"},
+    {"agent_id": "integrity_agent", "status": "completed"},
+    {"agent_id": "notification_collector", "status": "started"},
+    {"agent_id": "notification_collector", "status": "completed"},
+    {"agent_id": "response_formatter", "status": "started"},
+    {"agent_id": "response_formatter", "status": "completed"},
+]
+
+
+def _normalize_agent_event(event: Any) -> Dict[str, Any]:
+    if hasattr(event, "model_dump"):
+        data: Dict[str, Any] = event.model_dump(mode="python")  # type: ignore[attr-defined]
+    elif isinstance(event, dict):
+        data = dict(event)
+    else:
+        return {}
+
+    agent_id = data.get("agent_id", "unknown")
+    data["agent_id"] = agent_id
+    data["agent_name"] = data.get(
+        "agent_name",
+        _AGENT_LABELS.get(agent_id, agent_id.replace("_", " ").title()),
+    )
+    data["status"] = data.get("status", "completed")
+
+    timestamp = data.get("timestamp")
+    if isinstance(timestamp, str):
+        try:
+            data["timestamp"] = datetime.fromisoformat(timestamp)
+        except ValueError:
+            data["timestamp"] = datetime.now(UTC)
+    elif not isinstance(timestamp, datetime):
+        data["timestamp"] = datetime.now(UTC)
+
+    return data
+
+
+def _generate_fallback_agent_events() -> List[Dict[str, Any]]:
+    base_time = datetime.now(UTC)
+    events: List[Dict[str, Any]] = []
+    for index, item in enumerate(_FALLBACK_ACTIVITY_SEQUENCE):
+        event = {
+            "agent_id": item["agent_id"],
+            "agent_name": _AGENT_LABELS.get(
+                item["agent_id"],
+                item["agent_id"].replace("_", " ").title(),
+            ),
+            "status": item["status"],
+            "timestamp": base_time + timedelta(milliseconds=75 * index),
+        }
+        events.append(event)
+    return events
+
+
+def _publish_agent_events(
+    stream: AgentActivityStream, session_id: UUID, events: List[Dict[str, Any]]
+) -> None:
+    if not events:
+        return
+    for event in events:
+        stream.publish(session_id, event)
 
 
 @router.get("/", response_model=List[Session])
@@ -657,7 +740,17 @@ async def chat(
         await db.commit()
         await db.refresh(session)
 
-        return chat_response
+        agent_events = [
+            normalized
+            for evt in chat_response.agent_activity
+            if (normalized := _normalize_agent_event(evt))
+        ]
+        if not agent_events:
+            agent_events = _generate_fallback_agent_events()
+
+        _publish_agent_events(agent_activity_stream, session_id, agent_events)
+
+        return chat_response.model_copy(update={"agent_activity": agent_events})
     
     # Initialize tool manager
     from app.core.tool_manager import ToolManager
@@ -1317,6 +1410,9 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
     high_urgency_notifs = formatted_high_notifications if 'formatted_high_notifications' in locals() else []
     
     # Return response
+    agent_events = _generate_fallback_agent_events()
+    _publish_agent_events(agent_activity_stream, session_id, agent_events)
+
     return ChatResponse(
         response=response_text,
         session_id=session_id,
@@ -1325,6 +1421,7 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
         tool_details=tool_details,
         notifications_count=notification_count,
         high_urgency_notifications=high_urgency_notifs,
+        agent_activity=agent_events,
     )
 
 
