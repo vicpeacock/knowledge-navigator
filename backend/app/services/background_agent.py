@@ -8,7 +8,6 @@ import logging
 
 from app.core.memory_manager import MemoryManager
 from app.core.ollama_client import OllamaClient
-from app.core.dependencies import get_ollama_background_client
 from app.services.semantic_integrity_checker import SemanticIntegrityChecker
 from app.services.notification_service import NotificationService
 from app.core.config import settings
@@ -32,7 +31,7 @@ class BackgroundAgent:
         self.db = db
         
         # Use background Ollama client (phi3:mini) for background tasks
-        self.ollama_client = ollama_client or get_ollama_background_client()
+        self.ollama_client = ollama_client or self._create_background_client()
         
         # Initialize services
         self.integrity_checker = SemanticIntegrityChecker(
@@ -98,6 +97,19 @@ class BackgroundAgent:
         except Exception as e:
             logger.error(f"Error processing new knowledge in background: {e}", exc_info=True)
             # Don't raise - background tasks should not fail the main flow
+    
+    @staticmethod
+    def _create_background_client() -> OllamaClient:
+        if settings.use_llama_cpp_background:
+            from app.core.llama_cpp_client import LlamaCppClient
+            return LlamaCppClient(
+                base_url=settings.ollama_background_base_url,
+                model=settings.ollama_background_model,
+            )
+        return OllamaClient(
+            base_url=settings.ollama_background_base_url,
+            model=settings.ollama_background_model,
+        )
     
     async def check_external_events(self):
         """Check external events (email, calendar, etc.) - to be implemented"""

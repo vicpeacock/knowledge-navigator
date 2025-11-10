@@ -4,6 +4,7 @@ from app.core.mcp_client import MCPClient
 from app.core.memory_manager import MemoryManager
 from app.core.ollama_client import OllamaClient
 from app.services.agent_activity_stream import AgentActivityStream
+from app.services.background_task_manager import BackgroundTaskManager
 
 # Global instances
 _ollama_client: OllamaClient = None
@@ -11,6 +12,7 @@ _planner_client: OllamaClient = None
 _mcp_client: MCPClient = None
 _memory_manager: MemoryManager = None
 _agent_activity_stream: AgentActivityStream = None
+_background_task_manager: BackgroundTaskManager = None
 
 
 def init_clients():
@@ -29,6 +31,8 @@ def init_clients():
         _memory_manager = MemoryManager()
     if _agent_activity_stream is None:
         _agent_activity_stream = AgentActivityStream()
+    if _background_task_manager is None:
+        _background_task_manager = BackgroundTaskManager()
 
 
 def get_ollama_client() -> OllamaClient:
@@ -67,4 +71,8 @@ def get_memory_manager() -> MemoryManager:
 
 def get_agent_activity_stream() -> AgentActivityStream:
     return _agent_activity_stream
+
+
+def get_background_task_manager() -> BackgroundTaskManager:
+    return _background_task_manager
 
