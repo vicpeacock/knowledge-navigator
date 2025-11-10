@@ -7,13 +7,28 @@ import base64
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 try:
     from msal import ConfidentialClientApplication
 except ImportError:
     ConfidentialClientApplication = None
 import httpx
 from app.core.config import settings
+
+
+class IntegrationAuthError(Exception):
+    """Raised when an integration requires the user to re-authorize."""
+
+    def __init__(self, provider: str, reason: str, detail: Optional[str] = None):
+        self.provider = provider
+        self.reason = reason
+        self.detail = detail or reason
+        message = f"{provider} auth error: {reason}"
+        if detail and detail != reason:
+            message += f" ({detail})"
+        super().__init__(message)
 
 
 class EmailService:
@@ -60,15 +75,26 @@ class EmailService:
         integration_id: Optional[str] = None,
     ):
         """Setup Gmail integration with token"""
-        creds = Credentials.from_authorized_user_info(token_dict)
-        
-        # Refresh token if needed
-        if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        
-        service = build("gmail", "v1", credentials=creds)
+        try:
+            creds = Credentials.from_authorized_user_info(token_dict)
+        except Exception as exc:
+            raise IntegrationAuthError("gmail", "invalid_credentials", str(exc)) from exc
+
+        try:
+            if creds.expired:
+                if creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    raise IntegrationAuthError("gmail", "refresh_token_missing")
+        except RefreshError as exc:
+            raise IntegrationAuthError("gmail", "token_refresh_failed", str(exc)) from exc
+
+        try:
+            service = build("gmail", "v1", credentials=creds)
+        except HttpError as exc:
+            raise IntegrationAuthError("gmail", "api_unavailable", str(exc)) from exc
+
         self._services[self._get_service_key("gmail", integration_id)] = service
-        
         return service
     
     async def get_gmail_messages(
@@ -83,7 +109,7 @@ class EmailService:
         service = self._services.get(service_key)
         
         if not service:
-            raise ValueError(f"Gmail not configured for integration {integration_id}")
+            raise IntegrationAuthError("gmail", "service_not_initialized")
         
         query_params = {"maxResults": max_results}
         if query:
@@ -127,8 +153,15 @@ class EmailService:
                 result.append(email_data)
             
             return result
-        except Exception as e:
-            raise ValueError(f"Error fetching Gmail messages: {str(e)}")
+        except HttpError as exc:
+            if exc.resp.status in (401, 403):
+                # Token revoked or scope insufficient
+                raise IntegrationAuthError("gmail", "unauthorized", str(exc)) from exc
+            raise ValueError(f"Error fetching Gmail messages: {str(exc)}") from exc
+        except IntegrationAuthError:
+            raise
+        except Exception as exc:
+            raise ValueError(f"Error fetching Gmail messages: {str(exc)}") from exc
     
     def _extract_email_body(self, payload: Dict[str, Any]) -> str:
         """Extract text body from email payload"""

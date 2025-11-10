@@ -1,4 +1,6 @@
 """Dependency functions for FastAPI"""
+import logging
+
 from app.core.config import settings
 from app.core.mcp_client import MCPClient
 from app.core.memory_manager import MemoryManager
@@ -14,23 +16,47 @@ _memory_manager: MemoryManager = None
 _agent_activity_stream: AgentActivityStream = None
 _background_task_manager: BackgroundTaskManager = None
 
+logger = logging.getLogger(__name__)
+
 
 def init_clients():
     """Initialize global clients"""
-    global _ollama_client, _planner_client, _mcp_client, _memory_manager, _agent_activity_stream
+    global _ollama_client, _planner_client, _mcp_client, _memory_manager, _agent_activity_stream, _background_task_manager
+
     if _ollama_client is None:
-        _ollama_client = OllamaClient()
+        try:
+            _ollama_client = OllamaClient()
+        except Exception as exc:
+            logger.error("Failed to initialize main Ollama client: %s", exc, exc_info=True)
+            raise
+
     if _planner_client is None:
-        _planner_client = OllamaClient(
-            base_url=settings.ollama_planner_base_url,
-            model=settings.ollama_planner_model,
-        )
+        try:
+            _planner_client = OllamaClient(
+                base_url=settings.ollama_planner_base_url,
+                model=settings.ollama_planner_model,
+            )
+        except Exception as exc:
+            logger.error("Failed to initialize planner client: %s", exc, exc_info=True)
+            raise
+
     if _mcp_client is None:
-        _mcp_client = MCPClient()
+        try:
+            _mcp_client = MCPClient()
+        except Exception as exc:
+            logger.error("Failed to initialize MCP client: %s", exc, exc_info=True)
+            _mcp_client = None
+
     if _memory_manager is None:
-        _memory_manager = MemoryManager()
+        try:
+            _memory_manager = MemoryManager()
+        except Exception as exc:
+            logger.error("Failed to initialize memory manager: %s", exc, exc_info=True)
+            raise
+
     if _agent_activity_stream is None:
         _agent_activity_stream = AgentActivityStream()
+
     if _background_task_manager is None:
         _background_task_manager = BackgroundTaskManager()
 

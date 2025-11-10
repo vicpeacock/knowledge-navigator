@@ -30,7 +30,7 @@ const AGENT_ORDER = [
   'planner',
   'tool_loop',
   'knowledge_agent',
-  'integrity_agent',
+  'background_integrity_agent',
   'notification_collector',
   'response_formatter',
 ]

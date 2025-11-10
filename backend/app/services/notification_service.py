@@ -1,7 +1,7 @@
 """
 Notification Service - Manages proactive notifications from the assistant
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterable, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
@@ -95,30 +95,48 @@ class NotificationService:
             for notif in notifications
         ]
     
-    async def mark_as_read(self, notification_id: UUID) -> bool:
+    async def mark_as_read(
+        self,
+        notification_id: Union[UUID, Iterable[UUID]],
+    ) -> bool:
         """
         Mark a notification as read.
         
         Args:
-            notification_id: ID of the notification to mark as read
+            notification_id: ID (or iterable of IDs) of the notification(s) to mark as read
             
         Returns:
-            True if notification was found and marked, False otherwise
+            True if at least one notification was marked, False otherwise
         """
-        result = await self.db.execute(
-            select(NotificationModel).where(NotificationModel.id == notification_id)
-        )
-        notification = result.scalar_one_or_none()
+        if isinstance(notification_id, (list, tuple, set)):
+            notification_ids = list(notification_id)
+        else:
+            notification_ids = [notification_id]
         
-        if not notification:
-            logger.warning(f"Notification {notification_id} not found")
+        if not notification_ids:
             return False
         
-        notification.read = True
-        notification.read_at = datetime.now(timezone.utc)
+        result = await self.db.execute(
+            select(NotificationModel).where(NotificationModel.id.in_(notification_ids))
+        )
+        notifications = result.scalars().all()
+        
+        if not notifications:
+            logger.warning(f"Notifications {notification_ids} not found")
+            return False
+        
+        now = datetime.now(timezone.utc)
+        for notification in notifications:
+            notification.read = True
+            notification.read_at = now
+        
         await self.db.commit()
         
-        logger.info(f"Marked notification {notification_id} as read")
+        logger.info(
+            "Marked %d notification(s) as read: %s",
+            len(notifications),
+            [str(n.id) for n in notifications],
+        )
         return True
     
     async def mark_all_as_read(
