@@ -27,12 +27,14 @@ from app.core.dependencies import (
     get_memory_manager,
     get_planner_client,
     get_agent_activity_stream,
+    get_background_task_manager,
 )
 from app.core.ollama_client import OllamaClient
 from app.core.memory_manager import MemoryManager
 from app.core.config import settings
 from app.agents import run_langgraph_chat
 from app.services.agent_activity_stream import AgentActivityStream
+from app.services.background_task_manager import BackgroundTaskManager
 
 router = APIRouter()
 
@@ -46,6 +48,7 @@ _AGENT_LABELS: Dict[str, str] = {
     "integrity_agent": "Integrity Agent",
     "notification_collector": "Notification Collector",
     "response_formatter": "Response Formatter",
+    "background_integrity_agent": "Background Integrity Agent",
 }
 
 _FALLBACK_ACTIVITY_SEQUENCE: List[Dict[str, str]] = [
@@ -528,6 +531,7 @@ async def chat(
     planner_client: OllamaClient = Depends(get_planner_client),
     memory: MemoryManager = Depends(get_memory_manager),
     agent_activity_stream: AgentActivityStream = Depends(get_agent_activity_stream),
+    background_tasks: BackgroundTaskManager = Depends(get_background_task_manager),
 ):
     """Send a message and get AI response"""
     # Verify session exists
@@ -539,47 +543,13 @@ async def chat(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Check for contradictions in user message (run in background, don't block response)
-    # This checks EVERY user message against long-term memory, regardless of knowledge extraction
-    import asyncio
-    import logging
-    from app.db.database import AsyncSessionLocal
-    from app.services.background_agent import BackgroundAgent
-    
-    logger = logging.getLogger(__name__)
-    
-    # Create a task for contradiction check that we can optionally wait for
-    contradiction_check_task = None
-    
-    async def _check_contradictions_background():
-        """Background task to check if user message contradicts existing memory"""
-        async with AsyncSessionLocal() as db_session:
-            try:
-                # Create a temporary knowledge item from the user message
-                # This allows the background agent to check for contradictions
-                user_message_knowledge = {
-                    "type": "user_statement",
-                    "content": request.message,
-                    "importance": 0.5,  # Default importance for user statements
-                }
-                
-                agent = BackgroundAgent(
-                    memory_manager=memory,
-                    db=db_session,
-                    ollama_client=None,  # Will use background client
-                )
-                
-                logger.info(f"🔍 Checking contradictions for user message: {request.message[:50]}...")
-                await agent.process_new_knowledge(
-                    knowledge_item=user_message_knowledge,
-                    session_id=session_id,
-                )
-                logger.info(f"✅ Contradiction check completed for user message: {request.message[:50]}...")
-            except Exception as e:
-                logger.warning(f"Error checking contradictions for user message: {e}", exc_info=True)
-    
-    # Schedule contradiction check in background
-    contradiction_check_task = asyncio.create_task(_check_contradictions_background())
+    # Schedule contradiction analysis in true background mode (fire-and-forget)
+    background_tasks.schedule_contradiction_check(
+        session_id=session_id,
+        message=request.message,
+        memory_manager=memory,
+        agent_activity_stream=agent_activity_stream,
+    )
     
     # Get session context (previous messages)
     messages_result = await db.execute(
@@ -1230,18 +1200,6 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
     # If we exhausted iterations and had tool calls, add note
     if tool_iteration >= max_tool_iterations and tool_calls and tool_results:
         response_text += "\n\n[Nota: Alcuni tool sono stati eseguiti per ottenere informazioni reali.]"
-    
-    # Wait a bit for contradiction check to complete (if it's still running)
-    # This ensures we catch contradictions detected for the current message
-    if contradiction_check_task and not contradiction_check_task.done():
-        try:
-            # Wait up to 2 seconds for contradiction check to complete
-            await asyncio.wait_for(contradiction_check_task, timeout=2.0)
-            logger.info("✅ Contradiction check completed before retrieving notifications")
-        except asyncio.TimeoutError:
-            logger.info("⏱️ Contradiction check still running, retrieving notifications anyway")
-        except Exception as e:
-            logger.warning(f"Error waiting for contradiction check: {e}")
     
     # Check for pending notifications and format high urgency ones
     from app.services.notification_service import NotificationService
