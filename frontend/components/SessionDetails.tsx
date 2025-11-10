@@ -47,7 +47,7 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
         ['planner', { label: 'Planner', icon: Bot }],
         ['tool_loop', { label: 'Tool Loop', icon: Network }],
         ['knowledge_agent', { label: 'Knowledge', icon: Brain }],
-        ['integrity_agent', { label: 'Integrity', icon: ShieldCheck }],
+        ['background_integrity_agent', { label: 'Integrity', icon: ShieldCheck }],
         ['notification_collector', { label: 'Notifications', icon: BellRing }],
         ['response_formatter', { label: 'Response', icon: MessageSquare }],
       ]),

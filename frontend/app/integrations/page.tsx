@@ -33,6 +33,8 @@ export default function IntegrationsPage() {
   const [selectedTools, setSelectedTools] = useState<string[]>([])
   const [loadingTools, setLoadingTools] = useState(false)
   const [isSaving, setIsSaving] = useState(false) // Flag to prevent useEffect from interfering during save
+  const [gmailNeedsReconnect, setGmailNeedsReconnect] = useState(false)
+  const [gmailStatusMessage, setGmailStatusMessage] = useState<string | null>(null)
   
   // Use global status panel
   const { addStatusMessage } = useStatus()
@@ -204,8 +206,23 @@ export default function IntegrationsPage() {
       } else {
         addStatusMessage('success', 'Gmail: Connessione funzionante')
       }
+      setGmailNeedsReconnect(false)
+      setGmailStatusMessage(null)
     } catch (error: any) {
-      console.error('Error testing Gmail:', error.response?.data?.detail || error.message)
+      const detail = error.response?.data?.detail
+      const reason = detail?.reason || detail?.message || error.message
+      console.error('Error testing Gmail:', reason)
+      if (error.response?.status === 401) {
+        setGmailNeedsReconnect(true)
+        const message =
+          typeof detail === 'object' && detail?.message
+            ? detail.message
+            : 'Autorizzazione Gmail scaduta o revocata. Ricollega l’account.'
+        setGmailStatusMessage(message)
+        addStatusMessage('warning', message)
+      } else {
+        addStatusMessage('error', `Gmail: errore nel test - ${reason}`)
+      }
     }
   }
 
@@ -442,6 +459,14 @@ export default function IntegrationsPage() {
                   <li>Ottenere informazioni sulle email recenti</li>
                 </ul>
               </div>
+              {gmailNeedsReconnect && (
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700 rounded-lg">
+                  <p className="text-sm text-yellow-900 dark:text-yellow-200 font-medium">
+                    {gmailStatusMessage ||
+                      'Il token di autorizzazione Gmail è scaduto. Ricollega l’account per continuare a leggere le email.'}
+                  </p>
+                </div>
+              )}
                   <div className="flex gap-3">
                     <button
                       onClick={testGmailConnection}
@@ -466,6 +491,23 @@ export default function IntegrationsPage() {
                         Rimuovi
                       </button>
                     )}
+                    <button
+                      onClick={connectGmail}
+                      disabled={connectingEmail}
+                      className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {connectingEmail ? (
+                        <>
+                          <RefreshCw size={18} className="animate-spin" />
+                          Richiesta in corso...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw size={18} />
+                          Ricollega Gmail
+                        </>
+                      )}
+                    </button>
                     <button
                       onClick={loadIntegrations}
                       className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"

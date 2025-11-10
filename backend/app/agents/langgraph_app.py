@@ -172,7 +172,6 @@ _AGENT_REGISTRY: Dict[str, str] = {
     "tool_loop": "Tool Loop",
     "planner": "Planner",
     "knowledge_agent": "Knowledge Agent",
-    "integrity_agent": "Integrity Agent",
     "notification_collector": "Notification Collector",
     "response_formatter": "Response Formatter",
 }
@@ -864,23 +863,6 @@ async def knowledge_agent_node(state: LangGraphChatState) -> LangGraphChatState:
     return state
 
 
-async def integrity_agent_node(state: LangGraphChatState) -> LangGraphChatState:
-    """Segnaposto per SemanticIntegrityChecker (per ora no-op)."""
-
-    log_agent_activity(state, agent_id="integrity_agent", status="started")
-    try:
-        log_agent_activity(state, agent_id="integrity_agent", status="completed")
-        return state
-    except Exception as exc:
-        log_agent_activity(
-            state,
-            agent_id="integrity_agent",
-            status="error",
-            message=str(exc),
-        )
-        raise
-
-
 async def notification_collector_node(state: LangGraphChatState) -> LangGraphChatState:
     """Aggrega le notifiche raccolte dagli agenti specializzati."""
 
@@ -944,7 +926,6 @@ def build_langgraph_app() -> StateGraph:
     graph.add_node("orchestrator", orchestrator_node)
     graph.add_node("tool_loop", tool_loop_node)
     graph.add_node("knowledge_agent", knowledge_agent_node)
-    graph.add_node("integrity_agent", integrity_agent_node)
     graph.add_node("notification_collector", notification_collector_node)
     graph.add_node("response_formatter", response_formatter_node)
 
@@ -958,8 +939,7 @@ def build_langgraph_app() -> StateGraph:
         },
     )
     graph.add_edge("tool_loop", "knowledge_agent")
-    graph.add_edge("knowledge_agent", "integrity_agent")
-    graph.add_edge("integrity_agent", "notification_collector")
+    graph.add_edge("knowledge_agent", "notification_collector")
     graph.add_edge("notification_collector", "response_formatter")
     graph.add_edge("response_formatter", END)
     return graph.compile()

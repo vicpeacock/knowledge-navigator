@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.services.email_service import EmailService
+from app.services.email_service import EmailService, IntegrationAuthError
 from app.services.calendar_service import CalendarService
 from app.services.date_parser import DateParser
 from app.models.database import Integration
@@ -359,6 +359,15 @@ class ToolManager:
                 "success": True,
                 "events": events,
                 "count": len(events),
+            }
+        except IntegrationAuthError as exc:
+            return {
+                "error": (
+                    "Autorizzazione Gmail scaduta o revocata. "
+                    "Ricollega l'integrazione email e riprova."
+                ),
+                "provider": exc.provider,
+                "reason": exc.reason,
             }
         except Exception as e:
             return {"error": str(e)}

@@ -18,11 +18,12 @@ logger = logging.getLogger(__name__)
 
 class SemanticIntegrityChecker:
     """Service for checking semantic integrity and detecting contradictions"""
-    
+
     def __init__(self, memory_manager: MemoryManager, ollama_client: Optional[OllamaClient] = None):
         self.memory_manager = memory_manager
-        self.ollama_client = ollama_client or OllamaClient()
+        self.ollama_client = ollama_client
         self.embedding_service = EmbeddingService()
+        self.enabled = self.ollama_client is not None
     
     async def check_contradictions(
         self,
@@ -44,6 +45,15 @@ class SemanticIntegrityChecker:
         Returns:
             Dict with contradiction information
         """
+        if not self.enabled:
+            logger.info("Semantic integrity checker disabled (no background LLM available)")
+            return {
+                "has_contradiction": False,
+                "contradictions": [],
+                "confidence": 0.0,
+                "disabled": True,
+            }
+
         max_similar = max_similar_memories or settings.integrity_max_similar_memories
         threshold = confidence_threshold or settings.integrity_confidence_threshold
         
@@ -193,6 +203,15 @@ class SemanticIntegrityChecker:
                 "explanation": str
             }
         """
+        if not self.ollama_client:
+            logger.info("Skipping LLM contradiction analysis: background client unavailable")
+            return {
+                "is_contradiction": False,
+                "confidence": 0.0,
+                "explanation": "Background LLM unavailable",
+                "which_correct": "unknown",
+            }
+
         try:
             # Comprehensive LLM-based prompt for logical contradiction detection
             # Works in any language, detects all types of contradictions

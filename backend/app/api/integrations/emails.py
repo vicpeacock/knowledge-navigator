@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.db.database import get_db
 from app.models.database import Integration
-from app.services.email_service import EmailService
+from app.services.email_service import EmailService, IntegrationAuthError
 from app.core.ollama_client import OllamaClient
 from app.core.dependencies import get_ollama_client
 from cryptography.fernet import Fernet
@@ -138,7 +138,16 @@ async def oauth_callback(
             integration_id = integration.id
         
         # Setup email service
-        await email_service.setup_gmail(credentials, str(integration_id))
+        try:
+            await email_service.setup_gmail(credentials, str(integration_id))
+        except IntegrationAuthError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "message": "Autorizzazione Gmail non valida.",
+                    "reason": exc.reason,
+                },
+            )
         
         # Redirect to frontend with success
         frontend_url = "http://localhost:3003"
@@ -181,15 +190,34 @@ async def get_messages(
                     settings.credentials_encryption_key
                 )
                 await email_service.setup_gmail(credentials, str(integration_id))
-            except:
-                pass  # Already setup
+            except IntegrationAuthError as exc:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "message": "Autorizzazione Gmail scaduta o revocata.",
+                        "reason": exc.reason,
+                    },
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
         
-        messages = await email_service.get_gmail_messages(
-            max_results=max_results,
-            query=query,
-            integration_id=str(integration_id) if integration_id else None,
-            include_body=include_body,
-        )
+        try:
+            messages = await email_service.get_gmail_messages(
+                max_results=max_results,
+                query=query,
+                integration_id=str(integration_id) if integration_id else None,
+                include_body=include_body,
+            )
+        except IntegrationAuthError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "message": "Autorizzazione Gmail scaduta o revocata.",
+                    "reason": exc.reason,
+                },
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         
         return {
             "provider": provider,
@@ -228,19 +256,41 @@ async def summarize_important_emails(
         raise HTTPException(status_code=404, detail="Integration not found")
     
     # Decrypt and setup
-    credentials = _decrypt_credentials(
-        integration.credentials_encrypted,
-        settings.credentials_encryption_key
-    )
-    await email_service.setup_gmail(credentials, str(integration_id))
+    try:
+        credentials = _decrypt_credentials(
+            integration.credentials_encrypted,
+            settings.credentials_encryption_key
+        )
+        await email_service.setup_gmail(credentials, str(integration_id))
+    except IntegrationAuthError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "message": "Autorizzazione Gmail scaduta o revocata.",
+                "reason": exc.reason,
+            },
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     
     # Get unread emails
-    emails = await email_service.get_gmail_messages(
-        max_results=max_emails,
-        query="is:unread",
-        integration_id=str(integration_id),
-        include_body=True,
-    )
+    try:
+        emails = await email_service.get_gmail_messages(
+            max_results=max_emails,
+            query="is:unread",
+            integration_id=str(integration_id),
+            include_body=True,
+        )
+    except IntegrationAuthError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "message": "Autorizzazione Gmail scaduta o revocata.",
+                "reason": exc.reason,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     
     if not emails:
         return {
