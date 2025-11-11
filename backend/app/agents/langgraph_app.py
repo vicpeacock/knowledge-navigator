@@ -25,6 +25,9 @@ from app.core.memory_manager import MemoryManager
 from app.core.tool_manager import ToolManager
 from app.services.agent_activity_stream import AgentActivityStream
 from app.services.notification_center import NotificationCenter
+from app.services.task_queue import TaskQueue, Task, TaskStatus
+from app.core.dependencies import get_task_queue
+from app.services.task_queue import TaskQueue, Task, TaskStatus
 
 
 class PlanStep(TypedDict, total=False):
@@ -174,6 +177,9 @@ _AGENT_REGISTRY: Dict[str, str] = {
     "knowledge_agent": "Knowledge Agent",
     "notification_collector": "Notification Collector",
     "response_formatter": "Response Formatter",
+    "task_dispatcher": "Task Dispatcher",
+    "background_integrity_agent": "Background Integrity Agent",
+    "service_health_agent": "Service Health Agent",
 }
 
 
@@ -228,6 +234,128 @@ def _snapshot_notifications(state: LangGraphChatState) -> None:
 
     state["notifications"] = all_notifications
     state["high_urgency_notifications"] = high_notifications
+
+
+def _handle_active_task(
+    state: LangGraphChatState,
+    task: Task,
+    queue: TaskQueue,
+) -> Optional[tuple[LangGraphChatState, str]]:
+    if task.type == "resolve_contradiction":
+        return _handle_contradiction_resolution_task(state, task, queue)
+    return None
+
+
+def _handle_contradiction_resolution_task(
+    state: LangGraphChatState,
+    task: Task,
+    queue: TaskQueue,
+) -> Optional[tuple[LangGraphChatState, str]]:
+    session_id = state.get("session_id")
+    if not session_id:
+        return None
+
+    payload = task.payload or {}
+    if task.status == TaskStatus.IN_PROGRESS:
+        message = _format_contradiction_prompt(payload)
+        queue.update_task(
+            session_id,
+            task.id,
+            status=TaskStatus.WAITING_USER,
+            payload_updates={"prompt_sent_at": datetime.now(UTC).isoformat()},
+        )
+        state["current_task"] = queue.get_task(session_id, task.id)
+        state["response"] = message
+        state["plan_completed"] = True
+        state["assistant_message_saved"] = False
+        state.setdefault("tool_results", [])
+        _snapshot_notifications(state)
+        notifications = state.get("notifications", [])
+        high_notifications = state.get("high_urgency_notifications", [])
+        state["chat_response"] = ChatResponse(
+            response=message,
+            session_id=session_id,
+            memory_used=state.get("memory_used", {}),
+            tools_used=[],
+            tool_details=[],
+            notifications_count=len(notifications),
+            high_urgency_notifications=high_notifications,
+            agent_activity=state.get("agent_activity", []),
+        )
+        log_agent_activity(
+            state,
+            agent_id="task_dispatcher",
+            status="waiting",
+            message="Contradiction resolution awaiting user input",
+        )
+        return state, "waiting"
+
+    if task.status == TaskStatus.WAITING_USER:
+        user_reply = state["request"].message.strip()
+        queue.complete_task(
+            session_id,
+            task.id,
+            payload_updates={
+                "user_response": user_reply,
+                "resolved_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        state["current_task"] = None
+        acknowledgement = (
+            "Grazie! Terrò conto della tua indicazione per mantenere coerenti le informazioni."
+        )
+        state["response"] = acknowledgement
+        state["plan_completed"] = True
+        state["assistant_message_saved"] = False
+        state.setdefault("tool_results", [])
+        _snapshot_notifications(state)
+        notifications = state.get("notifications", [])
+        high_notifications = state.get("high_urgency_notifications", [])
+        state["chat_response"] = ChatResponse(
+            response=acknowledgement,
+            session_id=session_id,
+            memory_used=state.get("memory_used", {}),
+            tools_used=[],
+            tool_details=[],
+            notifications_count=len(notifications),
+            high_urgency_notifications=high_notifications,
+            agent_activity=state.get("agent_activity", []),
+        )
+        log_agent_activity(
+            state,
+            agent_id="task_dispatcher",
+            status="completed",
+            message="Contradiction response recorded",
+        )
+        return state, "completed"
+
+    return None
+
+
+def _format_contradiction_prompt(payload: Dict[str, Any]) -> str:
+    new_statement = payload.get("new_statement") or payload.get("knowledge_item", "")
+    contradictions = payload.get("contradictions", []) or []
+
+    lines = [
+        "Ho rilevato una possibile contraddizione nelle informazioni memorizzate.",
+    ]
+    if new_statement:
+        lines.append(f"- Nuova informazione: {new_statement}")
+
+    if contradictions:
+        lines.append("Memorie in conflitto:")
+        for idx, contradiction in enumerate(contradictions[:3], start=1):
+            existing = contradiction.get("existing_memory") or contradiction.get("existing")
+            explanation = contradiction.get("explanation")
+            if existing:
+                lines.append(f"  {idx}. {existing}")
+            if explanation:
+                lines.append(f"     Motivo segnalato: {explanation}")
+
+    lines.append(
+        "Puoi indicarmi quale versione è corretta oppure fornire un contesto per conciliare le due informazioni?"
+    )
+    return "\n".join(lines)
 
 
 def log_planning_status(
@@ -509,6 +637,8 @@ class LangGraphChatState(TypedDict, total=False):
     done: bool
     agent_activity: List[Dict[str, Any]]
     agent_activity_manager: AgentActivityStream
+    task_queue: TaskQueue
+    current_task: Optional[Task]
 
 
 async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
@@ -570,6 +700,46 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         tool_manager = ToolManager(db=state["db"])
         available_tools = await tool_manager.get_available_tools()
         available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
+
+        task_queue: Optional[TaskQueue] = state.get("task_queue")
+        session_id = state.get("session_id")
+        active_task: Optional[Task] = state.get("current_task")
+
+        if task_queue and session_id:
+            if active_task:
+                refreshed = task_queue.get_task(session_id, active_task.id)
+                if refreshed:
+                    active_task = refreshed
+                else:
+                    active_task = None
+                    state["current_task"] = None
+
+            if active_task is None:
+                waiting = task_queue.find_task_by_status(
+                    session_id, TaskStatus.WAITING_USER
+                )
+                if waiting:
+                    active_task = waiting
+                    state["current_task"] = active_task
+
+            if active_task is None:
+                next_task = task_queue.start_next(session_id)
+                if next_task:
+                    active_task = next_task
+                    state["current_task"] = active_task
+                    log_agent_activity(
+                        state,
+                        agent_id="task_dispatcher",
+                        status="started",
+                        message=f"Gestione task {active_task.type}",
+                    )
+
+            if active_task:
+                handled = _handle_active_task(state, active_task, task_queue)
+                if handled:
+                    handled_state, loop_status = handled
+                    log_agent_activity(state, agent_id="tool_loop", status=loop_status)
+                    return handled_state
 
         # Se non abbiamo un piano corrente e il messaggio non è solo conferma, valutiamo la necessità di un piano
         if not plan and not acknowledgement:
@@ -994,6 +1164,8 @@ async def run_langgraph_chat(
         "done": False,
         "agent_activity": [],
         "agent_activity_manager": agent_activity_stream,
+        "task_queue": get_task_queue(),
+        "current_task": None,
     }
     final_state = await app.ainvoke(state)
     chat_response = final_state["chat_response"]
