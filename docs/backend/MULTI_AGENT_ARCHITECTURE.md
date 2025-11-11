@@ -363,7 +363,98 @@ class ServiceHealthEvent(BaseModel):
 
 > Nota: per evitare rumore si può applicare un debounce (es. segnalare il problema solo dopo 2/3 failure consecutivi) e un cooldown prima di ritentare.
 
-### 4. Message Broker (Communication Hub)
+### 4. Priority Task Queue & Main-Agent Mediation *(aggiornato)*
+
+Per coordinare agenti autonomi e interazione utente introduciamo una **Priority Task Queue**
+centralizzata. Gli agenti “di gestione” (integrity, service health, calendar sentinel, ecc.)
+non generano output direttamente verso l’utente: creano task con priorità e li inseriscono
+nella coda. Il planner (o un nodo `task_dispatcher`) decide quando estrarre un task e
+trasformarlo in un piano, mantenendo il Main Agent come unica voce nella chat.
+
+```
+┌───────────────────────┐        ┌──────────────────────────────┐
+│ Background Agents      │        │   Priority Task Queue         │
+│ (integrity, health…)   │───────►│ (stato, priorità, telemetry) │
+└───────────────────────┘        └──────────┬───────────────────┘
+                                            │ dequeue (priority)
+                                            ▼
+                               ┌──────────────────────────────┐
+                               │ Planner / Task Dispatcher    │
+                               │ (decide ordine esecuzione)   │
+                               └──────────┬───────────────────┘
+                                          │ crea piano
+                                          ▼
+                               ┌──────────────────────────────┐
+                               │ Main Agent                   │
+                               │ (unica voce verso l’utente)  │
+                               └──────────┬───────────────────┘
+                                          │
+                                          ▼
+                               Chat con l’utente finale
+```
+
+**Meccanica**
+
+- Ogni task contiene `id`, `priority`, `origin`, `type`, `payload`, `created_at`, `status`.
+- Il planner controlla la coda prima di processare un messaggio utente: se trova un task
+  `critical`/`high`, costruisce un piano dedicato (es. chiedere chiarimenti su una
+  contraddizione).
+- Le azioni interne tra agenti non compaiono nella cronologia utente: sono tracciate tramite
+  `AgentActivityStream` e log della coda.
+- Quando serve un intervento umano, il Main Agent traduce il task in un messaggio
+  conversazionale, attende la risposta e poi aggiorna lo stato del task (es. `waiting_user`
+  → `completed`) notificando l’agente che l’ha generato.
+
+**Benefici**
+
+- Disaccoppiamo produttori (agenti autonomi) e consumatore (Main), evitando blocchi e
+  favorendo estendibilità.
+- Restiamo aderenti al modello del whitepaper Google: orchestrazione multi-agente con
+  controllo centrale dei task.
+- Possiamo applicare politiche di fairness (round-robin, backoff, escalation) senza cambiare
+  gli agenti esistenti.
+
+### 5. Scheduler Periodico degli Agenti *(nuovo)*
+
+Per evitare che la produzione dipenda solo da trigger reattivi, aggiungiamo uno **Scheduler**
+che ciclicamente interroga gli agenti autonomi e chiede se hanno nuovi task da proporre.
+
+```
+┌──────────────────────────────┐
+│ ScheduledTaskManager         │  loop (p.es. ogni 60s)
+└──────────────┬───────────────┘
+               │ poll()
+               ▼
+    ┌──────────────────────┐
+    │ integrity_agent.poll │  → Task[]
+    ├──────────────────────┤
+    │ health_agent.poll    │  → Task[]
+    ├──────────────────────┤
+    │ calendar_agent.poll  │  → Task[]
+    └──────┬───────────────┘
+           │ enqueue
+           ▼
+    Priority Task Queue  → Planner/Main
+```
+
+**Meccanica**
+
+- Registro di agenti schedulati (`name`, `interval`, `last_run`, `handler`).  
+- Ad ogni giro, lo scheduler controlla chi deve essere svegliato, invoca `produce_tasks()` e
+  inserisce i risultati nella queue.  
+- In fase di bootstrap può trasformare backlog esistenti (es. notifiche di contraddizione già
+  archiviate) in task `resolve_contradiction`, così il main li gestisce appena possibile.
+
+**Benefici**
+
+- Gli agenti “di guardia” (integrity, service health, calendar sentinel, ecc.) lavorano anche in
+  assenza di messaggi utente.
+- Il control plane mantiene visibilità su quali agenti sono attivi e può abilitare/disabilitare
+  polling o cambiare gli intervalli senza toccare il planner.
+- Allinea l’architettura alle raccomandazioni del whitepaper Google: orchestrazione
+  proattiva con controlli periodici.
+
+### 6. Message Broker (Communication Hub)
 
 **Ruolo**: Gestisce comunicazione tra agenti
 
@@ -415,7 +506,7 @@ class MessageBroker:
             raise
 ```
 
-### 5. Agent Base Class
+### 7. Agent Base Class
 
 **Ruolo**: Classe base per tutti gli agenti
 

@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     # Encryption for credentials
     credentials_encryption_key: str = "your-32-byte-encryption-key-change-me"
 
+    # Service health monitoring
+    service_health_monitor_enabled: bool = True
+    service_health_check_interval_seconds: int = 60
+
 
 settings = Settings()
 

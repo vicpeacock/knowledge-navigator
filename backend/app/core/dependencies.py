@@ -1,12 +1,17 @@
 """Dependency functions for FastAPI"""
 import logging
+from typing import Optional
 
 from app.core.config import settings
 from app.core.mcp_client import MCPClient
 from app.core.memory_manager import MemoryManager
 from app.core.ollama_client import OllamaClient
+from app.core.health_check import get_health_check_service
 from app.services.agent_activity_stream import AgentActivityStream
 from app.services.background_task_manager import BackgroundTaskManager
+from app.services.notification_center import NotificationCenter
+from app.services.service_health_agent import ServiceHealthAgent
+from app.services.task_queue import TaskQueue
 
 # Global instances
 _ollama_client: OllamaClient = None
@@ -15,13 +20,24 @@ _mcp_client: MCPClient = None
 _memory_manager: MemoryManager = None
 _agent_activity_stream: AgentActivityStream = None
 _background_task_manager: BackgroundTaskManager = None
+_notification_center: NotificationCenter = None
+_service_health_agent: ServiceHealthAgent = None
+_task_queue: TaskQueue = None
 
 logger = logging.getLogger(__name__)
 
 
 def init_clients():
     """Initialize global clients"""
-    global _ollama_client, _planner_client, _mcp_client, _memory_manager, _agent_activity_stream, _background_task_manager
+    global _ollama_client
+    global _planner_client
+    global _mcp_client
+    global _memory_manager
+    global _agent_activity_stream
+    global _background_task_manager
+    global _notification_center
+    global _service_health_agent
+    global _task_queue
 
     if _ollama_client is None:
         try:
@@ -59,6 +75,27 @@ def init_clients():
 
     if _background_task_manager is None:
         _background_task_manager = BackgroundTaskManager()
+
+    if _notification_center is None:
+        _notification_center = NotificationCenter()
+
+    if _task_queue is None:
+        _task_queue = TaskQueue()
+
+    if (
+        _service_health_agent is None
+        and settings.service_health_monitor_enabled
+    ):
+        health_checker = get_health_check_service()
+        _service_health_agent = ServiceHealthAgent(
+            notification_center=_notification_center,
+            agent_activity_stream=_agent_activity_stream,
+            health_checker=health_checker,
+        )
+        _background_task_manager.start_service_health_monitor(
+            _service_health_agent,
+            interval_seconds=settings.service_health_check_interval_seconds,
+        )
 
 
 def get_ollama_client() -> OllamaClient:
@@ -101,4 +138,16 @@ def get_agent_activity_stream() -> AgentActivityStream:
 
 def get_background_task_manager() -> BackgroundTaskManager:
     return _background_task_manager
+
+
+def get_notification_center() -> NotificationCenter:
+    return _notification_center
+
+
+def get_service_health_agent() -> Optional[ServiceHealthAgent]:
+    return _service_health_agent
+
+
+def get_task_queue() -> TaskQueue:
+    return _task_queue
 

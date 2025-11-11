@@ -9,6 +9,15 @@ import pytest
 from app.agents import langgraph_app
 from app.models.schemas import ChatRequest, ChatResponse
 from app.services.agent_activity_stream import AgentActivityStream
+from app.services.task_queue import TaskQueue
+
+
+@pytest.fixture
+def event_loop():
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.run_until_complete(loop.shutdown_asyncgens())
+    loop.close()
 
 
 def test_should_force_web_search_acknowledgement_off() -> None:
@@ -191,3 +200,94 @@ async def test_plan_waits_for_confirmation_and_resumes(monkeypatch: pytest.Monke
     assert any(
         match(evt, "tool_loop", "completed") for evt in activity_followup
     ), "La tool_loop dovrebbe completare il piano dopo la conferma"
+
+
+@pytest.mark.asyncio
+async def test_contradiction_task_flow(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core import dependencies
+    from app.services.task_queue import Task, TaskPriority, TaskStatus
+
+    session_id = uuid4()
+    db = object()
+
+    queue = TaskQueue()
+    monkeypatch.setattr(dependencies, "_task_queue", queue, raising=False)
+
+    contradiction_task = Task(
+        type="resolve_contradiction",
+        payload={
+            "new_statement": "Il contratto è stato rinnovato",
+            "contradictions": [
+                {
+                    "existing_memory": "Il contratto non è stato rinnovato",
+                    "explanation": "Due affermazioni opposte",
+                }
+            ],
+        },
+        origin="background_integrity_agent",
+        priority=TaskPriority.HIGH,
+    )
+    queue.enqueue(session_id, contradiction_task)
+
+    async def fake_main_agent(**kwargs: Any) -> ChatResponse:
+        raise AssertionError("run_main_agent_pipeline should not be called when handling task queue")
+
+    monkeypatch.setattr(langgraph_app, "run_main_agent_pipeline", fake_main_agent)
+
+    planner_stub = object()
+    activity_stream = AgentActivityStream()
+
+    request_user = ChatRequest(
+        message="Puoi controllare lo stato del contratto?",
+        session_id=session_id,
+        use_memory=False,
+        force_web_search=False,
+    )
+
+    first_result = await langgraph_app.run_langgraph_chat(
+        db=db,  # type: ignore[arg-type]
+        session_id=session_id,
+        request=request_user,
+        ollama=object(),  # type: ignore[arg-type]
+        planner_client=planner_stub,  # type: ignore[arg-type]
+        agent_activity_stream=activity_stream,
+        memory_manager=object(),  # type: ignore[arg-type]
+        session_context=[],
+        retrieved_memory=[],
+        memory_used={},
+        previous_messages=[],
+        pending_plan=None,
+    )
+
+    response_text = first_result["chat_response"].response
+    assert "contraddizione" in response_text.lower()
+    task_waiting = queue.find_task_by_status(session_id, TaskStatus.WAITING_USER)
+    assert task_waiting is not None
+
+    request_answer = ChatRequest(
+        message="La versione corretta è che il contratto è stato rinnovato.",
+        session_id=session_id,
+        use_memory=False,
+        force_web_search=False,
+    )
+
+    second_result = await langgraph_app.run_langgraph_chat(
+        db=db,  # type: ignore[arg-type]
+        session_id=session_id,
+        request=request_answer,
+        ollama=object(),  # type: ignore[arg-type]
+        planner_client=planner_stub,  # type: ignore[arg-type]
+        agent_activity_stream=activity_stream,
+        memory_manager=object(),  # type: ignore[arg-type]
+        session_context=[{"role": "assistant", "content": response_text}],
+        retrieved_memory=[],
+        memory_used={},
+        previous_messages=[{"role": "assistant", "content": response_text}],
+        pending_plan=None,
+    )
+
+    completion_text = second_result["chat_response"].response
+    assert "grazie" in completion_text.lower()
+    final_task = queue.get_task(session_id, contradiction_task.id)
+    assert final_task is not None
+    assert final_task.status == TaskStatus.COMPLETED

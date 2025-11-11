@@ -1,22 +1,18 @@
 """
 Background Agent - Autonomous thinking agent for proactive checks
 """
-from typing import Dict, Any, Optional
-from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import UUID
 import logging
-
-from app.core.memory_manager import MemoryManager
 from typing import Dict, Any, Optional
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
-import logging
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
 from app.core.memory_manager import MemoryManager
 from app.core.ollama_client import OllamaClient
-from app.services.semantic_integrity_checker import SemanticIntegrityChecker
 from app.services.notification_service import NotificationService
-from app.core.config import settings
+from app.services.semantic_integrity_checker import SemanticIntegrityChecker
+from app.services.task_queue import TaskQueue, Task, TaskPriority
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +28,11 @@ class BackgroundAgent:
         memory_manager: MemoryManager,
         db: AsyncSession,
         ollama_client: Optional[OllamaClient] = None,
+        task_queue: Optional[TaskQueue] = None,
     ):
         self.memory_manager = memory_manager
         self.db = db
+        self.task_queue = task_queue
 
         # Use background Ollama client (phi3:mini) for background tasks
         self.ollama_client = ollama_client or self._create_background_client()
@@ -104,6 +102,26 @@ class BackgroundAgent:
                 # The Main process will check for new notifications when generating response
                 # and decide the final urgency level and format
                 logger.info(f"📢 Contradiction notification sent to Main for processing (session {session_id})")
+
+                if self.task_queue and session_id:
+                    task_payload = {
+                        "new_statement": knowledge_item.get("content"),
+                        "contradictions": contradiction_info.get("contradictions", []),
+                        "confidence": contradiction_info.get("confidence", 0.0),
+                        "notification_id": notification.id if notification else None,
+                    }
+                    task = Task(
+                        type="resolve_contradiction",
+                        origin="background_integrity_agent",
+                        priority=TaskPriority.HIGH,
+                        payload=task_payload,
+                    )
+                    self.task_queue.enqueue(session_id, task)
+                    logger.info(
+                        "📝 Enqueued contradiction resolution task %s for session %s",
+                        task.id,
+                        session_id,
+                    )
             else:
                 logger.info(f"No contradictions found for knowledge: {knowledge_item.get('content', '')[:50]}... (confidence: {contradiction_info.get('confidence', 0):.2f})")
 

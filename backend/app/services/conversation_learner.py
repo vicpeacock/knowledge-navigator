@@ -206,6 +206,7 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                 import asyncio
                 from app.db.database import AsyncSessionLocal
                 from app.services.background_agent import BackgroundAgent
+                from app.core.dependencies import get_task_queue
                 
                 async def _check_integrity_background():
                     """Background task to check integrity of knowledge (including duplicates)"""
@@ -215,6 +216,7 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                                 memory_manager=self.memory_manager,
                                 db=db_session,
                                 ollama_client=None,  # Will use background client
+                                task_queue=get_task_queue(),
                             )
                             
                             # Process each knowledge item (including duplicates) for contradiction check

@@ -1,14 +1,19 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 from contextlib import suppress
 from datetime import UTC, datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from uuid import UUID
 
 from app.db.database import AsyncSessionLocal
 from app.services.background_agent import BackgroundAgent
 from app.core.memory_manager import MemoryManager
 from app.services.agent_activity_stream import AgentActivityStream
+
+if TYPE_CHECKING:
+    from app.services.service_health_agent import ServiceHealthAgent
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +28,11 @@ class BackgroundTaskManager:
     def __init__(self) -> None:
         self._tasks: set[asyncio.Task] = set()
         self._loop = asyncio.get_event_loop()
+        self._service_health_task: Optional[asyncio.Task] = None
+
+    # ------------------------------------------------------------------ #
+    # Management helpers
+    # ------------------------------------------------------------------ #
 
     def _track_task(self, task: asyncio.Task) -> None:
         self._tasks.add(task)
@@ -67,9 +77,12 @@ class BackgroundTaskManager:
 
             try:
                 async with AsyncSessionLocal() as db_session:
+                    from app.core.dependencies import get_task_queue
+
                     agent = BackgroundAgent(
                         memory_manager=memory_manager,
                         db=db_session,
+                        task_queue=get_task_queue(),
                     )
                     knowledge = {
                         "type": "user_statement",
@@ -104,5 +117,35 @@ class BackgroundTaskManager:
 
     def active_tasks(self) -> int:
         return len(self._tasks)
+
+    # ------------------------------------------------------------------ #
+    # Service health monitoring
+    # ------------------------------------------------------------------ #
+    def start_service_health_monitor(
+        self,
+        agent: ServiceHealthAgent,
+        *,
+        interval_seconds: int,
+    ) -> None:
+        """
+        Launch a long-running task that periodically executes the service health agent.
+        """
+
+        if self._service_health_task and not self._service_health_task.done():
+            return
+
+        async def _runner() -> None:
+            while True:
+                try:
+                    await agent.run_once()
+                except Exception as exc:  # pragma: no cover - safeguard
+                    logger.error(
+                        "Service health monitor failed: %s", exc, exc_info=True
+                    )
+                await asyncio.sleep(max(5, interval_seconds))
+
+        task = self._loop.create_task(_runner(), name="service-health-monitor")
+        self._service_health_task = task
+        self._track_task(task)
 
 
