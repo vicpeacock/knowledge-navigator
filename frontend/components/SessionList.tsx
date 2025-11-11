@@ -58,7 +58,7 @@ export default function SessionList({ currentSessionId }: SessionListProps) {
   }
 
   return (
-    <div className="w-64 bg-gray-100 dark:bg-gray-900 p-4 h-screen overflow-y-auto flex flex-col">
+    <div className="w-64 bg-gray-100 dark:bg-gray-900 p-4 h-screen flex flex-col overflow-y-auto pb-16">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Sessions</h2>
         <button

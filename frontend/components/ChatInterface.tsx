@@ -543,7 +543,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
 
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4"
+        className="flex-1 overflow-y-auto p-4 pb-24 space-y-4"
         style={{ scrollBehavior: 'smooth' }}
       >
         {loadingMessages ? (
