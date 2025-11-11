@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { integrationsApi } from '@/lib/api'
-import { Calendar, CheckCircle, XCircle, RefreshCw, ExternalLink, Mail, ArrowLeft, Trash2, Server, Settings, MessageSquare } from 'lucide-react'
+import { Calendar, CheckCircle, XCircle, RefreshCw, ExternalLink, Mail, ArrowLeft, Trash2, Server, Settings, MessageSquare, RotateCcw } from 'lucide-react'
 import { useStatus } from '@/components/StatusPanel'
 
 interface Integration {
@@ -37,6 +37,7 @@ export default function IntegrationsPage() {
   const [gmailStatusMessage, setGmailStatusMessage] = useState<string | null>(null)
   const [calendarNeedsReconnect, setCalendarNeedsReconnect] = useState(false)
   const [calendarStatusMessage, setCalendarStatusMessage] = useState<string | null>(null)
+  const [isRefreshingIntegrations, setIsRefreshingIntegrations] = useState(false)
   
   // Use global status panel
   const { addStatusMessage } = useStatus()
@@ -136,20 +137,148 @@ export default function IntegrationsPage() {
     }
   }, [selectedMcpIntegration, isSaving])
 
-  const loadIntegrations = async () => {
+  const loadIntegrations = async (options: { promptCleanup?: boolean } = {}) => {
+    const { promptCleanup = false } = options
+    if (promptCleanup) {
+      setIsRefreshingIntegrations(true)
+    } else {
+      setLoading(true)
+    }
+
+    const maybeCleanupDuplicates = async (
+      calendarList: Integration[],
+      emailList: Integration[]
+    ): Promise<{ calendarIds: string[]; emailIds: string[] } | null> => {
+      type DuplicateGroup = {
+        type: 'calendar' | 'email'
+        provider: string
+        toDelete: Integration[]
+        total: number
+      }
+
+      const duplicateGroups: DuplicateGroup[] = []
+
+      const collectDuplicates = (list: Integration[], type: 'calendar' | 'email') => {
+        const byProvider = new Map<string, Integration[]>()
+        list.forEach((integration) => {
+          const key = integration.provider || 'unknown'
+          const current = byProvider.get(key) || []
+          current.push(integration)
+          byProvider.set(key, current)
+        })
+        byProvider.forEach((items, provider) => {
+          if (items.length > 1) {
+            const toDelete = items.slice(0, -1) // keep the last one (assumed latest)
+            duplicateGroups.push({
+              type,
+              provider,
+              toDelete,
+              total: items.length,
+            })
+          }
+        })
+      }
+
+      collectDuplicates(calendarList, 'calendar')
+      collectDuplicates(emailList, 'email')
+
+      if (duplicateGroups.length === 0) {
+        return null
+      }
+
+      const summaryLines = duplicateGroups.map((group) => {
+        const providerLabel =
+          group.type === 'calendar'
+            ? `${group.provider.charAt(0).toUpperCase()}${group.provider.slice(1)} Calendar`
+            : `${group.provider.charAt(0).toUpperCase()}${group.provider.slice(1)} Email`
+        return `${providerLabel}: trovate ${group.total} integrazioni (verranno rimosse ${group.toDelete.length})`
+      })
+
+      const confirmed = window.confirm(
+        `Sono state trovate integrazioni duplicate:\n\n${summaryLines.join(
+          '\n'
+        )}\n\nVuoi rimuovere automaticamente quelle meno recenti?`
+      )
+
+      if (!confirmed) {
+        return null
+      }
+
+      const deletedCalendarIds: string[] = []
+      const deletedEmailIds: string[] = []
+
+      for (const group of duplicateGroups) {
+        for (const integration of group.toDelete) {
+          try {
+            if (group.type === 'calendar') {
+              await integrationsApi.calendar.deleteIntegration(integration.id)
+              deletedCalendarIds.push(integration.id)
+            } else {
+              await integrationsApi.email.deleteIntegration(integration.id)
+              deletedEmailIds.push(integration.id)
+            }
+          } catch (error: any) {
+            const detail = error.response?.data?.detail || error.message
+            addStatusMessage(
+              'error',
+              `Errore rimozione integrazione ${integration.provider}: ${detail}`
+            )
+          }
+        }
+      }
+
+      const totalDeleted = deletedCalendarIds.length + deletedEmailIds.length
+      if (totalDeleted > 0) {
+        addStatusMessage(
+          'success',
+          `Rimosse automaticamente ${totalDeleted} integrazioni duplicate`
+        )
+      } else {
+        addStatusMessage('info', 'Nessuna integrazione duplicata è stata rimossa')
+      }
+
+      return {
+        calendarIds: deletedCalendarIds,
+        emailIds: deletedEmailIds,
+      }
+    }
+
     try {
       const [calendarResponse, emailResponse, mcpResponse] = await Promise.all([
         integrationsApi.calendar.listIntegrations(),
         integrationsApi.email.listIntegrations(),
         integrationsApi.mcp.listIntegrations().catch(() => ({ data: { integrations: [] } })),
       ])
-      setCalendarIntegrations(calendarResponse.data.integrations || [])
-      setEmailIntegrations(emailResponse.data.integrations || [])
+      let calendarList: Integration[] = calendarResponse.data.integrations || []
+      let emailList: Integration[] = emailResponse.data.integrations || []
+
+      if (promptCleanup) {
+        const cleanupResult = await maybeCleanupDuplicates(calendarList, emailList)
+        if (cleanupResult) {
+          if (cleanupResult.calendarIds.length > 0) {
+            calendarList = calendarList.filter(
+              (integration) => !cleanupResult.calendarIds.includes(integration.id)
+            )
+          }
+          if (cleanupResult.emailIds.length > 0) {
+            emailList = emailList.filter(
+              (integration) => !cleanupResult.emailIds.includes(integration.id)
+            )
+          }
+        }
+      }
+
+      setCalendarIntegrations(calendarList)
+      setEmailIntegrations(emailList)
       setMcpIntegrations(mcpResponse.data.integrations || [])
     } catch (error) {
       console.error('Error loading integrations:', error)
     } finally {
-      setLoading(false)
+      if (promptCleanup) {
+        setIsRefreshingIntegrations(false)
+      } else {
+        setLoading(false)
+      }
     }
   }
 
@@ -335,13 +464,28 @@ export default function IntegrationsPage() {
     <div className="min-h-screen p-8 bg-gray-50 dark:bg-gray-900">
       <div className="max-w-4xl mx-auto">
         <div className="mb-8">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 mb-4 transition-colors"
-          >
-            <ArrowLeft size={20} />
-            <span>Torna alla Home</span>
-          </Link>
+          <div className="flex items-center justify-between mb-4">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+            >
+              <ArrowLeft size={20} />
+              <span>Torna alla Home</span>
+            </Link>
+            <button
+              onClick={() => loadIntegrations({ promptCleanup: true })}
+              disabled={isRefreshingIntegrations}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              title="Ricarica le integrazioni e rimuovi eventuali duplicati"
+            >
+              {isRefreshingIntegrations ? (
+                <RefreshCw size={18} className="animate-spin" />
+              ) : (
+                <RotateCcw size={18} />
+              )}
+              <span className="hidden sm:inline text-sm font-medium">Ricarica</span>
+            </button>
+          </div>
           <h1 className="text-4xl font-bold mb-2">Integrazioni</h1>
           <p className="text-gray-600 dark:text-gray-400">
             Collega i tuoi servizi esterni per arricchire il Knowledge Navigator
@@ -439,12 +583,6 @@ export default function IntegrationsPage() {
                     </>
                   )}
                 </button>
-                <button
-                  onClick={loadIntegrations}
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
-                >
-                  Aggiorna
-                </button>
               </div>
             </div>
           ) : (
@@ -526,53 +664,47 @@ export default function IntegrationsPage() {
                   Sono presenti {gmailIntegrations.length} integrazioni Gmail abilitate. Mantieni solo quella più recente e rimuovi le altre per evitare token scaduti.
                 </div>
               )}
-                  <div className="flex gap-3">
-                    <button
-                      onClick={testGmailConnection}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                    >
+              <div className="flex gap-3">
+                <button
+                  onClick={testGmailConnection}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                >
+                  <RefreshCw size={18} />
+                  Test Connessione
+                </button>
+                {gmailIntegration && (
+                  <button
+                    onClick={() => {
+                      if (gmailIntegration?.id) {
+                        disconnectEmail(gmailIntegration.id)
+                      } else {
+                        console.warn('Nessuna integrazione trovata')
+                      }
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+                  >
+                    <Trash2 size={18} />
+                    Rimuovi
+                  </button>
+                )}
+                <button
+                  onClick={() => connectGmail(gmailIntegration?.id)}
+                  disabled={connectingEmail}
+                  className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {connectingEmail ? (
+                    <>
+                      <RefreshCw size={18} className="animate-spin" />
+                      Richiesta in corso...
+                    </>
+                  ) : (
+                    <>
                       <RefreshCw size={18} />
-                      Test Connessione
-                    </button>
-                    {gmailIntegration && (
-                      <button
-                        onClick={() => {
-                          if (gmailIntegration?.id) {
-                            disconnectEmail(gmailIntegration.id)
-                          } else {
-                            console.warn('Nessuna integrazione trovata')
-                          }
-                        }}
-                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
-                      >
-                        <Trash2 size={18} />
-                        Rimuovi
-                      </button>
-                    )}
-                    <button
-                      onClick={() => connectGmail(gmailIntegration?.id)}
-                      disabled={connectingEmail}
-                      className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                      {connectingEmail ? (
-                        <>
-                          <RefreshCw size={18} className="animate-spin" />
-                          Richiesta in corso...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw size={18} />
-                          Ricollega Gmail
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={loadIntegrations}
-                      className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
-                    >
-                      Aggiorna
-                    </button>
-                  </div>
+                      Ricollega Gmail
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-4">

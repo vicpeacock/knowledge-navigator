@@ -277,6 +277,92 @@ class EventMonitorAgent:
                 )
 ```
 
+#### 3.5 Service Health Agent *(proposta)*
+
+**Ruolo**: monitorare periodicamente lo stato di componenti interni ed integrazioni esterne, producendo eventi di salute utilizzabili da planner, UI e sistemi di auto-ripristino.
+
+**Perché serve**
+
+- Gli health check sincroni oggi fotografano solo lo stato al load della pagina.
+- Vogliamo notificare in anticipo scadenze token o servizi degradati, evitando errori a cascata.
+- L’orchestratore/planner deve sapere quali tool sono realmente disponibili.
+
+**Responsabilità principali**
+
+1. Schedulare *probe* asincroni tramite `BackgroundTaskManager` (es. ogni 60 s con backoff adattivo).
+2. Aggregare risultati e calcolare `status` (`healthy`, `degraded`, `unhealthy`) più contatori di failure consecutivi.
+3. Pubblicare notifiche nel `NotificationCenter` (con `NotificationPriority` coerente) e aggiornare il `StatusPanel`.
+4. Scrivere eventi di telemetria nell’`AgentActivityStream` per la UI degli agenti.
+5. Esporre ultima fotografia tramite cache condivisa (`state["service_health"]`) così planner e frontend possono consultarla immediatamente.
+
+**Workflow (alto livello)**
+
+```
+┌──────────────────────┐       ┌─────────────────────────────┐
+│ BackgroundTaskManager │ 1..n  │ ServiceHealthAgent          │
+└──────┬────────────────┘       └──────────────┬──────────────┘
+       │ schedule probes                      │
+       ▼                                      │ produce events
+┌──────────────┐    HTTP/SDK    ┌─────────────▼──────────────┐
+│ Target Probe │◄──────────────►│ ProbeRunner (per resource) │
+└──────┬───────┘                 └─────────────┬──────────────┘
+       │ success/error                         │
+       ▼                                      ▼
+┌──────────────┐      ┌──────────────────────────────────────┐
+│ Event Cache  │◄──── │ ServiceHealthEvent (resource, status)│
+└──────────────┘      └────────────┬──────────────────────────┘
+                                   │
+                 ┌─────────────────┴───────────────┐
+                 ▼                                 ▼
+      NotificationCenter (UI)        AgentActivityStream / Planner
+```
+
+**Formato evento proposto**
+
+```python
+class ServiceHealthEvent(BaseModel):
+    probe_id: str
+    resource: str  # es. "postgres", "google_calendar"
+    status: Literal["healthy", "degraded", "unhealthy"]
+    severity: Literal["info", "warning", "critical"]
+    latency_ms: Optional[float] = None
+    checked_at: datetime
+    message: str | None = None
+    consecutive_failures: int = 0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+```
+
+**Probe da coprire (prima iterazione)**
+
+| Categoria | Risorsa | Strategia | Default severity |
+| --- | --- | --- | --- |
+| Core backend | Postgres, Chroma, Ollama front/back, Scheduler | Ping REST + operazione sintetica (es. `SELECT 1`) | `critical` |
+| Integrazioni OAuth | Gmail, Calendar, altri provider | Check refresh token + chiamata list limitata | `warning` |
+| MCP & strumenti esterni | MCP server registrati, browser tools | Tool “ping” o `GET /status` | `warning` |
+| Background services | llama.cpp monitor, worker async | Controllo processo/porta + heartbeat interno | `warning` |
+| KPI | Latenza media tool o tassi errore | Query su metadati interni | `info` |
+
+**Notifiche**
+
+- `healthy → degraded/unhealthy`: notifica `HIGH`/`CRITICAL` e badge giallo/rosso nel `StatusPanel`.
+- `degraded/unhealthy → healthy`: notifica `info` di ripristino, per evitare “false positive”.
+- Token/OAuth: messaggio testuale con call-to-action “Ricollega” verso pagina integrazioni.
+
+**Integrazione nel grafo**
+
+- L’agente vive fuori dal flusso chat (non blocca risposte), ma scrive nello stato condiviso (`state["service_health"]`).
+- Il planner e la LangGraph condition node possono controllare `state["service_health"][tool_id]` prima di proporre un tool.
+- Il `BackendStatus` del frontend può combinare health-check immediato + stati asincroni per mostrare la situazione reale.
+
+**Step successivi**
+
+1. Definire il “registry” dei probe (YAML o DB) e il relativo modello Pydantic.
+2. Implementare il runner nel modulo `services/service_health_agent.py` con hook verso `NotificationCenter`.
+3. Aggiornare API/WS per esporre `service_health` insieme alla lista sessioni o via endpoint dedicato.
+4. Scrivere test (unitari per ogni probe + integrazione con `BackgroundTaskManager`).
+
+> Nota: per evitare rumore si può applicare un debounce (es. segnalare il problema solo dopo 2/3 failure consecutivi) e un cooldown prima di ritentare.
+
 ### 4. Message Broker (Communication Hub)
 
 **Ruolo**: Gestisce comunicazione tra agenti
