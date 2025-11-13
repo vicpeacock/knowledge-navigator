@@ -65,10 +65,24 @@ export default function FileManager({ sessionId, isOpen, onClose, onFileUploaded
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
   }
 
-  if (!isOpen) return null
+  // Always render when isOpen is true
+  if (!isOpen) {
+    return null
+  }
+
+  console.log('[FileManager] Rendering popup - isOpen:', isOpen, 'sessionId:', sessionId, 'loading:', loading)
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 z-[110] flex items-center justify-center"
+      style={{ zIndex: 110 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          console.log('[FileManager] Backdrop clicked, closing')
+          onClose()
+        }
+      }}
+    >
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="text-xl font-semibold">File in Memoria</h2>

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAgentActivity } from './AgentActivityContext'
+import NotificationBell from './NotificationBell'
 
 interface SessionDetailsProps {
   session: Session
@@ -108,8 +109,15 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
     )
     const label = definition?.label ?? status.agentName ?? agentId
     const statusLabel = statusLabelMap[status.status] ?? status.status
+    
+    // Get last 5 events for this agent
+    const agentEvents = events
+      .filter((e) => e.agent_id === agentId)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 5)
+    
     return (
-      <div key={agentId} className="flex flex-col items-center gap-2 text-center text-xs text-blue-900 dark:text-blue-200">
+      <div key={agentId} className="flex flex-col items-center gap-2 text-center text-xs text-blue-900 dark:text-blue-200 relative group">
         <span className={bubbleClasses}>
           <Icon size={18} />
         </span>
@@ -121,6 +129,42 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
           </span>
         )}
         {status.message && <span className="text-[10px] text-slate-600 dark:text-slate-400">{status.message}</span>}
+        
+        {/* Tooltip with agent logs */}
+        <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 w-64 p-3 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
+          <div className="font-semibold mb-2 text-sm border-b border-gray-700 pb-1">
+            {label} - Ultimi eventi
+          </div>
+          {agentEvents.length > 0 ? (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {agentEvents.map((event, idx) => (
+                <div key={idx} className="text-left">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={clsx(
+                      'px-1.5 py-0.5 rounded text-[10px] font-semibold',
+                      event.status === 'started' && 'bg-emerald-600',
+                      event.status === 'completed' && 'bg-blue-600',
+                      event.status === 'waiting' && 'bg-amber-600',
+                      event.status === 'error' && 'bg-rose-600'
+                    )}>
+                      {statusLabelMap[event.status] || event.status}
+                    </span>
+                    <span className="text-[10px] text-gray-400">
+                      {new Date(event.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  {event.message && (
+                    <div className="text-[11px] text-gray-300 ml-1">
+                      {event.message}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-gray-400 text-[11px]">Nessun evento recente</div>
+          )}
+        </div>
       </div>
     )
   }
@@ -190,6 +234,7 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
           <Home size={16} />
           <span>Home</span>
         </Link>
+        <NotificationBell sessionId={session.id} />
         <button
           type="button"
           onClick={() => setShowAgentActivity((prev) => !prev)}

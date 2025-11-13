@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -30,7 +31,8 @@ class AgentActivityStream:
         self._queue_size = max(1, queue_size)
         self._history: Dict[UUID, Deque[Dict[str, Any]]] = defaultdict(deque)
         self._subscribers: Dict[UUID, MutableSet[_Subscriber]] = defaultdict(set)
-        self._lock = asyncio.Lock()
+        self._async_lock = asyncio.Lock()  # Per register/unregister (async)
+        self._sync_lock = threading.Lock()  # Per publish/get_active_sessions (sync)
 
     @staticmethod
     def _serialize_event(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -48,19 +50,21 @@ class AgentActivityStream:
         """
         queue: asyncio.Queue = asyncio.Queue(maxsize=self._queue_size)
         subscriber = _Subscriber(queue=queue)
-        async with self._lock:
-            self._subscribers[session_id].add(subscriber)
+        async with self._async_lock:
+            with self._sync_lock:
+                self._subscribers[session_id].add(subscriber)
         return queue
 
     async def unregister(self, session_id: UUID, queue: asyncio.Queue) -> None:
         """Remove a subscriber queue when the client disconnects."""
         subscriber = _Subscriber(queue=queue)
-        async with self._lock:
-            subscribers = self._subscribers.get(session_id)
-            if subscribers and subscriber in subscribers:
-                subscribers.remove(subscriber)
-                if not subscribers:
-                    self._subscribers.pop(session_id, None)
+        async with self._async_lock:
+            with self._sync_lock:
+                subscribers = self._subscribers.get(session_id)
+                if subscribers and subscriber in subscribers:
+                    subscribers.remove(subscriber)
+                    if not subscribers:
+                        self._subscribers.pop(session_id, None)
 
     def publish(self, session_id: UUID, event: Dict[str, Any]) -> None:
         """Publish a new telemetry event to all subscribers."""
@@ -70,10 +74,14 @@ class AgentActivityStream:
         while len(history) > self._history_size:
             history.popleft()
 
-        subscribers = list(self._subscribers.get(session_id, []))
+        # Make a thread-safe copy of subscribers list
+        with self._sync_lock:
+            subscribers = list(self._subscribers.get(session_id, []))
+        
         if not subscribers:
             return
 
+        # Process subscribers outside the lock to avoid blocking
         for subscriber in subscribers:
             queue = subscriber.queue
             try:
@@ -112,5 +120,23 @@ class AgentActivityStream:
             "events": history,
         }
         return f"data: {json.dumps(payload)}\n\n"
+    
+    def get_active_sessions(self) -> List[UUID]:
+        """Return list of session IDs that have active subscribers."""
+        with self._sync_lock:
+            return list(self._subscribers.keys())
+    
+    def publish_to_all_active_sessions(self, event: Dict[str, Any]) -> None:
+        """Publish an event to all sessions with active subscribers."""
+        # Get a snapshot of active sessions to avoid holding lock during publish
+        with self._sync_lock:
+            active_sessions = list(self._subscribers.keys())
+        
+        if not active_sessions:
+            return
+        
+        # Publish to each session (publish() will acquire its own lock)
+        for session_id in active_sessions:
+            self.publish(session_id, event)
 
 

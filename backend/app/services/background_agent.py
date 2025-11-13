@@ -2,7 +2,7 @@
 Background Agent - Autonomous thinking agent for proactive checks
 """
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,9 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.memory_manager import MemoryManager
 from app.core.ollama_client import OllamaClient
+from app.db.database import AsyncSessionLocal
 from app.services.notification_service import NotificationService
 from app.services.semantic_integrity_checker import SemanticIntegrityChecker
-from app.services.task_queue import TaskQueue, Task, TaskPriority
+from app.services.task_queue import TaskQueue, Task, TaskPriority, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -160,4 +161,135 @@ class BackgroundAgent:
         """Check todo list - to be implemented"""
         # TODO: Implement todo list checking
         pass
+
+
+async def fetch_pending_contradiction_tasks(
+    task_queue: TaskQueue,
+) -> List[Tuple[UUID, Task]]:
+    """
+    Inspect stored notifications and generate queue tasks for unresolved contradictions.
+    """
+    results: List[Tuple[UUID, Task]] = []
+    
+    # Clear completed tasks for all sessions to avoid stale tasks blocking new ones
+    # This ensures we only check for active tasks (QUEUED, IN_PROGRESS, WAITING_USER)
+    total_before = sum(len(tasks) for tasks in task_queue._tasks.values())
+    for session_id in list(task_queue._tasks.keys()):
+        task_queue.clear_completed(session_id)
+    total_after = sum(len(tasks) for tasks in task_queue._tasks.values())
+    if total_before > 0:
+        logger.debug(
+            "🧹 Cleared completed tasks: %d total before, %d total after",
+            total_before,
+            total_after,
+        )
+
+    async with AsyncSessionLocal() as db_session:
+        service = NotificationService(db_session)
+        pending = await service.get_pending_notifications(read=False)
+        
+        logger.info(
+            "🔍 Scheduler poller: found %d pending notifications (all types)",
+            len(pending),
+        )
+
+        contradiction_count = 0
+        skipped_count = 0
+        
+        for notification in pending:
+            if notification.get("type") != "contradiction":
+                continue
+            
+            contradiction_count += 1
+            session_id = notification.get("session_id")
+            if not session_id:
+                logger.debug("Skipping contradiction notification without session_id")
+                continue
+
+            try:
+                session_uuid = UUID(session_id)
+            except ValueError:
+                logger.warning("Invalid session_id in notification: %s", session_id)
+                continue
+
+            # Check if there's already an active task for this contradiction
+            # First, log the state of the queue for this session
+            session_tasks = task_queue._tasks.get(session_uuid, {})
+            active_tasks = [
+                t for t in session_tasks.values()
+                if t.status in [TaskStatus.QUEUED, TaskStatus.IN_PROGRESS, TaskStatus.WAITING_USER]
+            ]
+            logger.info(
+                "🔍 Checking session %s: %d total tasks, %d active tasks",
+                session_uuid,
+                len(session_tasks),
+                len(active_tasks),
+            )
+            
+            existing_task = task_queue.find_task_by_type(
+                session_uuid,
+                "resolve_contradiction",
+                statuses=[
+                    TaskStatus.QUEUED,
+                    TaskStatus.IN_PROGRESS,
+                    TaskStatus.WAITING_USER,
+                ],
+            )
+            if existing_task:
+                skipped_count += 1
+                logger.info(
+                    "⏭️  Skipping contradiction for session %s: task already exists (id=%s, status=%s, created=%s)",
+                    session_uuid,
+                    existing_task.id,
+                    existing_task.status.value,
+                    existing_task.created_at,
+                )
+                continue
+            
+            # TEMPORARY: Force creation of tasks to debug why they're not being created
+            # Remove this after debugging
+            logger.info(
+                "✅ No existing task found for session %s, creating new task",
+                session_uuid,
+            )
+            
+            # Log when we're about to create a new task
+            logger.debug(
+                "✅ No existing task found for session %s, will create new task",
+                session_uuid,
+            )
+
+            content = notification.get("content") or {}
+            new_knowledge = content.get("new_knowledge") or {}
+            new_statement = new_knowledge.get("content") or new_knowledge.get("text") or ""
+            contradictions = content.get("contradictions", [])
+            confidence = content.get("confidence", 0.0)
+
+            task = Task(
+                type="resolve_contradiction",
+                origin="background_integrity_agent",
+                priority=TaskPriority.HIGH,
+                payload={
+                    "new_statement": new_statement,
+                    "contradictions": contradictions,
+                    "confidence": confidence,
+                    "notification_id": notification.get("id"),
+                },
+            )
+            results.append((session_uuid, task))
+            logger.info(
+                "✅ Created contradiction task %s for session %s (notification_id=%s)",
+                task.id,
+                session_uuid,
+                notification.get("id"),
+            )
+
+        logger.info(
+            "📊 Scheduler poller summary: %d contradiction notifications, %d tasks created, %d skipped (task already exists)",
+            contradiction_count,
+            len(results),
+            skipped_count,
+        )
+
+    return results
 

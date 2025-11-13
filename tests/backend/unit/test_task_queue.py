@@ -72,6 +72,11 @@ def test_find_task_by_status() -> None:
     queue.update_task(session_id, t1.id, status=TaskStatus.WAITING_USER)
     queue.update_task(session_id, t2.id, status=TaskStatus.WAITING_USER)
 
-    found = queue.find_task_by_status(session_id, TaskStatus.WAITING_USER)
-    assert found is t1  # highest priority first
+    found_status = queue.find_task_by_status(session_id, TaskStatus.WAITING_USER)
+    assert found_status is t1  # highest priority first
+
+    found_type = queue.find_task_by_type(session_id, "example")
+    assert found_type is t1
+    assert queue.task_exists(session_id, "example")
+    assert not queue.task_exists(session_id, "nonexistent")
 

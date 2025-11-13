@@ -4,13 +4,14 @@ import asyncio
 import logging
 from contextlib import suppress
 from datetime import UTC, datetime
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Coroutine, Any
 from uuid import UUID
 
 from app.db.database import AsyncSessionLocal
 from app.services.background_agent import BackgroundAgent
 from app.core.memory_manager import MemoryManager
 from app.services.agent_activity_stream import AgentActivityStream
+from app.services.agent_scheduler import AgentScheduler, ScheduledAgent
 
 if TYPE_CHECKING:
     from app.services.service_health_agent import ServiceHealthAgent
@@ -29,6 +30,7 @@ class BackgroundTaskManager:
         self._tasks: set[asyncio.Task] = set()
         self._loop = asyncio.get_event_loop()
         self._service_health_task: Optional[asyncio.Task] = None
+        self._agent_scheduler: Optional[AgentScheduler] = None
 
     # ------------------------------------------------------------------ #
     # Management helpers
@@ -146,6 +148,28 @@ class BackgroundTaskManager:
 
         task = self._loop.create_task(_runner(), name="service-health-monitor")
         self._service_health_task = task
+        self._track_task(task)
+
+    # ------------------------------------------------------------------ #
+    # Scheduled agents
+    # ------------------------------------------------------------------ #
+    def configure_agent_scheduler(self, scheduler: AgentScheduler) -> None:
+        if self._agent_scheduler is not None:
+            return
+
+        self._agent_scheduler = scheduler
+
+        async def _runner() -> None:
+            await scheduler.run_forever()
+
+        task = self._loop.create_task(_runner(), name="agent-scheduler")
+        self._track_task(task)
+
+    # ------------------------------------------------------------------ #
+    # Generic utility
+    # ------------------------------------------------------------------ #
+    def schedule_coroutine(self, coro: Coroutine[Any, Any, Any], *, name: str = "background-task") -> None:
+        task = self._loop.create_task(coro, name=name)
         self._track_task(task)
 
 
