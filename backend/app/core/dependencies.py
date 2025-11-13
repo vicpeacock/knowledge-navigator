@@ -12,6 +12,10 @@ from app.services.background_task_manager import BackgroundTaskManager
 from app.services.notification_center import NotificationCenter
 from app.services.service_health_agent import ServiceHealthAgent
 from app.services.task_queue import TaskQueue
+from app.services.agent_scheduler import AgentScheduler, ScheduledAgent
+from app.services.background_agent import fetch_pending_contradiction_tasks
+from app.services.task_dispatcher import TaskDispatcher
+from app.db.database import AsyncSessionLocal
 
 # Global instances
 _ollama_client: OllamaClient = None
@@ -23,6 +27,8 @@ _background_task_manager: BackgroundTaskManager = None
 _notification_center: NotificationCenter = None
 _service_health_agent: ServiceHealthAgent = None
 _task_queue: TaskQueue = None
+_agent_scheduler: AgentScheduler = None
+_task_dispatcher: TaskDispatcher = None
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +43,9 @@ def init_clients():
     global _background_task_manager
     global _notification_center
     global _service_health_agent
+    global _agent_scheduler
     global _task_queue
+    global _task_dispatcher
 
     if _ollama_client is None:
         try:
@@ -81,6 +89,61 @@ def init_clients():
 
     if _task_queue is None:
         _task_queue = TaskQueue()
+
+    if _agent_scheduler is None:
+        _agent_scheduler = AgentScheduler(
+            task_queue=_task_queue,
+            tick_seconds=settings.agent_scheduler_tick_seconds,
+            agent_activity_stream=_agent_activity_stream,
+        )
+
+        async def integrity_poller():
+            return await fetch_pending_contradiction_tasks(_task_queue)
+
+        _agent_scheduler.register_agent(
+            ScheduledAgent(
+                name="integrity_contradictions",
+                interval_seconds=settings.integrity_scheduler_interval_seconds,
+                poller=integrity_poller,
+            )
+        )
+        _background_task_manager.configure_agent_scheduler(_agent_scheduler)
+
+    if _task_dispatcher is None:
+        _task_dispatcher = TaskDispatcher(
+            task_queue=_task_queue,
+            background_tasks=_background_task_manager,
+            session_factory=AsyncSessionLocal,
+            agent_activity_stream=_agent_activity_stream,
+            memory_manager=_memory_manager,
+            ollama_client=_ollama_client,
+            planner_client=_planner_client,
+        )
+        _agent_scheduler.register_dispatcher(_task_dispatcher)
+        
+        # Recreate tasks from pending notifications on startup
+        async def _recreate_tasks_on_startup():
+            try:
+                from app.services.background_agent import fetch_pending_contradiction_tasks
+                tasks = await fetch_pending_contradiction_tasks(_task_queue)
+                if tasks:
+                    logger.info(
+                        "🔄 Recreated %d contradiction tasks from notifications on startup",
+                        len(tasks),
+                    )
+                    for session_id, task in tasks:
+                        _task_queue.enqueue(session_id, task)
+                        _task_dispatcher.schedule_dispatch(session_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to recreate tasks on startup: %s", exc, exc_info=True
+                )
+        
+        # Schedule task recreation in background
+        if _background_task_manager:
+            _background_task_manager.schedule_coroutine(
+                _recreate_tasks_on_startup(), name="recreate-tasks-on-startup"
+            )
 
     if (
         _service_health_agent is None
@@ -150,4 +213,8 @@ def get_service_health_agent() -> Optional[ServiceHealthAgent]:
 
 def get_task_queue() -> TaskQueue:
     return _task_queue
+
+
+def get_task_dispatcher() -> TaskDispatcher:
+    return _task_dispatcher
 

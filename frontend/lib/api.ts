@@ -26,6 +26,7 @@ export const sessionsApi = {
   chat: (id: string, message: string, useMemory: boolean = true, forceWebSearch: boolean = false) =>
     api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: useMemory, force_web_search: forceWebSearch }, { timeout: 180000 }), // 3 minutes to allow long-running background tasks
   getMemory: (id: string) => api.get(`/api/sessions/${id}/memory`),
+  cleanContradictionNotifications: () => api.delete('/api/sessions/notifications/contradictions'),
 }
 
 // Files API

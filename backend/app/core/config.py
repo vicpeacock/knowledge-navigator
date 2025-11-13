@@ -63,9 +63,10 @@ class Settings(BaseSettings):
     context_keep_recent_messages: int = 10  # Keep last N messages when summarizing
     
     # Semantic Integrity Check
-    integrity_confidence_threshold: float = 0.7  # Soglia confidenza contraddizioni (ridotta da 0.8 per catturare più casi)
-    integrity_max_similar_memories: int = 15  # Numero memorie simili da controllare (aumentato da 10)
+    integrity_confidence_threshold: float = 0.85  # Soglia confidenza contraddizioni (aumentata per ridurre falsi positivi)
+    integrity_max_similar_memories: int = 5  # Numero memorie simili da controllare (ridotto per efficienza e precisione)
     integrity_check_exhaustive: bool = False  # Se True, controlla tutte (più lento)
+    integrity_min_importance: float = 0.7  # Importanza minima delle memorie da controllare (filtra memorie poco importanti)
     
     # Feature flags
     use_langgraph_prototype: bool = False
@@ -82,6 +83,8 @@ class Settings(BaseSettings):
     # Service health monitoring
     service_health_monitor_enabled: bool = True
     service_health_check_interval_seconds: int = 60
+    agent_scheduler_tick_seconds: int = 30
+    integrity_scheduler_interval_seconds: int = 30  # Temporaneamente ridotto per test
 
 
 settings = Settings()

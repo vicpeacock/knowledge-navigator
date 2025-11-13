@@ -31,6 +31,8 @@ const AGENT_ORDER = [
   'tool_loop',
   'knowledge_agent',
   'background_integrity_agent',
+  'task_scheduler',
+  'task_dispatcher',
   'notification_collector',
   'response_formatter',
 ]
@@ -109,13 +111,16 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
     setConnectionState('connecting')
 
     const streamUrl = `${API_BASE_URL}/api/sessions/${sessionId}/agent-activity/stream`
+    console.log('[AgentActivity] Connecting to SSE stream:', streamUrl)
     const source = new EventSource(streamUrl)
 
     source.onopen = () => {
+      console.log('[AgentActivity] SSE connection opened')
       setConnectionState('open')
     }
 
-    source.onerror = () => {
+    source.onerror = (error) => {
+      console.error('[AgentActivity] SSE connection error:', error)
       source.close()
       setConnectionState('closed')
       if (!isUnmountedRef.current && !reconnectTimerRef.current) {
@@ -130,17 +135,22 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
       if (!event.data) return
       try {
         const payload = JSON.parse(event.data)
+        console.log('[AgentActivity] Received SSE event:', payload.type, payload.event?.agent_id)
         if (payload.type === 'agent_activity_snapshot' && Array.isArray(payload.events)) {
           const normalised = payload.events
             .map(normaliseEvent)
-            .filter((evt): evt is AgentActivityEvent => evt !== null)
+            .filter((evt: AgentActivityEvent | null): evt is AgentActivityEvent => evt !== null)
+          console.log('[AgentActivity] Processing snapshot with', normalised.length, 'events')
           reset()
           ingestBatch(normalised)
           return
         }
         if (payload.type === 'agent_activity' && payload.event) {
           const evt = normaliseEvent(payload.event)
-          if (evt) ingestBatch([evt])
+          if (evt) {
+            console.log('[AgentActivity] Processing event:', evt.agent_id, evt.status)
+            ingestBatch([evt])
+          }
         }
       } catch (error) {
         console.error('[AgentActivity] Failed to parse SSE payload', error)
@@ -250,7 +260,7 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
       }
     }
 
-    const allAgentIds = Array.from(new Set([...AGENT_ORDER, ...eventsByAgent.keys()]))
+    const allAgentIds = Array.from(new Set([...AGENT_ORDER, ...Array.from(eventsByAgent.keys())]))
 
     return allAgentIds.map((agentId) => {
       const history = eventsByAgent.get(agentId) ?? []

@@ -70,10 +70,12 @@ class SemanticIntegrityChecker:
             # Remove type prefix if present (e.g., "[FACT] ...")
             clean_content = re.sub(r'^\[.*?\]\s*', '', content).strip()
             
-            # 1. Find similar memories using semantic search
+            # 1. Find similar memories using semantic search (filter by importance)
+            min_importance = settings.integrity_min_importance
             similar_memories = await self._find_similar_memories(
                 clean_content,
-                n_results=max_similar
+                n_results=max_similar,
+                min_importance=min_importance
             )
             
             if not similar_memories:
@@ -129,14 +131,15 @@ class SemanticIntegrityChecker:
                 "error": str(e),
             }
     
-    async def _find_similar_memories(self, content: str, n_results: int = 10) -> List[str]:
-        """Find similar memories using semantic search"""
+    async def _find_similar_memories(self, content: str, n_results: int = 10, min_importance: float = None) -> List[str]:
+        """Find similar memories using semantic search, optionally filtered by importance"""
         try:
-            logger.info(f"Searching for similar memories to: '{content[:100]}...'")
-            # Use long-term memory retrieval with high similarity threshold
+            logger.info(f"Searching for similar memories to: '{content[:100]}...' (min_importance={min_importance})")
+            # Use long-term memory retrieval with optional importance filter
             similar = await self.memory_manager.retrieve_long_term_memory(
                 content,
                 n_results=n_results,
+                min_importance=min_importance,
             )
             logger.info(f"Found {len(similar)} similar memories: {[s[:50] + '...' if len(s) > 50 else s for s in similar[:3]]}")
             return similar

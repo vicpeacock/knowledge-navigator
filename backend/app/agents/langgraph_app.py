@@ -52,6 +52,16 @@ ACK_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+IGNORE_REGEX = re.compile(
+    r"^(ignora|ignora\s+questa|ignora\s+la|ignora\s+questa\s+contraddizione|ignora\s+la\s+contraddizione|skip|salta)([!.]*)$",
+    re.IGNORECASE,
+)
+
+NO_CONTRADICTION_REGEX = re.compile(
+    r"(non\s+c'è\s+contraddizione|non\s+ci\s+sono\s+contraddizioni|non\s+è\s+una\s+contraddizione|non\s+esiste\s+contraddizione)",
+    re.IGNORECASE,
+)
+
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
@@ -68,6 +78,35 @@ def is_acknowledgement(message: str) -> bool:
     if normalized in {"ok", "okay", "va bene", "va bene si", "va bene sì", "si", "sì", "si grazie", "sì grazie", "si, grazie", "sì, grazie", "grazie", "certo", "perfetto", "d'accordo", "procedi", "continua", "vai pure", "fai pure"}:
         return True
     return bool(ACK_REGEX.match(normalized))
+
+
+def is_ignore_contradiction(message: str) -> bool:
+    """Check if the user wants to ignore the contradiction."""
+    if not message:
+        return False
+    normalized = _normalize_text(message)
+    if not normalized:
+        return False
+    # Check if message starts with ignore pattern
+    return bool(IGNORE_REGEX.match(normalized))
+
+
+def is_no_contradiction(message: str) -> bool:
+    """Check if the user claims there's no contradiction."""
+    if not message:
+        return False
+    normalized = _normalize_text(message)
+    if not normalized:
+        return False
+    # Check if message contains "non c'è contraddizione" pattern
+    # Allow up to 3 words before the pattern (e.g., "secondo me non c'è contraddizione")
+    match = NO_CONTRADICTION_REGEX.search(normalized)
+    if match:
+        start_pos = match.start()
+        # Allow up to 3 words before the pattern
+        words_before = normalized[:start_pos].strip().split() if start_pos > 0 else []
+        return len(words_before) <= 3
+    return False
 
 
 def should_force_web_search(request: ChatRequest, acknowledgement: bool) -> bool:
@@ -251,13 +290,15 @@ def _handle_contradiction_resolution_task(
     task: Task,
     queue: TaskQueue,
 ) -> Optional[tuple[LangGraphChatState, str]]:
+    logger = logging.getLogger(__name__)
     session_id = state.get("session_id")
     if not session_id:
         return None
 
     payload = task.payload or {}
     if task.status == TaskStatus.IN_PROGRESS:
-        message = _format_contradiction_prompt(payload)
+        # For contradictions, we don't send messages to chat - they appear in the notification bell
+        # Just update the task status to WAITING_USER
         queue.update_task(
             session_id,
             task.id,
@@ -265,15 +306,18 @@ def _handle_contradiction_resolution_task(
             payload_updates={"prompt_sent_at": datetime.now(UTC).isoformat()},
         )
         state["current_task"] = queue.get_task(session_id, task.id)
-        state["response"] = message
+        
+        # Don't create a chat message - the notification is already in the bell
+        # Just mark as done so the dispatcher can move on
+        state["response"] = ""  # Empty response - no message in chat
         state["plan_completed"] = True
-        state["assistant_message_saved"] = False
+        state["assistant_message_saved"] = True  # Mark as saved so no message is persisted
         state.setdefault("tool_results", [])
         _snapshot_notifications(state)
         notifications = state.get("notifications", [])
         high_notifications = state.get("high_urgency_notifications", [])
         state["chat_response"] = ChatResponse(
-            response=message,
+            response="",  # Empty - notification is in the bell, not in chat
             session_id=session_id,
             memory_used=state.get("memory_used", {}),
             tools_used=[],
@@ -286,24 +330,60 @@ def _handle_contradiction_resolution_task(
             state,
             agent_id="task_dispatcher",
             status="waiting",
-            message="Contradiction resolution awaiting user input",
+            message="Contradiction resolution awaiting user input (notification bell)",
         )
-        return state, "waiting"
+        return state, "completed"  # Mark as completed so dispatcher doesn't wait
 
     if task.status == TaskStatus.WAITING_USER:
         user_reply = state["request"].message.strip()
+        
+        # Determine response type
+        if is_ignore_contradiction(user_reply):
+            resolution_type = "ignored"
+            acknowledgement = "Ho ignorato questa contraddizione come richiesto."
+        elif is_no_contradiction(user_reply):
+            resolution_type = "no_contradiction"
+            # Extract explanation if present
+            normalized = _normalize_text(user_reply)
+            match = NO_CONTRADICTION_REGEX.search(normalized)
+            if match:
+                # Find the corresponding position in the original message
+                # This is approximate but should work for most cases
+                explanation_part = user_reply[match.end():].strip()
+                if explanation_part:
+                    explanation = explanation_part
+                else:
+                    explanation = user_reply
+            else:
+                explanation = user_reply
+            acknowledgement = f"Grazie per la spiegazione. Ho preso nota che non c'è contraddizione: {explanation}"
+        else:
+            resolution_type = "resolved"
+            acknowledgement = "Grazie! Terrò conto della tua indicazione per mantenere coerenti le informazioni."
+        
         queue.complete_task(
             session_id,
             task.id,
             payload_updates={
                 "user_response": user_reply,
+                "resolution_type": resolution_type,
                 "resolved_at": datetime.now(UTC).isoformat(),
             },
         )
         state["current_task"] = None
-        acknowledgement = (
-            "Grazie! Terrò conto della tua indicazione per mantenere coerenti le informazioni."
-        )
+        
+        # Trigger dispatcher to process next queued task if any
+        try:
+            from app.core.dependencies import get_task_dispatcher
+            dispatcher = get_task_dispatcher()
+            if dispatcher:
+                dispatcher.schedule_dispatch(session_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to trigger dispatcher for next task after contradiction resolution: %s",
+                exc,
+            )
+        
         state["response"] = acknowledgement
         state["plan_completed"] = True
         state["assistant_message_saved"] = False
@@ -325,7 +405,7 @@ def _handle_contradiction_resolution_task(
             state,
             agent_id="task_dispatcher",
             status="completed",
-            message="Contradiction response recorded",
+            message=f"Contradiction resolution recorded (type: {resolution_type})",
         )
         return state, "completed"
 
@@ -352,9 +432,13 @@ def _format_contradiction_prompt(payload: Dict[str, Any]) -> str:
             if explanation:
                 lines.append(f"     Motivo segnalato: {explanation}")
 
-    lines.append(
-        "Puoi indicarmi quale versione è corretta oppure fornire un contesto per conciliare le due informazioni?"
-    )
+    lines.append("")
+    lines.append("Come vuoi procedere?")
+    lines.append("1) Indicare quale versione è corretta o fornire un contesto per conciliare le informazioni")
+    lines.append("2) Ignorare questa contraddizione (rispondi con 'ignora' o 'ignora questa contraddizione')")
+    lines.append("3) Spiegare perché la contraddizione rilevata in realtà non esiste (rispondi con 'non c'è contraddizione' seguito dalla tua spiegazione)")
+    lines.append("")
+    lines.append("Puoi rispondere con una delle opzioni sopra o fornire direttamente la tua indicazione.")
     return "\n".join(lines)
 
 
@@ -413,10 +497,15 @@ async def analyze_message_for_plan(
         f"{tool_catalog if tool_catalog else '- Nessun tool disponibile'}\n\n"
         "Linee guida obbligatorie:\n"
         "1. Se per rispondere devi consultare dati da integrazioni (email, calendario, file, ecc.), questo richiede un piano multi-step e l'uso esplicito del relativo tool.\n"
-        "2. Preferisci tool specialistici alle ricerche generiche: usa web_search solo quando l'informazione richiesta arriva dal web pubblico o non esistono tool dedicati.\n"
-        "3. Quando accedi a dati sensibili (email, calendario, file personali) includi uno step \"wait_user\" per richiedere conferma esplicita prima di eseguire il tool.\n"
-        "4. Ogni piano deve descrivere in modo chiaro gli step successivi (max 5) con \"action\" tra tool/respond/wait_user, il tool da chiamare e i parametri essenziali.\n"
-        "5. Se puoi rispondere immediatamente senza strumenti esterni, imposta needs_plan=false e steps=[].\n\n"
+        "2. IMPORTANTE: Se l'utente chiede di 'leggere', 'vedere', 'recuperare', 'controllare' email, calendario, o file, DEVI creare un piano che usa il tool corrispondente (get_emails, get_calendar_events, search_memory, ecc.). NON rispondere direttamente senza chiamare il tool.\n"
+        "3. Esempi di richieste che RICHIEDONO un tool:\n"
+        "   - 'leggi le ultime 5 email' → needs_plan=true, step con tool='get_emails', query='' (vuoto per tutte le email), max_results=5\n"
+        "   - 'leggi le email non lette' → needs_plan=true, step con tool='get_emails', query='is:unread'\n"
+        "   - 'controlla il calendario' → needs_plan=true, step con tool='get_calendar_events'\n"
+        "4. Preferisci tool specialistici alle ricerche generiche: usa web_search solo quando l'informazione richiesta arriva dal web pubblico o non esistono tool dedicati.\n"
+        "5. Quando accedi a dati sensibili (email, calendario, file personali) includi uno step \"wait_user\" per richiedere conferma esplicita prima di eseguire il tool.\n"
+        "6. Ogni piano deve descrivere in modo chiaro gli step successivi (max 5) con \"action\" tra tool/respond/wait_user, il tool da chiamare e i parametri essenziali.\n"
+        "7. Se puoi rispondere immediatamente senza strumenti esterni, imposta needs_plan=false e steps=[].\n\n"
         "Rispondi SEMPRE con JSON valido, senza testo extra:\n"
         "{\n"
         "  \"needs_plan\": true|false,\n"
@@ -697,13 +786,31 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         state.setdefault("plan_completed", not plan)
         state.setdefault("assistant_message_saved", False)
 
-        tool_manager = ToolManager(db=state["db"])
-        available_tools = await tool_manager.get_available_tools()
-        available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
-
         task_queue: Optional[TaskQueue] = state.get("task_queue")
         session_id = state.get("session_id")
         active_task: Optional[Task] = state.get("current_task")
+
+        # Check if this is an auto-task message (from dispatcher)
+        is_auto_task = request.message.startswith("[auto-task]")
+        
+        # If it's an auto-task, prioritize task processing over normal planning
+        if is_auto_task and task_queue and session_id:
+            # Try to get the next task from queue
+            if not active_task:
+                next_task = task_queue.start_next(session_id)
+                if next_task:
+                    active_task = next_task
+                    state["current_task"] = active_task
+                    log_agent_activity(
+                        state,
+                        agent_id="task_dispatcher",
+                        status="started",
+                        message=f"Auto-task: gestione {active_task.type}",
+                    )
+
+        tool_manager = ToolManager(db=state["db"])
+        available_tools = await tool_manager.get_available_tools()
+        available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
 
         if task_queue and session_id:
             if active_task:
@@ -746,13 +853,19 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             planner_client = state.get("planner_client") or state["ollama"]
             log_agent_activity(state, agent_id="planner", status="started")
             try:
+                logger.info(f"🔍 Planning for message: {request.message[:100]}")
                 analysis = await analyze_message_for_plan(
                     planner_client,
                     request,
                     available_tools,
                     state.get("session_context", []),
                 )
+                logger.info(f"📋 Planner analysis: needs_plan={analysis.get('needs_plan')}, reason={analysis.get('reason')}, steps_count={len(analysis.get('steps', []))}")
+                if analysis.get("steps"):
+                    for idx, step in enumerate(analysis.get("steps", [])):
+                        logger.info(f"  Step {idx}: action={step.get('action')}, tool={step.get('tool')}, inputs={step.get('inputs')}")
             except Exception as exc:
+                logger.error(f"❌ Planner error: {exc}", exc_info=True)
                 log_agent_activity(
                     state,
                     agent_id="planner",
@@ -773,7 +886,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             if analysis.get("needs_plan") and analysis.get("steps"):
                 plan = normalize_plan_steps(analysis.get("steps", []), available_tool_names)
                 if plan:
-                    logger.info("Generated plan with %s steps", len(plan))
+                    logger.info(f"✅ Generated plan with {len(plan)} steps")
                     state["plan"] = plan
                     state["plan_index"] = 0
                     state["plan_dirty"] = True
@@ -786,7 +899,9 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                         plan=plan,
                     )
                 else:
-                    logger.info("Plan analysis returned no valid steps")
+                    logger.warning("⚠️  Plan analysis returned no valid steps after normalization")
+            else:
+                logger.warning(f"⚠️  Planner returned needs_plan={analysis.get('needs_plan')}, steps={len(analysis.get('steps', []))} - falling back to legacy pipeline")
 
         # Esegui piano se presente
         if plan:

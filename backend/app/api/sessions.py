@@ -1,7 +1,7 @@
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from uuid import UUID
 from typing import Any, Dict, List, Optional
 from datetime import UTC, datetime, timedelta, timezone
@@ -35,6 +35,9 @@ from app.core.config import settings
 from app.agents import run_langgraph_chat
 from app.services.agent_activity_stream import AgentActivityStream
 from app.services.background_task_manager import BackgroundTaskManager
+from app.services.notification_service import NotificationService
+from app.services.task_queue import TaskQueue, TaskStatus
+from app.core.dependencies import get_task_queue
 
 router = APIRouter()
 
@@ -520,6 +523,110 @@ async def get_session_messages(
     
     logger.info(f"Returning {len(result_messages)} processed messages")
     return result_messages
+
+
+# Notifications endpoints - placed early to avoid route conflicts
+# IMPORTANT: Static routes must come before dynamic routes with path parameters
+@router.delete("/notifications/contradictions", status_code=200)
+async def clean_contradiction_notifications(
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all contradiction notifications from the database"""
+    logger = logging.getLogger(__name__)
+    logger.info("🧹 Cleaning contradiction notifications...")
+    
+    from app.models.database import Notification as NotificationModel
+    
+    # Count before deletion
+    result = await db.execute(
+        select(NotificationModel).where(NotificationModel.type == "contradiction")
+    )
+    count_before = len(result.scalars().all())
+    logger.info(f"📊 Found {count_before} contradiction notifications to delete")
+    
+    if count_before == 0:
+        logger.info("ℹ️  No contradiction notifications to delete")
+        return {
+            "message": "No contradiction notifications to delete",
+            "deleted_count": 0
+        }
+    
+    # Delete all contradiction notifications
+    try:
+        delete_stmt = delete(NotificationModel).where(NotificationModel.type == "contradiction")
+        result = await db.execute(delete_stmt)
+        rows_affected = result.rowcount if hasattr(result, 'rowcount') else count_before
+        await db.commit()
+        
+        logger.info(f"✅ Deleted {count_before} contradiction notifications (rows affected: {rows_affected})")
+        
+        return {
+            "message": f"Deleted {count_before} contradiction notifications",
+            "deleted_count": count_before
+        }
+    except Exception as e:
+        logger.error(f"❌ Error deleting contradiction notifications: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting contradiction notifications: {str(e)}"
+        )
+
+
+@router.get("/{session_id}/notifications/pending")
+async def get_pending_notifications(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get pending notifications that require user input (global, not session-specific)"""
+    logger = logging.getLogger(__name__)
+    logger.info(f"Fetching pending notifications (global)")
+    
+    service = NotificationService(db)
+    notifications = await service.get_pending_notifications(read=False)
+    
+    logger.info(f"Found {len(notifications)} total pending notifications")
+    
+    # Filter by type that requires user input (global, not session-specific)
+    global_notifications = []
+    for n in notifications:
+        notif_type = n.get("type")
+        # Return all contradiction notifications regardless of session
+        if notif_type in ["contradiction"]:
+            global_notifications.append(n)
+    
+    logger.info(f"Found {len(global_notifications)} global notifications requiring user input")
+    
+    # Format for frontend
+    result = []
+    for notif in global_notifications:
+        content = notif.get("content", {})
+        created_at = notif.get("created_at")
+        # Handle both datetime and string formats
+        if created_at:
+            if isinstance(created_at, str):
+                created_at_str = created_at
+            else:
+                created_at_str = created_at.isoformat()
+        else:
+            created_at_str = None
+            
+        result.append({
+            "id": str(notif.get("id")),
+            "type": notif.get("type"),
+            "priority": notif.get("urgency", "medium"),
+            "created_at": created_at_str,
+            "session_id": str(notif.get("session_id")) if notif.get("session_id") else None,
+            "content": {
+                "message": content.get("message", ""),
+                "title": content.get("title"),
+                "new_statement": content.get("new_statement") or content.get("new_knowledge", {}).get("content") or content.get("new_knowledge", {}).get("text"),
+                "contradictions": content.get("contradictions", []),
+            },
+        })
+    
+    logger.info(f"Returning {len(result)} formatted notifications")
+    return result
 
 
 @router.post("/{session_id}/chat", response_model=ChatResponse)
@@ -1394,31 +1501,42 @@ async def stream_agent_activity(
     Server-Sent Events endpoint streaming real-time agent activity telemetry
     for the requested session.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"🔌 SSE connection request for session {session_id}")
 
     # Ensure session exists before establishing stream
     result = await db.execute(
         select(SessionModel.id).where(SessionModel.id == session_id)
     )
     if result.scalar_one_or_none() is None:
+        logger.warning(f"❌ Session {session_id} not found for SSE stream")
         raise HTTPException(status_code=404, detail="Session not found")
 
     async def event_generator():
+        logger.info(f"✅ Starting SSE stream for session {session_id}")
         snapshot_payload = agent_activity_stream.snapshot_sse_payload(session_id)
         if snapshot_payload:
+            logger.debug(f"📸 Sending snapshot with {len(agent_activity_stream.snapshot(session_id))} events")
             yield snapshot_payload
 
         queue = await agent_activity_stream.register(session_id)
+        logger.info(f"📡 Registered subscriber for session {session_id}, active sessions: {len(agent_activity_stream.get_active_sessions())}")
         try:
             while True:
                 if await request.is_disconnected():
+                    logger.info(f"🔌 Client disconnected for session {session_id}")
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    logger.debug(f"📨 Sending event to session {session_id}: {event.get('agent_id', 'unknown')} ({event.get('status', 'unknown')})")
                 except asyncio.TimeoutError:
                     continue
                 yield agent_activity_stream.as_sse_payload(event)
         finally:
             await agent_activity_stream.unregister(session_id, queue)
+            logger.info(f"🔌 Unregistered subscriber for session {session_id}, active sessions: {len(agent_activity_stream.get_active_sessions())}")
 
     return StreamingResponse(
         event_generator(),
@@ -1437,19 +1555,32 @@ async def get_session_memory(
     memory: MemoryManager = Depends(get_memory_manager),
 ):
     """Get memory information for a session"""
+    logger = logging.getLogger(__name__)
     
     # Get short-term memory
-    short_term = await memory.get_short_term_memory(db, session_id)
+    try:
+        short_term = await memory.get_short_term_memory(db, session_id)
+    except Exception as e:
+        logger.warning(f"Error retrieving short-term memory: {e}")
+        short_term = None
     
     # Get sample medium-term memories (recent ones) - use a generic query
-    medium_samples = await memory.retrieve_medium_term_memory(
-        session_id, "sessione conversazione", n_results=5
-    )
+    try:
+        medium_samples = await memory.retrieve_medium_term_memory(
+            session_id, "sessione conversazione", n_results=5
+        )
+    except Exception as e:
+        logger.warning(f"Error retrieving medium-term memory: {e}")
+        medium_samples = []
     
     # Get sample long-term memories - use a generic query (for backward compatibility)
-    long_samples = await memory.retrieve_long_term_memory(
-        "conoscenza apprendimento", n_results=5
-    )
+    try:
+        long_samples = await memory.retrieve_long_term_memory(
+            "conoscenza apprendimento", n_results=5
+        )
+    except Exception as e:
+        logger.warning(f"Error retrieving long-term memory samples: {e}")
+        long_samples = []
     
     # Get ALL long-term memories from database with full metadata
     from app.models.database import MemoryLong as MemoryLongModel
@@ -1462,10 +1593,19 @@ async def get_session_memory(
     # Convert to schema format
     long_term_memories = []
     for mem in all_long_term:
+        # Convert datetime to ISO string if needed
+        created_at = mem.created_at
+        if hasattr(created_at, 'isoformat'):
+            created_at = created_at.isoformat()
+        elif isinstance(created_at, str):
+            created_at = created_at  # Already a string
+        else:
+            created_at = str(created_at)
+        
         long_term_memories.append({
             "content": mem.content,
             "importance_score": mem.importance_score,
-            "created_at": mem.created_at,
+            "created_at": created_at,
             "learned_from_sessions": mem.learned_from_sessions or [],
         })
     
@@ -1491,4 +1631,78 @@ async def get_session_memory(
         files_count=files_count,
         total_messages=total_messages,
     )
+
+
+@router.post("/{session_id}/notifications/{notification_id}/resolve")
+async def resolve_notification(
+    session_id: UUID,
+    notification_id: UUID,
+    resolution_data: Dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+):
+    """Resolve a notification (e.g., contradiction resolution)"""
+    resolution = resolution_data.get("resolution", "")
+    
+    # Get the task queue
+    task_queue = get_task_queue()
+    
+    # Find the task associated with this notification
+    # For now, we'll find tasks by type and session
+    tasks = task_queue.list_tasks(session_id)
+    contradiction_task = None
+    for task in tasks:
+        if task.type == "resolve_contradiction" and task.status in [TaskStatus.WAITING_USER, TaskStatus.IN_PROGRESS]:
+            # Check if this task matches the notification
+            task_payload = task.payload or {}
+            task_notification_id = task_payload.get("notification_id")
+            if str(task_notification_id) == str(notification_id):
+                contradiction_task = task
+                break
+    
+    if not contradiction_task:
+        # Try to find any waiting contradiction task for this session
+        for task in tasks:
+            if task.type == "resolve_contradiction" and task.status == TaskStatus.WAITING_USER:
+                contradiction_task = task
+                break
+    
+    if contradiction_task:
+        # Update task with resolution
+        if resolution == "ignore":
+            task_queue.complete_task(
+                session_id,
+                contradiction_task.id,
+                payload_updates={
+                    "user_response": resolution,
+                    "resolution_type": "ignored",
+                    "resolved_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        elif resolution == "no_contradiction":
+            task_queue.complete_task(
+                session_id,
+                contradiction_task.id,
+                payload_updates={
+                    "user_response": resolution,
+                    "resolution_type": "no_contradiction",
+                    "resolved_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        else:
+            # User provided a resolution
+            task_queue.complete_task(
+                session_id,
+                contradiction_task.id,
+                payload_updates={
+                    "user_response": resolution,
+                    "resolution_type": "resolved",
+                    "resolved_at": datetime.now(UTC).isoformat(),
+                },
+            )
+    
+    # Mark notification as read
+    service = NotificationService(db)
+    await service.mark_as_read([notification_id])
+    
+    return {"status": "resolved", "notification_id": str(notification_id)}
 

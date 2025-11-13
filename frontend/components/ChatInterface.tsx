@@ -33,13 +33,37 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
   const { addStatusMessage } = useStatus()
   const { ingestBatch } = useAgentActivity()
 
+  // Define loadMessages before using it in useEffect
+  const loadMessages = useCallback(async () => {
+    if (!sessionId) {
+      console.warn('No sessionId provided, cannot load messages')
+      setLoadingMessages(false)
+      return
+    }
+
+    setLoadingMessages(true)
+    try {
+      console.log('Fetching messages for session:', sessionId)
+      const response = await sessionsApi.getMessages(sessionId)
+      console.log('Messages loaded:', response.data?.length || 0, 'messages')
+      setMessages(response.data || [])
+      setInitialLoad(true) // Mark as initial load to scroll to bottom
+    } catch (error) {
+      console.error('Error loading messages:', error)
+      setMessages([]) // Set empty array on error
+    } finally {
+      setLoadingMessages(false)
+    }
+  }, [sessionId])
+
   // Load messages when sessionId changes or component mounts
   useEffect(() => {
     if (sessionId) {
       console.log('Loading messages for session:', sessionId)
       loadMessages()
     }
-  }, [sessionId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]) // Only depend on sessionId to avoid infinite loops
 
   // Scroll to bottom when messages are loaded or updated (but only if user is at bottom)
   useEffect(() => {
@@ -70,28 +94,6 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
       return () => container.removeEventListener('scroll', handleScroll)
     }
   }, [handleScroll])
-
-  const loadMessages = async () => {
-    if (!sessionId) {
-      console.warn('No sessionId provided, cannot load messages')
-      setLoadingMessages(false)
-      return
-    }
-
-    setLoadingMessages(true)
-    try {
-      console.log('Fetching messages for session:', sessionId)
-      const response = await sessionsApi.getMessages(sessionId)
-      console.log('Messages loaded:', response.data?.length || 0, 'messages')
-      setMessages(response.data || [])
-      setInitialLoad(true) // Mark as initial load to scroll to bottom
-    } catch (error) {
-      console.error('Error loading messages:', error)
-      setMessages([]) // Set empty array on error
-    } finally {
-      setLoadingMessages(false)
-    }
-  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -343,13 +345,16 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         throw new Error('Invalid response format: no data')
       }
       
-      if (!response.data.response) {
-        console.error('No response text in data:', response.data)
-        throw new Error('Invalid response format: no response text')
-      }
-      
+      // Handle agent activity even if response is empty (background tasks)
       if (response.data.agent_activity && Array.isArray(response.data.agent_activity)) {
         ingestBatch(response.data.agent_activity)
+      }
+      
+      // If response is empty, it might be a background task - don't show error
+      if (!response.data.response || response.data.response.trim() === '') {
+        console.log('Empty response received (likely background task), skipping message display')
+        setLoading(false)
+        return
       }
 
       // Handle high urgency notifications (contradictions, etc.)
@@ -509,7 +514,13 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowMemoryViewer(true)}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              console.log('Opening Memory Viewer')
+              setShowMemoryViewer(true)
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
             title="Visualizza contenuto memoria"
           >
@@ -517,7 +528,13 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
             Memoria
           </button>
           <button
-            onClick={() => setShowFileManager(true)}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              console.log('Opening File Manager')
+              setShowFileManager(true)
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm"
             title="Visualizza file in memoria"
           >

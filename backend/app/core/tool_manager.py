@@ -53,22 +53,22 @@ class ToolManager:
             },
             {
                 "name": "get_emails",
-                "description": "Recupera email da Gmail. Usa questo tool quando l'utente chiede informazioni sulle email, email non lette, messaggi, posta, o l'ultima email ricevuta.",
+                "description": "Recupera email da Gmail. DEVI usare questo tool quando l'utente chiede di leggere, vedere, controllare, o recuperare email. IMPORTANTE: Se l'utente chiede 'ultime N email' o 'leggi le email' senza specificare 'non lette', usa query vuota (o None) per recuperare TUTTE le email (incluse quelle già lette). Usa 'is:unread' solo se l'utente chiede specificamente email non lette.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Query Gmail (es: 'is:unread' per email non lette, 'from:example@gmail.com' per email da un mittente specifico). Se vuoto, recupera le ultime email."
+                            "description": "Query Gmail (es: 'is:unread' per SOLO email non lette, 'from:example@gmail.com' per email da un mittente). IMPORTANTE: Se l'utente chiede 'ultime N email' o 'leggi le email' senza menzionare 'non lette', lascia questo campo VUOTO o None per recuperare TUTTE le email (incluse quelle già lette)."
                         },
                         "max_results": {
                             "type": "integer",
-                            "description": "Numero massimo di email da recuperare (default: 1 per 'ultima email', 10 altrimenti, max: 50)",
+                            "description": "Numero massimo di email da recuperare. Se l'utente dice 'ultime 5 email', usa 5. Default: 10, max: 50",
                             "default": 10
                         },
                         "include_body": {
                             "type": "boolean",
-                            "description": "Includere il corpo completo delle email. DEVI impostarlo a true se l'utente chiede un riassunto o il contenuto (default: true)",
+                            "description": "Includere il corpo completo delle email. DEVI impostarlo a true se l'utente chiede di leggere, vedere il contenuto, o un riassunto delle email (default: true)",
                             "default": True
                         }
                     }
@@ -410,7 +410,13 @@ class ToolManager:
             # Get emails
             gmail_query = parameters.get("query", None)
             max_results = parameters.get("max_results", 10)
-            include_body = parameters.get("include_body", False)
+            include_body = parameters.get("include_body", True)  # Default to True for reading emails
+            
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"📧 get_emails called: query={gmail_query}, max_results={max_results}, include_body={include_body}"
+            )
             
             emails = await self.email_service.get_gmail_messages(
                 max_results=max_results,
@@ -418,6 +424,8 @@ class ToolManager:
                 integration_id=str(integration.id),
                 include_body=include_body,
             )
+            
+            logger.info(f"📧 Retrieved {len(emails) if emails else 0} emails")
             
             # Auto-index emails if enabled and session_id provided
             index_stats = None

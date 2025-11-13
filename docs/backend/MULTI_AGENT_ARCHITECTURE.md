@@ -435,6 +435,9 @@ che ciclicamente interroga gli agenti autonomi e chiede se hanno nuovi task da p
            │ enqueue
            ▼
     Priority Task Queue  → Planner/Main
+            │
+            ▼
+   TaskDispatcher (autoinvoca LangGraph)
 ```
 
 **Meccanica**
@@ -444,6 +447,9 @@ che ciclicamente interroga gli agenti autonomi e chiede se hanno nuovi task da p
   inserisce i risultati nella queue.  
 - In fase di bootstrap può trasformare backlog esistenti (es. notifiche di contraddizione già
   archiviate) in task `resolve_contradiction`, così il main li gestisce appena possibile.
+- Ogni volta che un task viene accodato, il `TaskDispatcher` avvia in background una
+  conversazione sintetica con LangGraph (`ChatRequest` auto-generata). Il Main agent diventa
+  subito proattivo e formula la domanda all’utente senza attendere un messaggio manuale.
 
 **Benefici**
 
@@ -453,6 +459,9 @@ che ciclicamente interroga gli agenti autonomi e chiede se hanno nuovi task da p
   polling o cambiare gli intervalli senza toccare il planner.
 - Allinea l’architettura alle raccomandazioni del whitepaper Google: orchestrazione
   proattiva con controlli periodici.
+- Il Main agent resta l’unica voce verso l’utente, mentre notifiche e telemetria
+  (via SSE) rimangono sincronizzate perché il dispatcher pubblica attività e riutilizza la
+  pipeline LangGraph standard.
 
 ### 6. Message Broker (Communication Hub)
 

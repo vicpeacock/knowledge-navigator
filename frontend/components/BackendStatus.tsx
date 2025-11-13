@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import axios from 'axios'
 
 // For testing: set TEST_BACKEND_OFFLINE=true to simulate offline backend
@@ -22,13 +22,22 @@ export function BackendStatus({ children }: BackendStatusProps) {
   const [unhealthyMandatory, setUnhealthyMandatory] = useState<
     Array<{ service: string; error?: string; message?: string }>
   >([])
+  const statusRef = useRef<Status>('checking')
 
   const checkBackend = async () => {
     try {
       setBackendStatus('checking')
+      statusRef.current = 'checking'
+      console.log(`[BackendStatus] Checking backend at ${API_URL}/health`)
       const response = await axios.get(`${API_URL}/health`, {
-        timeout: 5000, // 5 second timeout
+        timeout: 2000, // 2 second timeout for faster feedback
+        headers: {
+          'Accept': 'application/json',
+        },
+        validateStatus: (status) => status < 500, // Accept 4xx as valid responses
       })
+      
+      console.log(`[BackendStatus] Backend responded with status ${response.status}`)
       
       // Check if backend is responding (even if some services are unhealthy)
       if (response.status === 200 && response.data) {
@@ -47,33 +56,68 @@ export function BackendStatus({ children }: BackendStatusProps) {
         setUnhealthyMandatory(mandatoryIssues)
 
         if (mandatoryIssues.length > 0) {
-          setBackendStatus('degraded')
+          const newStatus: Status = 'degraded'
+          console.log(`[BackendStatus] Backend is degraded, ${mandatoryIssues.length} mandatory services unhealthy`)
+          setBackendStatus(newStatus)
+          statusRef.current = newStatus
         } else {
-          setBackendStatus('online')
+          const newStatus: Status = 'online'
+          console.log('[BackendStatus] Backend is online')
+          setBackendStatus(newStatus)
+          statusRef.current = newStatus
           setRetryCount(0)
         }
       } else {
-        setBackendStatus('offline')
+        const newStatus: Status = 'offline'
+        console.warn('[BackendStatus] Backend responded but with invalid data')
+        setBackendStatus(newStatus)
+        statusRef.current = newStatus
       }
-    } catch (error) {
-      console.error('Backend health check failed:', error)
-      setBackendStatus('offline')
+    } catch (error: any) {
+      console.error('[BackendStatus] Backend health check failed:', error)
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        console.warn('[BackendStatus] Backend health check timeout')
+      } else if (error.response) {
+        console.error('[BackendStatus] Backend responded with error:', error.response.status, error.response.data)
+      } else if (error.request) {
+        console.error('[BackendStatus] No response from backend:', error.request)
+      }
+      const newStatus: Status = 'offline'
+      setBackendStatus(newStatus)
+      statusRef.current = newStatus
     }
   }
 
   useEffect(() => {
-    checkBackend()
+    let mounted = true
     
-    // Retry every 5 seconds if offline
+    console.log('[BackendStatus] Component mounted, starting health check')
+    
+    const performCheck = async () => {
+      if (mounted) {
+        await checkBackend()
+      }
+    }
+    
+    // Initial check
+    performCheck()
+    
+    // Retry every 5 seconds if offline or degraded
     const interval = setInterval(() => {
-      if (backendStatus === 'offline' || backendStatus === 'degraded') {
-        checkBackend()
+      if (mounted && (statusRef.current === 'offline' || statusRef.current === 'degraded')) {
+        console.log('[BackendStatus] Retrying health check (status:', statusRef.current, ')')
+        performCheck()
         setRetryCount(prev => prev + 1)
       }
     }, 5000)
 
-    return () => clearInterval(interval)
-  }, [backendStatus])
+    return () => {
+      console.log('[BackendStatus] Component unmounting')
+      mounted = false
+      clearInterval(interval)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Empty dependency array - only run on mount
 
   if (backendStatus === 'offline') {
     return (
@@ -108,7 +152,7 @@ export function BackendStatus({ children }: BackendStatusProps) {
               onClick={checkBackend}
               className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
-              {backendStatus === 'checking' ? 'Verifica in corso...' : 'Riprova'}
+              Riprova
             </button>
             {retryCount > 0 && (
               <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -178,7 +222,7 @@ export function BackendStatus({ children }: BackendStatusProps) {
               onClick={checkBackend}
               className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
-              {backendStatus === 'checking' ? 'Verifica in corso...' : 'Riprova'}
+              Riprova
             </button>
             <p className="text-xs text-gray-500 dark:text-gray-400">
               Suggerimenti:
@@ -192,13 +236,18 @@ export function BackendStatus({ children }: BackendStatusProps) {
   }
 
   if (backendStatus === 'checking') {
+    // Render children even while checking - show overlay instead of blocking
+    // Use lower z-index so popups can appear above it
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Verifica connessione al backend...</p>
+      <>
+        {children}
+        <div className="fixed inset-0 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm flex items-center justify-center z-40 pointer-events-none">
+          <div className="text-center bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg pointer-events-auto">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+            <p className="text-gray-600 dark:text-gray-400">Verifica connessione al backend...</p>
+          </div>
         </div>
-      </div>
+      </>
     )
   }
 

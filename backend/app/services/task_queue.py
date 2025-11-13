@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Callable
 from uuid import UUID, uuid4
 
 
@@ -64,6 +64,9 @@ class TaskQueue:
     def __init__(self) -> None:
         self._tasks: Dict[UUID, Dict[str, Task]] = {}
 
+    def iter_tasks(self, session_id: UUID) -> Iterable[Task]:
+        return self._tasks.get(session_id, {}).values()
+
     def enqueue(self, session_id: UUID, task: Task) -> Task:
         session_tasks = self._tasks.setdefault(session_id, {})
         session_tasks[task.id] = task
@@ -92,6 +95,36 @@ class TaskQueue:
             )
         )
         return candidates[0]
+
+    def find_task_by_type(
+        self,
+        session_id: UUID,
+        task_type: str,
+        statuses: Optional[Iterable[TaskStatus]] = None,
+    ) -> Optional[Task]:
+        session_tasks = self._tasks.get(session_id)
+        if not session_tasks:
+            return None
+
+        statuses_set = set(statuses) if statuses else None
+
+        for task in session_tasks.values():
+            if task.type != task_type:
+                continue
+            if statuses_set and task.status not in statuses_set:
+                continue
+            return task
+        return None
+
+    def task_exists(
+        self,
+        session_id: UUID,
+        task_type: str,
+        statuses: Optional[Iterable[TaskStatus]] = None,
+    ) -> bool:
+        return (
+            self.find_task_by_type(session_id, task_type, statuses=statuses) is not None
+        )
 
     def start_next(self, session_id: UUID) -> Optional[Task]:
         session_tasks = self._tasks.get(session_id)
