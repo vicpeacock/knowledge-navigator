@@ -122,11 +122,19 @@
 - [x] Indicizzazione automatica contenuti web
 - [x] Sintesi e consolidamento memoria (MemoryConsolidator)
 - [x] Riassunto automatico conversazioni lunghe in memoria medium-term (ConversationSummarizer)
-- [ ] **Controllo integrità semantica**: Sistema per identificare contraddizioni nella memoria long-term
-  - [ ] Rilevamento contraddizioni su date/eventi (es: "nato il 12 luglio" vs "compleanno 15 agosto")
-  - [ ] Rilevamento contraddizioni su preferenze/fatti personali
-  - [ ] Notifica all'utente quando viene rilevata una contraddizione
-  - [ ] Suggerimento di correzione o chiarimento
+- [x] **Controllo integrità semantica**: Sistema per identificare contraddizioni nella memoria long-term (Implementato - da migliorare)
+  - [x] Rilevamento contraddizioni su date/eventi (es: "nato il 12 luglio" vs "compleanno 15 agosto")
+  - [x] Rilevamento contraddizioni su preferenze/fatti personali
+  - [x] Notifica all'utente quando viene rilevata una contraddizione (notification bell)
+  - [x] Suggerimento di correzione o chiarimento
+  - [ ] **TODO - Miglioramenti Rilevamento Contraddizioni**:
+    - [ ] Migliorare estrazione conoscenza: distinguere meglio tra affermazioni casuali e preferenze esplicite
+    - [ ] Rendere prompt analisi contraddizioni più conservativo (enfatizzare che preferenze diverse in contesti diversi NON sono contraddizioni)
+    - [ ] Aumentare soglia confidenza da 0.85 a 0.90-0.95
+    - [ ] Aggiungere filtri pre-analisi: non confrontare tipi diversi di conoscenza (fatti temporanei vs preferenze permanenti)
+    - [ ] Implementare pulizia periodica memoria: rimuovere duplicati, memorie obsolete, consolidare memorie simili
+    - [ ] Aggiungere contesto temporale: distinguere tra fatti temporanei ("oggi ho fatto X") e preferenze permanenti
+    - [ ] Ridurre enfasi su contraddizioni tassonomiche nel prompt LLM (essere più conservativo)
 
 **Ricerca e Discovery:**
 - [ ] Ricerca cross-sessione
