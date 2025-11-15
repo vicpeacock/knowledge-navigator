@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Float, JSON, Boolean, UniqueConstraint
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Float, JSON, Boolean, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -59,12 +59,10 @@ class ApiKey(Base):
     # Relationships
     tenant = relationship("Tenant", backref="api_keys")
 
-    # Index for fast lookups
+    # Indexes for fast lookups
     __table_args__ = (
-        {'postgresql_indexes': [
-            {'name': 'ix_api_keys_key_hash', 'columns': ['key_hash']},
-            {'name': 'ix_api_keys_tenant_id', 'columns': ['tenant_id']},
-        ]},
+        Index('ix_api_keys_key_hash', 'key_hash'),
+        Index('ix_api_keys_tenant_id', 'tenant_id'),
     )
 
 

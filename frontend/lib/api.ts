@@ -11,6 +11,39 @@ const api = axios.create({
   timeout: 120000, // 2 minutes - increased for longer responses (file summaries can take time)
 })
 
+// Multi-tenant support: Add tenant headers if configured
+api.interceptors.request.use((config) => {
+  // Add X-API-Key header if available (from localStorage or env)
+  const apiKey = typeof window !== 'undefined' 
+    ? localStorage.getItem('api_key') || process.env.NEXT_PUBLIC_API_KEY
+    : process.env.NEXT_PUBLIC_API_KEY
+  
+  if (apiKey) {
+    config.headers['X-API-Key'] = apiKey
+  }
+  
+  // Add X-Tenant-ID header if available (for development/testing)
+  const tenantId = typeof window !== 'undefined'
+    ? localStorage.getItem('tenant_id') || process.env.NEXT_PUBLIC_TENANT_ID
+    : process.env.NEXT_PUBLIC_TENANT_ID
+  
+  if (tenantId) {
+    config.headers['X-Tenant-ID'] = tenantId
+  }
+  
+  return config
+})
+
+// API Keys API
+export const apikeysApi = {
+  create: (data: { name?: string; expires_in_days?: number }) =>
+    api.post('/api/v1/apikeys', data),
+  list: (activeOnly: boolean = false) =>
+    api.get('/api/v1/apikeys', { params: { active_only: activeOnly } }),
+  revoke: (keyId: string) =>
+    api.delete(`/api/v1/apikeys/${keyId}`),
+}
+
 // Sessions API
 export const sessionsApi = {
   list: (status?: string) => api.get('/api/sessions/', { params: status ? { status } : {} }),
