@@ -30,7 +30,7 @@ export function BackendStatus({ children }: BackendStatusProps) {
       statusRef.current = 'checking'
       console.log(`[BackendStatus] Checking backend at ${API_URL}/health`)
       const response = await axios.get(`${API_URL}/health`, {
-        timeout: 2000, // 2 second timeout for faster feedback
+        timeout: 5000, // 5 second timeout for more reliable connection
         headers: {
           'Accept': 'application/json',
         },
@@ -38,38 +38,55 @@ export function BackendStatus({ children }: BackendStatusProps) {
       })
       
       console.log(`[BackendStatus] Backend responded with status ${response.status}`)
+      console.log(`[BackendStatus] Response data:`, response.data)
       
       // Check if backend is responding (even if some services are unhealthy)
       if (response.status === 200 && response.data) {
         const data = response.data
 
+        // Check all_mandatory_healthy first (most reliable indicator)
+        const allMandatoryHealthy = data?.all_mandatory_healthy ?? true
+        
+        // Fallback: check unhealthy_mandatory_services array
+        const unhealthyMandatoryServices = data?.unhealthy_mandatory_services ?? []
+        
+        // Fallback: check services object
         const mandatoryIssues =
-          data?.unhealthy_mandatory_services ??
-          Object.entries(data?.services ?? {})
-            .filter(([, status]: [string, any]) => status?.mandatory && !status?.healthy)
-            .map(([service, status]: [string, any]) => ({
-              service,
-              error: status?.error,
-              message: status?.message,
-            }))
+          unhealthyMandatoryServices.length > 0
+            ? unhealthyMandatoryServices
+            : Object.entries(data?.services ?? {})
+                .filter(([, status]: [string, any]) => status?.mandatory && !status?.healthy)
+                .map(([service, status]: [string, any]) => ({
+                  service,
+                  error: status?.error,
+                  message: status?.message,
+                }))
 
         setUnhealthyMandatory(mandatoryIssues)
 
-        if (mandatoryIssues.length > 0) {
+        // If all mandatory services are healthy, backend is online
+        if (allMandatoryHealthy && mandatoryIssues.length === 0) {
+          const newStatus: Status = 'online'
+          console.log('[BackendStatus] Backend is online (all mandatory services healthy)')
+          setBackendStatus(newStatus)
+          statusRef.current = newStatus
+          setRetryCount(0)
+        } else if (mandatoryIssues.length > 0) {
           const newStatus: Status = 'degraded'
           console.log(`[BackendStatus] Backend is degraded, ${mandatoryIssues.length} mandatory services unhealthy`)
           setBackendStatus(newStatus)
           statusRef.current = newStatus
         } else {
+          // All mandatory healthy but some optional services might be down
           const newStatus: Status = 'online'
-          console.log('[BackendStatus] Backend is online')
+          console.log('[BackendStatus] Backend is online (mandatory services healthy, some optional services may be down)')
           setBackendStatus(newStatus)
           statusRef.current = newStatus
           setRetryCount(0)
         }
       } else {
         const newStatus: Status = 'offline'
-        console.warn('[BackendStatus] Backend responded but with invalid data')
+        console.warn('[BackendStatus] Backend responded but with invalid data', { status: response.status, data: response.data })
         setBackendStatus(newStatus)
         statusRef.current = newStatus
       }

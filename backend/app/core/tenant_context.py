@@ -157,6 +157,7 @@ class TenantContext:
 async def get_tenant_context(
     tenant_id: UUID = Depends(get_tenant_id),
     db: AsyncSession = Depends(get_db),
+    use_schema_isolation: bool = False,  # Feature flag for schema-per-tenant
 ) -> TenantContext:
     """
     Get full tenant context including schema name.
