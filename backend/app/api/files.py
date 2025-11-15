@@ -14,6 +14,7 @@ from app.services.file_processor import FileProcessor
 from app.services.embedding_service import EmbeddingService
 from app.core.dependencies import get_memory_manager
 from app.core.memory_manager import MemoryManager
+from app.core.tenant_context import get_tenant_id
 
 router = APIRouter()
 file_processor = FileProcessor()
@@ -26,11 +27,15 @@ async def upload_file(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Upload and process a file for a session"""
-    # Verify session exists
+    """Upload and process a file for a session (for current tenant)"""
+    # Verify session exists and belongs to tenant
     result = await db.execute(
-        select(SessionModel).where(SessionModel.id == session_id)
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
     )
     session = result.scalar_one_or_none()
     
@@ -59,6 +64,7 @@ async def upload_file(
     # Create file record
     file_record = FileModel(
         session_id=session_id,
+        tenant_id=tenant_id,
         filename=file.filename,
         filepath=str(filepath),
         mime_type=file.content_type,
@@ -79,7 +85,9 @@ async def upload_file(
             if len(text_content) > 20000:  # ChromaDB document limit
                 text_content = text_content[:20000] + "... [truncated]"
             
-            memory.file_embeddings_collection.add(
+            # Get tenant-specific collection
+            file_collection = memory._get_collection("file_embeddings", tenant_id)
+            file_collection.add(
                 ids=[embedding_id],
                 embeddings=[embedding],
                 documents=[text_content],
@@ -111,11 +119,25 @@ async def upload_file(
 async def get_session_files(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Get all files for a session"""
+    """Get all files for a session (for current tenant)"""
+    # Verify session belongs to tenant
+    session_result = await db.execute(
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
+    )
+    if not session_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Session not found")
+    
     result = await db.execute(
         select(FileModel)
-        .where(FileModel.session_id == session_id)
+        .where(
+            FileModel.session_id == session_id,
+            FileModel.tenant_id == tenant_id
+        )
         .order_by(FileModel.uploaded_at.desc())
     )
     files = result.scalars().all()
@@ -138,10 +160,14 @@ async def get_session_files(
 async def get_file(
     file_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Get a file by ID"""
+    """Get a file by ID (for current tenant)"""
     result = await db.execute(
-        select(FileModel).where(FileModel.id == file_id)
+        select(FileModel).where(
+            FileModel.id == file_id,
+            FileModel.tenant_id == tenant_id
+        )
     )
     file = result.scalar_one_or_none()
     
@@ -165,10 +191,14 @@ async def delete_file(
     file_id: UUID,
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Delete a file"""
+    """Delete a file (for current tenant)"""
     result = await db.execute(
-        select(FileModel).where(FileModel.id == file_id)
+        select(FileModel).where(
+            FileModel.id == file_id,
+            FileModel.tenant_id == tenant_id
+        )
     )
     file = result.scalar_one_or_none()
     
@@ -179,6 +209,9 @@ async def delete_file(
     import logging
     logger = logging.getLogger(__name__)
     
+    # Get tenant-specific collection
+    file_collection = memory._get_collection("file_embeddings", tenant_id)
+    
     embedding_id = f"file_{file_id}"
     deleted_from_chroma = False
     
@@ -186,7 +219,7 @@ async def delete_file(
     embedding_ids_to_delete = []
     try:
         # Try to find embeddings by file_id in metadata
-        existing_embeddings = memory.file_embeddings_collection.get(
+        existing_embeddings = file_collection.get(
             where={"file_id": str(file_id)}
         )
         embedding_ids_to_delete = existing_embeddings.get('ids', [])
@@ -197,7 +230,7 @@ async def delete_file(
         logger.warning(f"Could not check existing embeddings by file_id: {e}")
         # Try alternative method
         try:
-            existing_embeddings = memory.file_embeddings_collection.get(
+            existing_embeddings = file_collection.get(
                 where={"session_id": str(file.session_id)}
             )
             # Filter by file_id in metadata manually
@@ -221,7 +254,7 @@ async def delete_file(
         # Strategy 1: Delete all found IDs
         if embedding_ids_to_delete:
             try:
-                result = memory.file_embeddings_collection.delete(ids=embedding_ids_to_delete)
+                result = file_collection.delete(ids=embedding_ids_to_delete)
                 logger.info(f"Deleted {len(embedding_ids_to_delete)} file embeddings by IDs: {embedding_ids_to_delete}")
                 deleted_from_chroma = True
             except Exception as e:
@@ -230,7 +263,7 @@ async def delete_file(
         # Strategy 2: Delete by ID (standard format) - fallback if batch delete failed
         if not deleted_from_chroma:
             try:
-                result = memory.file_embeddings_collection.delete(ids=[embedding_id])
+                result = file_collection.delete(ids=[embedding_id])
                 logger.info(f"Deleted file embedding by ID: {embedding_id}, result: {result}")
                 deleted_from_chroma = True
             except Exception as e:
@@ -240,7 +273,7 @@ async def delete_file(
         if not deleted_from_chroma:
             try:
                 # ChromaDB where clause needs $eq operator for equality
-                memory.file_embeddings_collection.delete(
+                file_collection.delete(
                     where={"file_id": {"$eq": str(file_id)}}
                 )
                 logger.info(f"Deleted file embeddings by file_id metadata ($eq): {file_id}")
@@ -248,7 +281,7 @@ async def delete_file(
             except Exception as e1:
                 # Try with simple equality (older ChromaDB versions)
                 try:
-                    memory.file_embeddings_collection.delete(
+                    file_collection.delete(
                         where={"file_id": str(file_id)}
                     )
                     logger.info(f"Deleted file embeddings by file_id metadata (simple): {file_id}")
@@ -260,7 +293,7 @@ async def delete_file(
         if not deleted_from_chroma:
             try:
                 # ChromaDB where clause with multiple conditions
-                memory.file_embeddings_collection.delete(
+                file_collection.delete(
                     where={"$and": [{"session_id": {"$eq": str(file.session_id)}}, {"file_id": {"$eq": str(file_id)}}]}
                 )
                 logger.info(f"Deleted file embeddings by session_id and file_id ($and): {file.session_id}, {file_id}")
@@ -268,7 +301,7 @@ async def delete_file(
             except Exception as e1:
                 # Try with simple equality
                 try:
-                    memory.file_embeddings_collection.delete(
+                    file_collection.delete(
                         where={"session_id": str(file.session_id), "file_id": str(file_id)}
                     )
                     logger.info(f"Deleted file embeddings by session_id and file_id (simple): {file.session_id}, {file_id}")
@@ -296,14 +329,18 @@ async def delete_file(
 async def cleanup_orphan_embeddings(
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Clean up orphaned embeddings (embeddings that point to files that no longer exist)"""
     import logging
     logger = logging.getLogger(__name__)
     
     try:
-        # Get all embeddings from ChromaDB
-        all_embeddings = memory.file_embeddings_collection.get()
+        # Get tenant-specific collection
+        file_collection = memory._get_collection("file_embeddings", tenant_id)
+        
+        # Get all embeddings from ChromaDB (for this tenant)
+        all_embeddings = file_collection.get()
         embedding_ids = all_embeddings.get('ids', [])
         metadatas = all_embeddings.get('metadatas', [])
         
@@ -315,8 +352,10 @@ async def cleanup_orphan_embeddings(
                 "deleted": 0
             }
         
-        # Get all file IDs from database
-        result = await db.execute(select(FileModel.id))
+        # Get all file IDs from database (filtered by tenant)
+        result = await db.execute(
+            select(FileModel.id).where(FileModel.tenant_id == tenant_id)
+        )
         existing_file_ids = {str(fid) for fid in result.scalars().all()}
         
         # Find orphaned embeddings
@@ -345,7 +384,7 @@ async def cleanup_orphan_embeddings(
             batch_size = 100
             for i in range(0, len(orphaned_ids), batch_size):
                 batch = orphaned_ids[i:i + batch_size]
-                memory.file_embeddings_collection.delete(ids=batch)
+                file_collection.delete(ids=batch)
                 deleted_count += len(batch)
                 logger.info(f"Deleted batch {i//batch_size + 1}: {len(batch)} orphaned embeddings")
         
@@ -368,11 +407,25 @@ async def search_files(
     n_results: int = 5,
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Search files in a session using semantic search"""
+    """Search files in a session using semantic search (for current tenant)"""
+    # Verify session belongs to tenant
+    session_result = await db.execute(
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
+    )
+    if not session_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Get tenant-specific collection
+    file_collection = memory._get_collection("file_embeddings", tenant_id)
+    
     query_embedding = embedding_service.generate_embedding(query)
     
-    results = memory.file_embeddings_collection.query(
+    results = file_collection.query(
         query_embeddings=[query_embedding],
         n_results=n_results,
         where={"session_id": str(session_id)},
@@ -383,11 +436,14 @@ async def search_files(
         for metadata in results.get("metadatas", [[]])[0]
     ]
     
-    # Get file records
+    # Get file records (filtered by tenant)
     files = []
     if file_ids:
         result = await db.execute(
-            select(FileModel).where(FileModel.id.in_(file_ids))
+            select(FileModel).where(
+                FileModel.id.in_(file_ids),
+                FileModel.tenant_id == tenant_id
+            )
         )
         files = result.scalars().all()
     

@@ -50,6 +50,17 @@ async def lifespan(app: FastAPI):
     # Initialize clients
     init_clients()
     
+    # Initialize default tenant (for multi-tenancy)
+    from app.db.database import get_db
+    from app.core.tenant_context import initialize_default_tenant
+    try:
+        async for db in get_db():
+            await initialize_default_tenant(db)
+            break
+    except Exception as e:
+        logging.warning(f"⚠️  Failed to initialize default tenant: {e}")
+        logging.warning("⚠️  Multi-tenant features may not work correctly.")
+    
     # Health check all services
     from app.core.health_check import get_health_check_service
     health_service = get_health_check_service()

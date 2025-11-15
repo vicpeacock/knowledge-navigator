@@ -848,6 +848,14 @@ Riassunto:"""
                     try:
                         from app.services.web_indexer import WebIndexer
                         from app.core.dependencies import get_memory_manager, init_clients
+                        from app.models.database import Session as SessionModel
+                        from sqlalchemy import select
+                        
+                        # Get tenant_id from session
+                        session_result = await db.execute(
+                            select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                        )
+                        tenant_id = session_result.scalar_one_or_none()
                         
                         # Initialize memory manager if not already done
                         init_clients()
@@ -858,6 +866,7 @@ Riassunto:"""
                             search_query=query,
                             results=serializable_results,
                             session_id=session_id,
+                            tenant_id=tenant_id,
                         )
                         result_dict["indexing_stats"] = index_stats
                         logger.info(f"Auto-indexed {index_stats.get('indexed', 0)} web search results")
@@ -963,6 +972,14 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                         from app.services.web_indexer import WebIndexer
                         from app.core.dependencies import get_memory_manager, init_clients
                         
+                        # Get tenant_id from session
+                        from app.models.database import Session as SessionModel
+                        from sqlalchemy import select
+                        session_result = await db.execute(
+                            select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                        )
+                        tenant_id = session_result.scalar_one_or_none()
+                        
                         # Initialize memory manager if not already done
                         init_clients()
                         memory_manager = get_memory_manager()
@@ -972,6 +989,7 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                             url=url,
                             result=result_dict["result"],
                             session_id=session_id,
+                            tenant_id=tenant_id,
                         )
                         if indexed:
                             result_dict["indexing_stats"] = {"indexed": True}

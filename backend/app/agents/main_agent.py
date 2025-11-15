@@ -27,6 +27,7 @@ async def run_main_agent_pipeline(
     session_context: List[Dict[str, str]],
     retrieved_memory: List[str],
     memory_used: Dict[str, Any],
+    tenant_id: Optional[UUID] = None,
 ) -> ChatResponse:
     """
     Esegue l'attuale pipeline principale (tool calling + generazione risposta) e
@@ -256,8 +257,17 @@ Alla luce dei risultati dei tool sopra, genera ora la risposta finale per l'uten
         break
 
     # Messaggio assistente e salvataggio
+    # Get tenant_id from session if not provided
+    if not tenant_id:
+        from sqlalchemy import select
+        result = await db.execute(
+            select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+        )
+        tenant_id = result.scalar_one_or_none()
+    
     assistant_message = MessageModel(
         session_id=session_id,
+        tenant_id=tenant_id,
         role="assistant",
         content=response_text,
         session_metadata={"memory_used": memory_used, "tools_used": tools_used},
@@ -270,6 +280,7 @@ Alla luce dei risultati dei tool sopra, genera ora la risposta finale per l'uten
     pending_notifications = await notification_service.get_pending_notifications(
         session_id=session_id,
         read=False,
+        tenant_id=tenant_id,
     )
     notification_count = len(pending_notifications)
 

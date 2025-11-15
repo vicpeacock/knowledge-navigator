@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from app.db.database import get_db
 from app.models.database import Session as SessionModel, Message as MessageModel
+from app.core.tenant_context import get_tenant_id
 from app.models.schemas import (
     Session,
     SessionCreate,
@@ -130,9 +131,10 @@ def _publish_agent_events(
 async def list_sessions(
     status: Optional[str] = None,  # Filter by status: active, archived, deleted
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """List all sessions, optionally filtered by status"""
-    query = select(SessionModel)
+    """List all sessions for current tenant, optionally filtered by status"""
+    query = select(SessionModel).where(SessionModel.tenant_id == tenant_id)
     if status:
         query = query.where(SessionModel.status == status)
     query = query.order_by(SessionModel.updated_at.desc())
@@ -159,13 +161,16 @@ async def list_sessions(
 async def create_session(
     session_data: SessionCreate,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Create a new session"""
+    """Create a new session for current tenant"""
     session_dict = session_data.model_dump()
     # Map metadata to session_metadata for database model
     if 'metadata' in session_dict:
         metadata_value = session_dict.pop('metadata')
         session_dict['session_metadata'] = metadata_value
+    # Assign tenant_id
+    session_dict['tenant_id'] = tenant_id
     session = SessionModel(**session_dict)
     db.add(session)
     await db.commit()
@@ -188,10 +193,14 @@ async def create_session(
 async def get_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Get a session by ID"""
+    """Get a session by ID (for current tenant)"""
     result = await db.execute(
-        select(SessionModel).where(SessionModel.id == session_id)
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
     )
     session = result.scalar_one_or_none()
     
@@ -217,10 +226,14 @@ async def update_session(
     session_id: UUID,
     session_data: SessionUpdate,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Update a session"""
+    """Update a session (for current tenant)"""
     result = await db.execute(
-        select(SessionModel).where(SessionModel.id == session_id)
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
     )
     session = result.scalar_one_or_none()
     
@@ -257,12 +270,16 @@ async def archive_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Archive a session and index it semantically in long-term memory"""
+    """Archive a session and index it semantically in long-term memory (for current tenant)"""
     from datetime import datetime, timezone
     
     result = await db.execute(
-        select(SessionModel).where(SessionModel.id == session_id)
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
     )
     session = result.scalar_one_or_none()
     
@@ -302,6 +319,7 @@ async def archive_session(
             content=session_content,
             learned_from_sessions=[session_id],
             importance_score=0.8,  # High importance for archived sessions
+            tenant_id=session.tenant_id,
         )
         
         logger = logging.getLogger(__name__)
@@ -329,10 +347,14 @@ async def archive_session(
 async def restore_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Restore an archived session back to active"""
+    """Restore an archived session back to active (for current tenant)"""
     result = await db.execute(
-        select(SessionModel).where(SessionModel.id == session_id)
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
     )
     session = result.scalar_one_or_none()
     
@@ -364,10 +386,14 @@ async def restore_session(
 async def delete_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Delete a session (soft delete by setting status to deleted)"""
+    """Delete a session (soft delete by setting status to deleted) - for current tenant"""
     result = await db.execute(
-        select(SessionModel).where(SessionModel.id == session_id)
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
     )
     session = result.scalar_one_or_none()
     
@@ -384,15 +410,30 @@ async def delete_session(
 async def get_session_messages(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Get all messages for a session"""
+    """Get all messages for a session (for current tenant)"""
     import logging
     logger = logging.getLogger(__name__)
+    
+    # First verify session belongs to tenant
+    session_result = await db.execute(
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
+    )
+    session = session_result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
     
     try:
         result = await db.execute(
             select(MessageModel)
-            .where(MessageModel.session_id == session_id)
+            .where(
+                MessageModel.session_id == session_id,
+                MessageModel.tenant_id == tenant_id
+            )
             .order_by(MessageModel.timestamp)
         )
         messages = result.scalars().all()
@@ -551,9 +592,12 @@ async def clean_contradiction_notifications(
             "deleted_count": 0
         }
     
-    # Delete all contradiction notifications
+    # Delete all contradiction notifications (filtered by tenant)
     try:
-        delete_stmt = delete(NotificationModel).where(NotificationModel.type == "contradiction")
+        delete_stmt = delete(NotificationModel).where(
+            NotificationModel.type == "contradiction",
+            NotificationModel.tenant_id == tenant_id
+        )
         result = await db.execute(delete_stmt)
         rows_affected = result.rowcount if hasattr(result, 'rowcount') else count_before
         await db.commit()
@@ -577,13 +621,24 @@ async def clean_contradiction_notifications(
 async def get_pending_notifications(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Get pending notifications that require user input (global, not session-specific)"""
+    """Get pending notifications that require user input (for current tenant)"""
     logger = logging.getLogger(__name__)
-    logger.info(f"Fetching pending notifications (global)")
+    logger.info(f"Fetching pending notifications for tenant {tenant_id}")
+    
+    # Verify session belongs to tenant
+    session_result = await db.execute(
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
+    )
+    if not session_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Session not found")
     
     service = NotificationService(db)
-    notifications = await service.get_pending_notifications(read=False)
+    notifications = await service.get_pending_notifications(read=False, tenant_id=tenant_id)
     
     logger.info(f"Found {len(notifications)} total pending notifications")
     
@@ -639,11 +694,15 @@ async def chat(
     memory: MemoryManager = Depends(get_memory_manager),
     agent_activity_stream: AgentActivityStream = Depends(get_agent_activity_stream),
     background_tasks: BackgroundTaskManager = Depends(get_background_task_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Send a message and get AI response"""
-    # Verify session exists
+    """Send a message and get AI response (for current tenant)"""
+    # Verify session exists and belongs to tenant
     result = await db.execute(
-        select(SessionModel).where(SessionModel.id == session_id)
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
     )
     session = result.scalar_one_or_none()
     
@@ -658,10 +717,13 @@ async def chat(
         agent_activity_stream=agent_activity_stream,
     )
     
-    # Get session context (previous messages)
+    # Get session context (previous messages) - filtered by tenant
     messages_result = await db.execute(
         select(MessageModel)
-        .where(MessageModel.session_id == session_id)
+        .where(
+            MessageModel.session_id == session_id,
+            MessageModel.tenant_id == tenant_id
+        )
         .order_by(MessageModel.timestamp)
     )
     previous_messages = messages_result.scalars().all()
@@ -693,7 +755,7 @@ async def chat(
     # Always retrieve file content for the session (files are session-specific context)
     # Pass db to filter out embeddings for deleted files
     file_content = await memory.retrieve_file_content(
-        session_id, request.message, n_results=5, db=db
+        session_id, request.message, n_results=5, db=db, tenant_id=tenant_id
     )
     memory_used["files"] = file_content
     
@@ -736,14 +798,14 @@ async def chat(
         
         # Medium-term memory
         medium_mem = await memory.retrieve_medium_term_memory(
-            session_id, request.message, n_results=3
+            session_id, request.message, n_results=3, tenant_id=tenant_id
         )
         memory_used["medium_term"] = medium_mem
         retrieved_memory.extend(medium_mem)
         
         # Long-term memory
         long_mem = await memory.retrieve_long_term_memory(
-            request.message, n_results=3
+            request.message, n_results=3, tenant_id=tenant_id
         )
         memory_used["long_term"] = long_mem
         retrieved_memory.extend(long_mem)
@@ -766,6 +828,7 @@ async def chat(
     # Save user message
     user_message = MessageModel(
         session_id=session_id,
+        tenant_id=tenant_id,
         role="user",
         content=request.message,
     )
@@ -805,6 +868,7 @@ async def chat(
         if not langgraph_result.get("assistant_message_saved", False):
             assistant_message = MessageModel(
                 session_id=session_id,
+                tenant_id=tenant_id,
                 role="assistant",
                 content=chat_response.response,
                 session_metadata={
@@ -1506,9 +1570,12 @@ async def stream_agent_activity(
     
     logger.info(f"🔌 SSE connection request for session {session_id}")
 
-    # Ensure session exists before establishing stream
+    # Ensure session exists and belongs to tenant before establishing stream
     result = await db.execute(
-        select(SessionModel.id).where(SessionModel.id == session_id)
+        select(SessionModel.id).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
     )
     if result.scalar_one_or_none() is None:
         logger.warning(f"❌ Session {session_id} not found for SSE stream")
@@ -1553,9 +1620,21 @@ async def get_session_memory(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Get memory information for a session"""
+    """Get memory information for a session (for current tenant)"""
     logger = logging.getLogger(__name__)
+    
+    # Verify session belongs to tenant
+    session_result = await db.execute(
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
+    )
+    session = session_result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
     
     # Get short-term memory
     try:
@@ -1567,7 +1646,7 @@ async def get_session_memory(
     # Get sample medium-term memories (recent ones) - use a generic query
     try:
         medium_samples = await memory.retrieve_medium_term_memory(
-            session_id, "sessione conversazione", n_results=5
+            session_id, "sessione conversazione", n_results=5, tenant_id=tenant_id
         )
     except Exception as e:
         logger.warning(f"Error retrieving medium-term memory: {e}")
@@ -1576,16 +1655,17 @@ async def get_session_memory(
     # Get sample long-term memories - use a generic query (for backward compatibility)
     try:
         long_samples = await memory.retrieve_long_term_memory(
-            "conoscenza apprendimento", n_results=5
+            "conoscenza apprendimento", n_results=5, tenant_id=tenant_id
         )
     except Exception as e:
         logger.warning(f"Error retrieving long-term memory samples: {e}")
         long_samples = []
     
-    # Get ALL long-term memories from database with full metadata
+    # Get ALL long-term memories from database with full metadata (filtered by tenant)
     from app.models.database import MemoryLong as MemoryLongModel
     long_term_result = await db.execute(
         select(MemoryLongModel)
+        .where(MemoryLongModel.tenant_id == tenant_id)
         .order_by(MemoryLongModel.created_at.desc())
     )
     all_long_term = long_term_result.scalars().all()

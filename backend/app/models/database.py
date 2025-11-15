@@ -43,6 +43,31 @@ class User(Base):
     )
 
 
+class ApiKey(Base):
+    """API Key per autenticazione tenant"""
+    __tablename__ = "api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    key_hash = Column(String(255), nullable=False, unique=True)  # Hashed API key
+    name = Column(String(255), nullable=True)  # Optional name/description
+    active = Column(Boolean, default=True, nullable=False)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # Optional expiration
+
+    # Relationships
+    tenant = relationship("Tenant", backref="api_keys")
+
+    # Index for fast lookups
+    __table_args__ = (
+        {'postgresql_indexes': [
+            {'name': 'ix_api_keys_key_hash', 'columns': ['key_hash']},
+            {'name': 'ix_api_keys_tenant_id', 'columns': ['tenant_id']},
+        ]},
+    )
+
+
 class Session(Base):
     __tablename__ = "sessions"
 

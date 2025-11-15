@@ -12,6 +12,7 @@ from app.models.database import Integration
 from app.services.calendar_service import CalendarService
 from app.services.exceptions import IntegrationAuthError
 from app.services.date_parser import DateParser
+from app.core.tenant_context import get_tenant_id
 from cryptography.fernet import Fernet
 import base64
 import json
@@ -71,6 +72,7 @@ class CalendarQueryRequest(BaseModel):
 async def authorize_google_calendar(
     integration_id: Optional[UUID] = None,
     calendar_service: CalendarService = Depends(get_calendar_service),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Start OAuth2 flow for Google Calendar"""
     from app.core.config import settings
@@ -98,6 +100,7 @@ async def authorize_google_calendar(
 @router.get("/oauth/callback")
 async def oauth_callback(
     code: str,
+    tenant_id: UUID = Depends(get_tenant_id),
     state: Optional[str] = None,
     calendar_service: CalendarService = Depends(get_calendar_service),
     db: AsyncSession = Depends(get_db),
@@ -148,9 +151,12 @@ async def oauth_callback(
                 integration_id = None
         
         if integration_id:
-            # Update existing integration
+            # Update existing integration (must belong to tenant)
             result = await db.execute(
-                select(Integration).where(Integration.id == integration_id)
+                select(Integration).where(
+                    Integration.id == integration_id,
+                    Integration.tenant_id == tenant_id
+                )
             )
             integration = result.scalar_one_or_none()
             if integration:
@@ -184,6 +190,7 @@ async def oauth_callback(
                 service_type="calendar",
                 credentials_encrypted=encrypted,
                 enabled=True,
+                tenant_id=tenant_id,
             )
             db.add(integration)
             await db.commit()
@@ -215,8 +222,9 @@ async def oauth_callback(
 async def setup_calendar(
     request: CalendarSetupRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Setup calendar integration (for non-OAuth providers)"""
+    """Setup calendar integration (for non-OAuth providers) - for current tenant"""
     if request.provider == "google":
         # For Google, use OAuth flow instead
         raise HTTPException(
@@ -230,6 +238,7 @@ async def setup_calendar(
         service_type="calendar",
         enabled=True,
         session_metadata=request.credentials or {},
+        tenant_id=tenant_id,
     )
     db.add(integration)
     await db.commit()
@@ -251,14 +260,16 @@ async def get_events(
     integration_id: Optional[UUID] = None,
     calendar_service: CalendarService = Depends(get_calendar_service),
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Get calendar events"""
     if provider == "google":
-        # Get integration from database
+        # Get integration from database (filtered by tenant)
         if integration_id:
             result = await db.execute(
                 select(Integration)
                 .where(Integration.id == integration_id)
+                .where(Integration.tenant_id == tenant_id)
                 .where(Integration.provider == "google")
                 .where(Integration.service_type == "calendar")
                 .where(Integration.enabled == True)
@@ -322,6 +333,7 @@ async def query_events_natural(
     request: CalendarQueryRequest,
     calendar_service: CalendarService = Depends(get_calendar_service),
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Query calendar events using natural language"""
     # Parse date range from natural language
@@ -335,11 +347,12 @@ async def query_events_natural(
     # Get events using parsed dates - call get_events directly
     try:
         if request.provider == "google":
-            # Get integration if provided
+            # Get integration if provided (filtered by tenant)
             if request.integration_id:
                 result = await db.execute(
                     select(Integration)
                     .where(Integration.id == request.integration_id)
+                    .where(Integration.tenant_id == tenant_id)
                     .where(Integration.provider == "google")
                     .where(Integration.service_type == "calendar")
                     .where(Integration.enabled == True)
@@ -411,9 +424,13 @@ async def query_events_natural(
 async def list_calendar_integrations(
     provider: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """List all calendar integrations"""
-    query = select(Integration).where(Integration.service_type == "calendar")
+    """List all calendar integrations (for current tenant)"""
+    query = select(Integration).where(
+        Integration.service_type == "calendar",
+        Integration.tenant_id == tenant_id
+    )
     
     if provider:
         query = query.where(Integration.provider == provider)
@@ -437,12 +454,16 @@ async def list_calendar_integrations(
 async def delete_calendar_integration(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Delete a calendar integration"""
+    """Delete a calendar integration (for current tenant)"""
     result = await db.execute(
         select(Integration)
-        .where(Integration.id == integration_id)
-        .where(Integration.service_type == "calendar")
+        .where(
+            Integration.id == integration_id,
+            Integration.tenant_id == tenant_id,
+            Integration.service_type == "calendar"
+        )
     )
     integration = result.scalar_one_or_none()
     
