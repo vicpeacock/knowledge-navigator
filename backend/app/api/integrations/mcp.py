@@ -13,6 +13,7 @@ from app.models.database import Integration as IntegrationModel
 from app.models.schemas import Integration, IntegrationCreate, IntegrationUpdate
 from app.core.mcp_client import MCPClient
 from app.core.config import settings
+from app.core.tenant_context import get_tenant_id
 
 router = APIRouter()
 
@@ -48,6 +49,7 @@ class MCPConnectRequest(BaseModel):
 async def connect_mcp_server(
     request: MCPConnectRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Connect to an MCP server and discover available tools"""
     import logging
@@ -87,6 +89,7 @@ async def connect_mcp_server(
             service_type="mcp_server",
             credentials_encrypted=request.server_url,  # Store URL (not encrypted, but using same field)
             enabled=True,
+            tenant_id=tenant_id,
             session_metadata={
                 "server_url": request.server_url,
                 "name": request.name,
@@ -115,11 +118,13 @@ async def connect_mcp_server(
 async def get_mcp_tools(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Get available tools from an MCP integration"""
+    """Get available tools from an MCP integration (for current tenant)"""
     result = await db.execute(
         select(IntegrationModel)
         .where(IntegrationModel.id == integration_id)
+        .where(IntegrationModel.tenant_id == tenant_id)
         .where(IntegrationModel.service_type == "mcp_server")
         .where(IntegrationModel.enabled == True)
     )
@@ -209,12 +214,16 @@ async def select_mcp_tools(
     integration_id: UUID,
     request: SelectToolsRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Select which MCP tools to enable for this integration"""
+    """Select which MCP tools to enable for this integration (for current tenant)"""
     result = await db.execute(
         select(IntegrationModel)
-        .where(IntegrationModel.id == integration_id)
-        .where(IntegrationModel.service_type == "mcp_server")
+        .where(
+            IntegrationModel.id == integration_id,
+            IntegrationModel.tenant_id == tenant_id,
+            IntegrationModel.service_type == "mcp_server"
+        )
     )
     integration = result.scalar_one_or_none()
     
@@ -242,7 +251,10 @@ async def select_mcp_tools(
                 # Use explicit UPDATE statement to ensure JSONB is saved correctly
                 await db.execute(
                     update(IntegrationModel)
-                    .where(IntegrationModel.id == integration_id)
+                    .where(
+                        IntegrationModel.id == integration_id,
+                        IntegrationModel.tenant_id == tenant_id
+                    )
                     .values(session_metadata=metadata)
                 )
                 await db.commit()
@@ -269,7 +281,10 @@ async def select_mcp_tools(
         # This is more reliable than modifying the object directly with AsyncSession
         await db.execute(
             update(IntegrationModel)
-            .where(IntegrationModel.id == integration_id)
+            .where(
+                IntegrationModel.id == integration_id,
+                IntegrationModel.tenant_id == tenant_id
+            )
             .values(session_metadata=new_metadata)
         )
         await db.commit()
@@ -315,11 +330,15 @@ async def select_mcp_tools(
 @router.get("/integrations")
 async def list_mcp_integrations(
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """List all MCP integrations"""
+    """List all MCP integrations (for current tenant)"""
     result = await db.execute(
         select(IntegrationModel)
-        .where(IntegrationModel.service_type == "mcp_server")
+        .where(
+            IntegrationModel.service_type == "mcp_server",
+            IntegrationModel.tenant_id == tenant_id
+        )
         .order_by(IntegrationModel.id.desc())
     )
     integrations = result.scalars().all()
@@ -357,12 +376,16 @@ async def list_mcp_integrations(
 async def delete_mcp_integration(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Delete an MCP integration"""
+    """Delete an MCP integration (for current tenant)"""
     result = await db.execute(
         select(IntegrationModel)
-        .where(IntegrationModel.id == integration_id)
-        .where(IntegrationModel.service_type == "mcp_server")
+        .where(
+            IntegrationModel.id == integration_id,
+            IntegrationModel.tenant_id == tenant_id,
+            IntegrationModel.service_type == "mcp_server"
+        )
     )
     integration = result.scalar_one_or_none()
     
@@ -379,15 +402,19 @@ async def delete_mcp_integration(
 async def debug_mcp_connection(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Debug endpoint to see raw MCP responses"""
+    """Debug endpoint to see raw MCP responses (for current tenant)"""
     import logging
     logger = logging.getLogger(__name__)
     
     result = await db.execute(
         select(IntegrationModel)
-        .where(IntegrationModel.id == integration_id)
-        .where(IntegrationModel.service_type == "mcp_server")
+        .where(
+            IntegrationModel.id == integration_id,
+            IntegrationModel.tenant_id == tenant_id,
+            IntegrationModel.service_type == "mcp_server"
+        )
     )
     integration = result.scalar_one_or_none()
     
@@ -479,15 +506,19 @@ async def debug_mcp_connection(
 async def test_mcp_connection(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Test connection to MCP server"""
+    """Test connection to MCP server (for current tenant)"""
     import logging
     logger = logging.getLogger(__name__)
     
     result = await db.execute(
         select(IntegrationModel)
-        .where(IntegrationModel.id == integration_id)
-        .where(IntegrationModel.service_type == "mcp_server")
+        .where(
+            IntegrationModel.id == integration_id,
+            IntegrationModel.tenant_id == tenant_id,
+            IntegrationModel.service_type == "mcp_server"
+        )
     )
     integration = result.scalar_one_or_none()
     

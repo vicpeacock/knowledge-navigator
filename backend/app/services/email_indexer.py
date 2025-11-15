@@ -57,6 +57,7 @@ class EmailIndexer:
         email: Dict[str, Any],
         session_id: UUID,
         importance_score: Optional[float] = None,
+        tenant_id: Optional[UUID] = None,
     ) -> bool:
         """
         Index a single email into long-term memory.
@@ -75,12 +76,22 @@ class EmailIndexer:
             if importance_score is None:
                 importance_score = await self._calculate_importance(email)
             
+            # Get tenant_id from session if not provided
+            if not tenant_id:
+                from app.models.database import Session as SessionModel
+                from sqlalchemy import select
+                session_result = await db.execute(
+                    select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                )
+                tenant_id = session_result.scalar_one_or_none()
+            
             # Index in long-term memory
             await self.memory_manager.add_long_term_memory(
                 db=db,
                 content=content,
                 learned_from_sessions=[session_id],
                 importance_score=importance_score,
+                tenant_id=tenant_id,
             )
             
             logger.info(f"Indexed email {email.get('id')} into long-term memory with importance {importance_score}")

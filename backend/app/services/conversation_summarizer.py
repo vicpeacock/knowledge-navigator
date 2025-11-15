@@ -144,11 +144,20 @@ Riassunto (massimo 500 parole, mantieni tutti i dettagli importanti):"""
                 logger.warning("Failed to generate summary")
                 return None
             
+            # Get tenant_id from session
+            from app.models.database import Session as SessionModel
+            from sqlalchemy import select
+            session_result = await db.execute(
+                select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+            )
+            tenant_id = session_result.scalar_one_or_none()
+            
             # Store in medium-term memory
             await self.memory_manager.add_medium_term_memory(
                 db=db,
                 session_id=session_id,
                 content=f"[RIASSUNTO CONVERSAZIONE] {summary}",
+                tenant_id=tenant_id,
             )
             
             logger.info(f"Created and stored conversation summary in medium-term memory for session {session_id}")

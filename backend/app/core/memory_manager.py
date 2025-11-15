@@ -28,33 +28,68 @@ class MemoryManager:
     - Short-term: In-memory context (session-specific)
     - Medium-term: Session-specific persisted memory
     - Long-term: Shared cross-session knowledge base
+    
+    Supports multi-tenant isolation via tenant-specific ChromaDB collections.
     """
     
-    def __init__(self):
-        # ChromaDB client
+    def __init__(self, tenant_id: Optional[UUID] = None):
+        # ChromaDB client (shared across tenants)
         self.chroma_client = chromadb.HttpClient(
             host=settings.chromadb_host,
             port=settings.chromadb_port,
         )
         
-        # Collections
-        self.file_embeddings_collection = self.chroma_client.get_or_create_collection(
-            name="file_embeddings",
-            metadata={"hnsw:space": "cosine"},
-        )
-        self.session_memory_collection = self.chroma_client.get_or_create_collection(
-            name="session_memory",
-            metadata={"hnsw:space": "cosine"},
-        )
-        self.long_term_memory_collection = self.chroma_client.get_or_create_collection(
-            name="long_term_memory",
-            metadata={"hnsw:space": "cosine"},
-        )
+        # Store tenant_id for collection naming
+        self.tenant_id = tenant_id
+        
+        # Collections cache (tenant-specific)
+        self._collections_cache: Dict[str, Any] = {}
         
         self.embedding_service = EmbeddingService()
         
         # In-memory short-term storage
         self.short_term_memory: Dict[UUID, Dict[str, Any]] = {}
+    
+    def _get_collection_name(self, base_name: str, tenant_id: Optional[UUID] = None) -> str:
+        """Get tenant-specific collection name"""
+        effective_tenant_id = tenant_id or self.tenant_id
+        if effective_tenant_id:
+            return f"{base_name}_tenant_{str(effective_tenant_id).replace('-', '_')}"
+        # Backward compatibility: use default collection name
+        return base_name
+    
+    def _get_collection(self, base_name: str, tenant_id: Optional[UUID] = None):
+        """Get or create tenant-specific collection"""
+        collection_name = self._get_collection_name(base_name, tenant_id)
+        
+        # Check cache first
+        if collection_name in self._collections_cache:
+            return self._collections_cache[collection_name]
+        
+        # Create or get collection
+        collection = self.chroma_client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine", "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "default"},
+        )
+        
+        # Cache it
+        self._collections_cache[collection_name] = collection
+        return collection
+    
+    @property
+    def file_embeddings_collection(self):
+        """Get file embeddings collection for current tenant"""
+        return self._get_collection("file_embeddings", self.tenant_id)
+    
+    @property
+    def session_memory_collection(self):
+        """Get session memory collection for current tenant"""
+        return self._get_collection("session_memory", self.tenant_id)
+    
+    @property
+    def long_term_memory_collection(self):
+        """Get long-term memory collection for current tenant"""
+        return self._get_collection("long_term_memory", self.tenant_id)
 
     # Short-term Memory
     async def get_short_term_memory(
@@ -168,11 +203,15 @@ class MemoryManager:
         session_id: UUID,
         query: str,
         n_results: int = 5,
+        tenant_id: Optional[UUID] = None,
     ) -> List[str]:
-        """Retrieve relevant medium-term memory for a session"""
+        """Retrieve relevant medium-term memory for a session (for specific tenant)"""
         query_embedding = self.embedding_service.generate_embedding(query)
         
-        results = self.session_memory_collection.query(
+        # Get tenant-specific collection
+        collection = self._get_collection("session_memory", tenant_id or self.tenant_id)
+        
+        results = collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results,
             where={"session_id": str(session_id)},
@@ -187,16 +226,21 @@ class MemoryManager:
         content: str,
         learned_from_sessions: List[UUID],
         importance_score: float = 0.5,
+        tenant_id: Optional[UUID] = None,
     ):
-        """Add content to long-term memory"""
+        """Add content to long-term memory (for specific tenant)"""
         # Generate embedding
         embedding = self.embedding_service.generate_embedding(content)
+        
+        # Get tenant-specific collection
+        effective_tenant_id = tenant_id or self.tenant_id
+        collection = self._get_collection("long_term_memory", effective_tenant_id)
         
         # Store in ChromaDB
         embedding_id = f"long_{datetime.now().isoformat()}"
         # ChromaDB doesn't accept lists in metadata, so convert to comma-separated string
         learned_from_str = ",".join([str(sid) for sid in learned_from_sessions])
-        self.long_term_memory_collection.add(
+        collection.add(
             ids=[embedding_id],
             embeddings=[embedding],
             documents=[content],
@@ -216,6 +260,7 @@ class MemoryManager:
             embedding_id=embedding_id,
             learned_from_sessions=learned_from_sessions_str,  # Store as strings for JSONB
             importance_score=importance_score,
+            tenant_id=tenant_id,
         )
         db.add(memory_long)
         await db.commit()
@@ -225,15 +270,20 @@ class MemoryManager:
         query: str,
         n_results: int = 5,
         min_importance: float = None,
+        tenant_id: Optional[UUID] = None,
     ) -> List[str]:
-        """Retrieve relevant long-term memory"""
+        """Retrieve relevant long-term memory (for specific tenant)"""
         query_embedding = self.embedding_service.generate_embedding(query)
+        
+        # Get tenant-specific collection
+        effective_tenant_id = tenant_id or self.tenant_id
+        collection = self._get_collection("long_term_memory", effective_tenant_id)
         
         where = {}
         if min_importance is not None:
             where["importance_score"] = {"$gte": min_importance}
         
-        results = self.long_term_memory_collection.query(
+        results = collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results,
             where=where if where else None,
@@ -256,15 +306,20 @@ class MemoryManager:
         query: str,
         n_results: int = 5,
         db: Optional[AsyncSession] = None,
+        tenant_id: Optional[UUID] = None,
     ) -> List[str]:
         """Retrieve relevant file content for a session based on query"""
         import logging
         logger = logging.getLogger(__name__)
         
         try:
+            # Get tenant-specific collection
+            effective_tenant_id = tenant_id or self.tenant_id
+            collection = self._get_collection("file_embeddings", effective_tenant_id)
+            
             # First, check if there are any files for this session
             session_id_str = str(session_id)
-            all_files = self.file_embeddings_collection.get(
+            all_files = collection.get(
                 where={"session_id": session_id_str},
             )
             
@@ -350,7 +405,7 @@ class MemoryManager:
             if valid_file_ids and file_upload_times:
                 # Get ALL files for this session from ChromaDB (not using semantic search)
                 # This ensures we have the most recent file even if it's not semantically relevant
-                all_session_files = self.file_embeddings_collection.get(
+                all_session_files = collection.get(
                     where={"session_id": session_id_str}
                 )
                 
@@ -416,7 +471,7 @@ class MemoryManager:
             # We'll filter and sort by upload time after
             query_n_results = len(all_files.get("ids", []))  # Get ALL files to ensure we have the most recent
             
-            results = self.file_embeddings_collection.query(
+            results = collection.query(
                 query_embeddings=[query_embedding],
                 n_results=query_n_results if query_n_results > 0 else 1,
                 where=where_clause,

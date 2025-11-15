@@ -997,6 +997,14 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         if force_web != request.force_web_search:
             effective_request = request.model_copy(update={"force_web_search": force_web})
 
+        # Get tenant_id from session
+        from app.models.database import Session as SessionModel
+        from sqlalchemy import select
+        tenant_result = await state["db"].execute(
+            select(SessionModel.tenant_id).where(SessionModel.id == state["session_id"])
+        )
+        tenant_id = tenant_result.scalar_one_or_none()
+        
         chat_response = await run_main_agent_pipeline(
             db=state["db"],
             session_id=state["session_id"],
@@ -1005,6 +1013,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             session_context=state["session_context"],
             retrieved_memory=list(state["retrieved_memory"]),
             memory_used=state["memory_used"],
+            tenant_id=tenant_id,
         )
         state["chat_response"] = chat_response.model_copy(
             update={"agent_activity": state.get("agent_activity", [])}

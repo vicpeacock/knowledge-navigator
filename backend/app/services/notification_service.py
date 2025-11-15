@@ -25,6 +25,7 @@ class NotificationService:
         urgency: str,  # "high", "medium", "low"
         content: Dict[str, Any],
         session_id: Optional[UUID] = None,
+        tenant_id: Optional[UUID] = None,
     ) -> NotificationModel:
         """
         Create a notification and save it to the database.
@@ -43,6 +44,7 @@ class NotificationService:
             urgency=urgency,
             content=content,
             session_id=session_id,
+            tenant_id=tenant_id,
             read=False,
         )
         self.db.add(notification)
@@ -57,6 +59,7 @@ class NotificationService:
         session_id: Optional[UUID] = None,
         urgency: Optional[str] = None,
         read: bool = False,
+        tenant_id: Optional[UUID] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get pending notifications.
@@ -65,11 +68,15 @@ class NotificationService:
             session_id: Optional session ID to filter by
             urgency: Optional urgency level to filter by
             read: Whether to include read notifications (default: False, only unread)
+            tenant_id: Optional tenant ID to filter by (required for multi-tenant)
             
         Returns:
             List of notification dicts
         """
         query = select(NotificationModel).where(NotificationModel.read == read)
+        
+        if tenant_id:
+            query = query.where(NotificationModel.tenant_id == tenant_id)
         
         if session_id:
             query = query.where(NotificationModel.session_id == session_id)
@@ -98,12 +105,14 @@ class NotificationService:
     async def mark_as_read(
         self,
         notification_id: Union[UUID, Iterable[UUID]],
+        tenant_id: Optional[UUID] = None,
     ) -> bool:
         """
         Mark a notification as read.
         
         Args:
             notification_id: ID (or iterable of IDs) of the notification(s) to mark as read
+            tenant_id: Optional tenant ID to filter by (required for multi-tenant)
             
         Returns:
             True if at least one notification was marked, False otherwise
@@ -116,9 +125,11 @@ class NotificationService:
         if not notification_ids:
             return False
         
-        result = await self.db.execute(
-            select(NotificationModel).where(NotificationModel.id.in_(notification_ids))
-        )
+        query = select(NotificationModel).where(NotificationModel.id.in_(notification_ids))
+        if tenant_id:
+            query = query.where(NotificationModel.tenant_id == tenant_id)
+        
+        result = await self.db.execute(query)
         notifications = result.scalars().all()
         
         if not notifications:
@@ -143,6 +154,7 @@ class NotificationService:
         self,
         session_id: Optional[UUID] = None,
         urgency: Optional[str] = None,
+        tenant_id: Optional[UUID] = None,
     ) -> int:
         """
         Mark all pending notifications as read.
@@ -150,11 +162,15 @@ class NotificationService:
         Args:
             session_id: Optional session ID to filter by
             urgency: Optional urgency level to filter by
+            tenant_id: Optional tenant ID to filter by (required for multi-tenant)
             
         Returns:
             Number of notifications marked as read
         """
         query = select(NotificationModel).where(NotificationModel.read == False)
+        
+        if tenant_id:
+            query = query.where(NotificationModel.tenant_id == tenant_id)
         
         if session_id:
             query = query.where(NotificationModel.session_id == session_id)
@@ -183,6 +199,7 @@ class NotificationService:
         session_id: Optional[UUID] = None,
         urgency: Optional[str] = None,
         read: bool = False,
+        tenant_id: Optional[UUID] = None,
     ) -> int:
         """
         Get count of notifications.
@@ -191,11 +208,15 @@ class NotificationService:
             session_id: Optional session ID to filter by
             urgency: Optional urgency level to filter by
             read: Whether to count read notifications (default: False, only unread)
+            tenant_id: Optional tenant ID to filter by (required for multi-tenant)
             
         Returns:
             Count of notifications
         """
         query = select(NotificationModel).where(NotificationModel.read == read)
+        
+        if tenant_id:
+            query = query.where(NotificationModel.tenant_id == tenant_id)
         
         if session_id:
             query = query.where(NotificationModel.session_id == session_id)

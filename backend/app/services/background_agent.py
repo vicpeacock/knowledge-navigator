@@ -85,6 +85,16 @@ class BackgroundAgent:
 
                 # STEP 1: Write to status update (create notification in database)
                 # This is the "status update" - stored in database for Main to process
+                # Get tenant_id from session if available
+                tenant_id = None
+                if session_id:
+                    from app.models.database import Session as SessionModel
+                    from sqlalchemy import select
+                    result = await self.db.execute(
+                        select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                    )
+                    tenant_id = result.scalar_one_or_none()
+                
                 notification = await self.notification_service.create_notification(
                     type="contradiction",
                     urgency="high",  # Initial urgency - Main will decide final urgency
@@ -95,6 +105,7 @@ class BackgroundAgent:
                         "status_update": True,  # Flag to indicate this should appear in status update
                     },
                     session_id=session_id,
+                    tenant_id=tenant_id,
                 )
 
                 logger.info(f"✅ Created contradiction notification {notification.id} for session {session_id} (status update written)")

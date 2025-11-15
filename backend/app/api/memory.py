@@ -11,6 +11,7 @@ from app.core.dependencies import get_memory_manager
 from app.core.memory_manager import MemoryManager
 from app.services.advanced_search import AdvancedSearch
 from app.services.memory_consolidator import MemoryConsolidator
+from app.core.tenant_context import get_tenant_id
 
 router = APIRouter()
 
@@ -30,10 +31,22 @@ async def get_medium_term_memory(
     query: str,
     n_results: int = 5,
     memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Retrieve medium-term memory for a session"""
+    """Retrieve medium-term memory for a session (for current tenant)"""
+    # Verify session belongs to tenant
+    from app.models.database import Session as SessionModel
+    from sqlalchemy import select
+    session_result = await db.execute(
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id
+        )
+    )
+    if not session_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Session not found")
     results = await memory.retrieve_medium_term_memory(
-        session_id, query, n_results
+        session_id, query, n_results, tenant_id=tenant_id
     )
     return {"session_id": session_id, "query": query, "results": results}
 
@@ -44,10 +57,11 @@ async def get_long_term_memory(
     n_results: int = 5,
     min_importance: float = None,
     memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Retrieve long-term memory"""
+    """Retrieve long-term memory (for current tenant)"""
     results = await memory.retrieve_long_term_memory(
-        query, n_results, min_importance
+        query, n_results, min_importance, tenant_id=tenant_id
     )
     return {"query": query, "results": results}
 
@@ -58,13 +72,15 @@ async def add_long_term_memory(
     learned_from_sessions: List[UUID],
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Add content to long-term memory"""
+    """Add content to long-term memory (for current tenant)"""
     await memory.add_long_term_memory(
         db,
         memory_data.content,
         learned_from_sessions,
         memory_data.importance_score,
+        tenant_id=tenant_id,
     )
     return {"message": "Memory added successfully"}
 

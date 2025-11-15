@@ -201,7 +201,7 @@ class TaskDispatcher:
         queued_task: Task,
         config: TaskPromptConfig,
     ) -> None:
-        # Fetch session and messages
+        # Fetch session and messages (with tenant filtering)
         result = await db.execute(
             select(SessionModel).where(SessionModel.id == session_id)
         )
@@ -212,10 +212,15 @@ class TaskDispatcher:
                 session_id,
             )
             return
+        
+        tenant_id = session.tenant_id
 
         messages_result = await db.execute(
             select(MessageModel)
-            .where(MessageModel.session_id == session_id)
+            .where(
+                MessageModel.session_id == session_id,
+                MessageModel.tenant_id == tenant_id
+            )
             .order_by(MessageModel.timestamp)
         )
         previous_messages = messages_result.scalars().all()
@@ -229,16 +234,21 @@ class TaskDispatcher:
         if config.system_log:
             existing_system_msg = await db.execute(
                 select(MessageModel)
-                .where(MessageModel.session_id == session_id)
-                .where(MessageModel.role == "system")
-                .where(MessageModel.content == config.system_log)
+                .where(
+                    MessageModel.session_id == session_id,
+                    MessageModel.tenant_id == tenant_id,
+                    MessageModel.role == "system",
+                    MessageModel.content == config.system_log
+                )
                 .order_by(MessageModel.timestamp.desc())
                 .limit(1)
             )
             if not existing_system_msg.scalar_one_or_none():
+                
                 # Only create if it doesn't exist
                 system_message = MessageModel(
                     session_id=session_id,
+                    tenant_id=tenant_id,
                     role="system",
                     content=config.system_log,
                 )
@@ -301,8 +311,10 @@ class TaskDispatcher:
 
         # Persist assistant message if LangGraph did not already do it
         if not assistant_message_saved:
+            
             assistant_message = MessageModel(
                 session_id=session_id,
+                tenant_id=tenant_id,
                 role="assistant",
                 content=chat_response.response,
                 session_metadata={

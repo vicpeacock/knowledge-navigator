@@ -12,6 +12,7 @@ from app.models.database import Integration
 from app.services.email_service import EmailService, IntegrationAuthError
 from app.core.ollama_client import OllamaClient
 from app.core.dependencies import get_ollama_client
+from app.core.tenant_context import get_tenant_id
 from cryptography.fernet import Fernet
 import base64
 import json
@@ -61,6 +62,7 @@ class EmailQueryRequest(BaseModel):
 async def authorize_gmail(
     integration_id: Optional[UUID] = None,
     email_service: EmailService = Depends(get_email_service),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Start OAuth2 flow for Gmail"""
     from app.core.config import settings
@@ -91,6 +93,7 @@ async def oauth_callback(
     state: Optional[str] = None,
     email_service: EmailService = Depends(get_email_service),
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
     """OAuth2 callback for Gmail"""
     from app.core.config import settings
@@ -119,8 +122,12 @@ async def oauth_callback(
                 integration_id = None
         
         if integration_id:
+            # Update existing integration (must belong to tenant)
             result = await db.execute(
-                select(Integration).where(Integration.id == integration_id)
+                select(Integration).where(
+                    Integration.id == integration_id,
+                    Integration.tenant_id == tenant_id
+                )
             )
             integration = result.scalar_one_or_none()
             if integration:
@@ -153,6 +160,7 @@ async def oauth_callback(
                 service_type="email",
                 credentials_encrypted=encrypted,
                 enabled=True,
+                tenant_id=tenant_id,
             )
             db.add(integration)
             await db.commit()
@@ -189,6 +197,7 @@ async def get_messages(
     integration_id: Optional[UUID] = None,
     email_service: EmailService = Depends(get_email_service),
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Get email messages"""
     if provider == "gmail":
@@ -196,6 +205,7 @@ async def get_messages(
             result = await db.execute(
                 select(Integration)
                 .where(Integration.id == integration_id)
+                .where(Integration.tenant_id == tenant_id)
                 .where(Integration.provider == "google")
                 .where(Integration.service_type == "email")
                 .where(Integration.enabled == True)
@@ -260,14 +270,16 @@ async def summarize_important_emails(
     ollama: OllamaClient = Depends(get_ollama_client),
     email_service: EmailService = Depends(get_email_service),
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Summarize important unread emails"""
+    """Summarize important unread emails (for current tenant)"""
     from app.core.config import settings
     
-    # Get integration
+    # Get integration (filtered by tenant)
     result = await db.execute(
         select(Integration)
         .where(Integration.id == integration_id)
+        .where(Integration.tenant_id == tenant_id)
         .where(Integration.provider == "google")
         .where(Integration.service_type == "email")
         .where(Integration.enabled == True)
@@ -368,9 +380,13 @@ Riassunto:"""
 async def list_email_integrations(
     provider: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """List all email integrations"""
-    query = select(Integration).where(Integration.service_type == "email")
+    """List all email integrations (for current tenant)"""
+    query = select(Integration).where(
+        Integration.service_type == "email",
+        Integration.tenant_id == tenant_id
+    )
     
     if provider:
         query = query.where(Integration.provider == provider)
@@ -394,12 +410,16 @@ async def list_email_integrations(
 async def delete_email_integration(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Delete an email integration"""
+    """Delete an email integration (for current tenant)"""
     result = await db.execute(
         select(Integration)
-        .where(Integration.id == integration_id)
-        .where(Integration.service_type == "email")
+        .where(
+            Integration.id == integration_id,
+            Integration.tenant_id == tenant_id,
+            Integration.service_type == "email"
+        )
     )
     integration = result.scalar_one_or_none()
     

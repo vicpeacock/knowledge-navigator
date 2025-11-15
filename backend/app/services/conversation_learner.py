@@ -181,6 +181,14 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                     items_to_check_contradictions.append(item)
                     continue
                 
+                # Get tenant_id from session
+                from app.models.database import Session as SessionModel
+                from sqlalchemy import select
+                session_result = await db.execute(
+                    select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                )
+                tenant_id = session_result.scalar_one_or_none()
+                
                 # Index in long-term memory (non-blocking)
                 logger.info(f"📝 Attempting to index knowledge: type={knowledge_type}, importance={importance}, content={content[:50]}...")
                 await self.memory_manager.add_long_term_memory(
@@ -188,6 +196,7 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                     content=formatted_content,
                     learned_from_sessions=[session_id],
                     importance_score=importance,
+                    tenant_id=tenant_id,
                 )
                 
                 indexed_count += 1

@@ -74,6 +74,7 @@ class WebIndexer:
         results: List[Dict[str, Any]],
         session_id: UUID,
         importance_score: float = 0.6,
+        tenant_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """
         Index web search results into long-term memory.
@@ -96,12 +97,22 @@ class WebIndexer:
                 
                 content_text += f"Search Query: {search_query}"
                 
+                # Get tenant_id from session if not provided
+                if not tenant_id:
+                    from app.models.database import Session as SessionModel
+                    from sqlalchemy import select
+                    session_result = await db.execute(
+                        select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                    )
+                    tenant_id = session_result.scalar_one_or_none()
+                
                 # Index in long-term memory
                 await self.memory_manager.add_long_term_memory(
                     db=db,
                     content=content_text,
                     learned_from_sessions=[session_id],
                     importance_score=importance_score,
+                    tenant_id=tenant_id,
                 )
                 
                 indexed_count += 1
@@ -124,6 +135,7 @@ class WebIndexer:
         result: Dict[str, Any],
         session_id: UUID,
         importance_score: float = 0.7,
+        tenant_id: Optional[UUID] = None,
     ) -> bool:
         """
         Index a single web fetch result into long-term memory.
@@ -140,12 +152,22 @@ class WebIndexer:
             # Build content for indexing
             content_text = f"Web Page: {title}\nURL: {url}\n\nContent:\n{content[:5000]}"  # Limit to 5000 chars
             
+            # Get tenant_id from session if not provided
+            if not tenant_id:
+                from app.models.database import Session as SessionModel
+                from sqlalchemy import select
+                session_result = await db.execute(
+                    select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                )
+                tenant_id = session_result.scalar_one_or_none()
+            
             # Index in long-term memory
             await self.memory_manager.add_long_term_memory(
                 db=db,
                 content=content_text,
                 learned_from_sessions=[session_id],
                 importance_score=importance_score,
+                tenant_id=tenant_id,
             )
             
             logger.info(f"Indexed web page: {title} ({url})")
