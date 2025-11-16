@@ -326,7 +326,12 @@ async def verify_email(
     token: str = Query(..., description="Email verification token"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Verify user email with verification token"""
+    """Verify user email with verification token.
+
+    If the user does not yet have a password (invited user), also generate
+    a password reset token so the frontend can redirect directly to the
+    password setup page.
+    """
     logger.info(f"Email verification attempt with token: {token[:10]}...")
     
     # First, try to find user by token
@@ -336,37 +341,49 @@ async def verify_email(
     user = result.scalar_one_or_none()
     
     if user:
-        # Token found - verify email if not already verified
+        # If already verified, just return info
         if user.email_verified:
             logger.info(f"Email already verified: {user.email}")
             return {
                 "message": "Email already verified",
                 "email": user.email,
-                "already_verified": True
+                "already_verified": True,
+                "password_reset_token": None,
             }
         
         # Verify email
         user.email_verified = True
         user.email_verification_token = None
+        
+        password_reset_token: Optional[str] = None
+        # If user has no password yet (invitation flow), generate a reset token
+        if not user.password_hash:
+            password_reset_token = generate_password_reset_token()
+            user.password_reset_token = password_reset_token
+            # Set expiry (align with /password-reset/request: e.g. 1 hour)
+            user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+        
         await db.commit()
+        await db.refresh(user)
         
         logger.info(f"Email verified: {user.email}")
         
         return {
             "message": "Email verified successfully",
             "email": user.email,
-            "already_verified": False
+            "already_verified": False,
+            "password_reset_token": password_reset_token,
         }
     
-    # Token not found - check if user might have already verified (token was removed)
-    # Try to find users with verified email but no token (they might have verified recently)
-    # This is a fallback - we can't match by token, but we can at least return a helpful message
-    logger.warning(f"Email verification failed: token not found")
-    
-    # Return a more helpful error message
+    # Token not found - likely already used or invalid
+    logger.warning("Email verification failed: token not found")
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Invalid or expired verification token. The token may have already been used. If you already verified your email, you can proceed to login."
+        detail=(
+            "Invalid or expired verification token. "
+            "The token may have already been used. "
+            "If you already verified your email, you can proceed to login."
+        ),
     )
 
 
@@ -413,12 +430,14 @@ async def confirm_password_reset(
     db: AsyncSession = Depends(get_db),
 ):
     """Confirm password reset with token"""
+    # Accept tokens that are either not expired OR have no explicit expiry
+    now = datetime.now(timezone.utc)
     result = await db.execute(
         select(User).where(
             User.password_reset_token == request.token,
-            User.password_reset_expires > datetime.now(timezone.utc)
+            (User.password_reset_expires == None) | (User.password_reset_expires > now),
         )
-    )
+    )  # type: ignore
     user = result.scalar_one_or_none()
     
     if not user:

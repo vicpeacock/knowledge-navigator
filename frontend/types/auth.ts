@@ -72,6 +72,7 @@ export interface UserCreate {
 }
 
 export interface UserUpdate {
+  email?: string;
   name?: string;
   role?: 'admin' | 'user' | 'viewer';
   active?: boolean;

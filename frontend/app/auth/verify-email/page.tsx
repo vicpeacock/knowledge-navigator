@@ -44,6 +44,13 @@ export default function VerifyEmailPage() {
         if (response.data.email) {
           setUserEmail(response.data.email)
         }
+
+        // If backend provided a password_reset_token, redirect to password setup page
+        if (response.data.password_reset_token) {
+          const resetToken = response.data.password_reset_token as string
+          console.log('Redirecting to password setup with token:', resetToken.substring(0, 20) + '...')
+          router.push(`/auth/password-reset/confirm?token=${encodeURIComponent(resetToken)}`)
+        }
       } catch (error: any) {
         console.error('Email verification error:', error)
         
