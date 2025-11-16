@@ -594,9 +594,18 @@ async def execute_plan_steps(
 ) -> Dict[str, Any]:
     logger = logging.getLogger(__name__)
 
-    tool_manager = ToolManager(db=state["db"])
     session_id = state["session_id"]
     db = state["db"]
+    
+    # Get tenant_id from session
+    from app.models.database import Session as SessionModel
+    from sqlalchemy import select
+    tenant_result = await db.execute(
+        select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+    )
+    tenant_id = tenant_result.scalar_one_or_none()
+    
+    tool_manager = ToolManager(db=db, tenant_id=tenant_id)
 
     execution_summaries: List[str] = []
     tool_results: List[Dict[str, Any]] = []
@@ -808,7 +817,19 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                         message=f"Auto-task: gestione {active_task.type}",
                     )
 
-        tool_manager = ToolManager(db=state["db"])
+        # Get tenant_id from session
+        db = state["db"]
+        if session_id:
+            from app.models.database import Session as SessionModel
+            from sqlalchemy import select
+            tenant_result = await db.execute(
+                select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+            )
+            tenant_id = tenant_result.scalar_one_or_none()
+        else:
+            tenant_id = None
+
+        tool_manager = ToolManager(db=db, tenant_id=tenant_id)
         available_tools = await tool_manager.get_available_tools()
         available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
 

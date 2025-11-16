@@ -4,7 +4,7 @@ import json as json_lib
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +37,7 @@ async def run_main_agent_pipeline(
     nodi LangGraph, in modo da evitare duplicazione della logica.
     """
 
-    tool_manager = ToolManager(db=db)
+    tool_manager = ToolManager(db=db, tenant_id=tenant_id)
     available_tools = await tool_manager.get_available_tools()
     tools_description = await tool_manager.get_tools_system_prompt()
 

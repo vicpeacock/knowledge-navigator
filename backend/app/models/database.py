@@ -196,6 +196,8 @@ class Integration(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    # Optional per-user ownership (NULL = global integration for tenant)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     provider = Column(String(50), nullable=False)  # google, apple, microsoft, mcp
     service_type = Column(String(50), nullable=False)  # calendar, email, whatsapp, mcp_server
     credentials_encrypted = Column(Text)  # Encrypted credentials (for OAuth services) or MCP server URL/config
@@ -204,6 +206,7 @@ class Integration(Base):
 
     # Relationships
     tenant = relationship("Tenant", backref="integrations")
+    user = relationship("User", backref="integrations")
 
 
 class Notification(Base):

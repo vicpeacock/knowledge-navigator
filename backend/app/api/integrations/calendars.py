@@ -13,6 +13,8 @@ from app.services.calendar_service import CalendarService
 from app.services.exceptions import IntegrationAuthError
 from app.services.date_parser import DateParser
 from app.core.tenant_context import get_tenant_id
+from app.core.user_context import get_current_user
+from app.models.database import User  # type: ignore  # for type hints only
 from cryptography.fernet import Fernet
 import base64
 import json
@@ -73,6 +75,7 @@ async def authorize_google_calendar(
     integration_id: Optional[UUID] = None,
     calendar_service: CalendarService = Depends(get_calendar_service),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
     """Start OAuth2 flow for Google Calendar"""
     from app.core.config import settings
@@ -84,9 +87,19 @@ async def authorize_google_calendar(
         )
     
     try:
-        flow = calendar_service.create_google_oauth_flow(
-            state=str(integration_id) if integration_id else None
-        )
+        # Encode state with integration_id and user_id so callback can associate integration to user
+        state_payload = {
+            "integration_id": str(integration_id) if integration_id else None,
+            "user_id": str(current_user.id),
+        }
+        import json as json_lib
+        import base64
+
+        state_str = base64.urlsafe_b64encode(
+            json_lib.dumps(state_payload).encode("utf-8")
+        ).decode("utf-8")
+
+        flow = calendar_service.create_google_oauth_flow(state=state_str)
         authorization_url, _ = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
@@ -142,13 +155,43 @@ async def oauth_callback(
         
         prior_refresh_token: Optional[str] = None
         
-        integration_id = None
+        # Decode state (may be raw UUID from older flow or base64-encoded JSON)
+        integration_id: Optional[UUID] = None
+        user_id: Optional[UUID] = None
         if state:
+            import base64
+            import json as json_lib
+            import logging
+            logger = logging.getLogger(__name__)
+
             try:
-                integration_id = UUID(state)
-            except (ValueError, TypeError):
-                # State is not a valid UUID, treat as new integration
-                integration_id = None
+                # Try to decode as base64 JSON first
+                # Fix padding if needed
+                state_bytes = state.encode("utf-8")
+                missing_padding = len(state_bytes) % 4
+                if missing_padding:
+                    state_bytes += b'=' * (4 - missing_padding)
+                
+                decoded = base64.urlsafe_b64decode(state_bytes)
+                payload = json_lib.loads(decoded.decode("utf-8"))
+                integration_id_str = payload.get("integration_id")
+                user_id_str = payload.get("user_id")
+                
+                logger.info(f"OAuth callback - Decoded state: integration_id={integration_id_str}, user_id={user_id_str}")
+                
+                if integration_id_str:
+                    integration_id = UUID(integration_id_str)
+                if user_id_str:
+                    user_id = UUID(user_id_str)
+                    logger.info(f"OAuth callback - Setting user_id={user_id} for new integration")
+            except Exception as e:
+                logger.warning(f"OAuth callback - Failed to decode state as JSON: {e}, trying as UUID")
+                # Fallback: treat state as raw UUID (old behavior)
+                try:
+                    integration_id = UUID(state)
+                except (ValueError, TypeError):
+                    integration_id = None
+                    logger.warning(f"OAuth callback - State is not a valid UUID either: {state}")
         
         if integration_id:
             # Update existing integration (must belong to tenant)
@@ -178,7 +221,7 @@ async def oauth_callback(
             else:
                 raise HTTPException(status_code=404, detail="Integration not found")
         else:
-            # Create new integration
+            # Create new integration (per-user if user_id provided)
             if not credentials.get("refresh_token"):
                 raise HTTPException(
                     status_code=400,
@@ -191,6 +234,7 @@ async def oauth_callback(
                 credentials_encrypted=encrypted,
                 enabled=True,
                 tenant_id=tenant_id,
+                user_id=user_id,
             )
             db.add(integration)
             await db.commit()
@@ -425,11 +469,17 @@ async def list_calendar_integrations(
     provider: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all calendar integrations (for current tenant)"""
-    query = select(Integration).where(
-        Integration.service_type == "calendar",
-        Integration.tenant_id == tenant_id
+    """List calendar integrations for current user (and optional global ones)"""
+    from sqlalchemy import or_
+
+    query = (
+        select(Integration)
+        .where(Integration.service_type == "calendar")
+        .where(Integration.tenant_id == tenant_id)
+        # Per-user or global (user_id is NULL)
+        .where(or_(Integration.user_id == current_user.id, Integration.user_id.is_(None)))
     )
     
     if provider:
