@@ -4,10 +4,13 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { sessionsApi } from '@/lib/api'
 import { Session } from '@/types'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { useAuth } from '@/contexts/AuthContext'
 
-export default function Dashboard() {
+function DashboardContent() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
+  const { user, logout } = useAuth()
 
   useEffect(() => {
     loadSessions()
@@ -68,7 +71,22 @@ export default function Dashboard() {
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-4xl font-bold">Knowledge Navigator</h1>
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-center">
+            {user && (
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/settings/profile"
+                  className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                >
+                  {user.name || user.email}
+                </Link>
+                {user.role === 'admin' && (
+                  <Link href="/admin/users" className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400">
+                    Admin
+                  </Link>
+                )}
+              </div>
+            )}
             <Link
               href="/integrations"
               className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
@@ -80,6 +98,12 @@ export default function Dashboard() {
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
               New Session
+            </button>
+            <button
+              onClick={logout}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+            >
+              Logout
             </button>
           </div>
         </div>
@@ -115,6 +139,14 @@ export default function Dashboard() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function Dashboard() {
+  return (
+    <ProtectedRoute>
+      <DashboardContent />
+    </ProtectedRoute>
   )
 }
 

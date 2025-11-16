@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = "your-secret-key-change-in-production"
     encryption_key: str = "your-32-byte-encryption-key"
+    jwt_secret_key: str = "your-jwt-secret-key-change-in-production"  # Per JWT tokens
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 15  # 15 minuti
+    jwt_refresh_token_expire_days: int = 7  # 7 giorni
 
     # File Storage
     upload_dir: Path = Path("./uploads")

@@ -110,7 +110,11 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
 
     setConnectionState('connecting')
 
-    const streamUrl = `${API_BASE_URL}/api/sessions/${sessionId}/agent-activity/stream`
+    // EventSource doesn't support custom headers, so we pass token as query param
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+    const streamUrl = token 
+      ? `${API_BASE_URL}/api/sessions/${sessionId}/agent-activity/stream?token=${encodeURIComponent(token)}`
+      : `${API_BASE_URL}/api/sessions/${sessionId}/agent-activity/stream`
     console.log('[AgentActivity] Connecting to SSE stream:', streamUrl)
     const source = new EventSource(streamUrl)
 

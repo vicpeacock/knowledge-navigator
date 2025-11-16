@@ -30,6 +30,26 @@ class User(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     email = Column(String(255), nullable=False)
     name = Column(String(255), nullable=True)
+    
+    # Authentication
+    password_hash = Column(String(255), nullable=True)  # NULL per utenti API-only
+    
+    # Roles and permissions
+    role = Column(String(50), default="user", nullable=False)  # admin, user, viewer
+    permissions = Column(JSONB, default={})  # Permessi granulari
+    
+    # Email verification
+    email_verified = Column(Boolean, default=False, nullable=False)
+    email_verification_token = Column(String(255), nullable=True)
+    
+    # Password reset
+    password_reset_token = Column(String(255), nullable=True)
+    password_reset_expires = Column(DateTime(timezone=True), nullable=True)
+    
+    # Session tracking
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+    last_login_ip = Column(String(45), nullable=True)  # IPv6 support
+    
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     user_metadata = Column("metadata", JSONB, default={})  # Use user_metadata as attribute name, but "metadata" as column name
@@ -40,6 +60,8 @@ class User(Base):
     # Unique constraint: email per tenant
     __table_args__ = (
         UniqueConstraint('tenant_id', 'email', name='uq_user_tenant_email'),
+        Index('ix_users_email', 'email'),  # Per lookup veloce
+        Index('ix_users_tenant_id', 'tenant_id'),  # Già presente ma esplicito
     )
 
 
@@ -71,6 +93,7 @@ class Session(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # NULL for backward compatibility
     name = Column(String(255), nullable=False)
     title = Column(String(255), nullable=True)  # Optional title for the session
     description = Column(Text, nullable=True)  # Optional description
@@ -82,9 +105,15 @@ class Session(Base):
 
     # Relationships
     tenant = relationship("Tenant", backref="sessions")
+    user = relationship("User", backref="sessions")
     messages = relationship("Message", back_populates="session", cascade="all, delete-orphan")
     files = relationship("File", back_populates="session", cascade="all, delete-orphan")
     memory_medium = relationship("MemoryMedium", back_populates="session", cascade="all, delete-orphan")
+    
+    # Index for performance
+    __table_args__ = (
+        Index('ix_sessions_user_id', 'user_id'),
+    )
 
 
 class Message(Base):
