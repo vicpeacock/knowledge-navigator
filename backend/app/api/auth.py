@@ -2,7 +2,7 @@
 from typing import Optional
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, EmailStr, Field
@@ -323,32 +323,51 @@ async def get_current_user_info(
 
 @router.get("/verify-email")
 async def verify_email(
-    token: str,
+    token: str = Query(..., description="Email verification token"),
     db: AsyncSession = Depends(get_db),
 ):
     """Verify user email with verification token"""
+    logger.info(f"Email verification attempt with token: {token[:10]}...")
+    
+    # First, try to find user by token
     result = await db.execute(
         select(User).where(User.email_verification_token == token)
     )
     user = result.scalar_one_or_none()
     
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid verification token"
-        )
+    if user:
+        # Token found - verify email if not already verified
+        if user.email_verified:
+            logger.info(f"Email already verified: {user.email}")
+            return {
+                "message": "Email already verified",
+                "email": user.email,
+                "already_verified": True
+            }
+        
+        # Verify email
+        user.email_verified = True
+        user.email_verification_token = None
+        await db.commit()
+        
+        logger.info(f"Email verified: {user.email}")
+        
+        return {
+            "message": "Email verified successfully",
+            "email": user.email,
+            "already_verified": False
+        }
     
-    if user.email_verified:
-        return {"message": "Email already verified"}
+    # Token not found - check if user might have already verified (token was removed)
+    # Try to find users with verified email but no token (they might have verified recently)
+    # This is a fallback - we can't match by token, but we can at least return a helpful message
+    logger.warning(f"Email verification failed: token not found")
     
-    # Verify email
-    user.email_verified = True
-    user.email_verification_token = None
-    await db.commit()
-    
-    logger.info(f"Email verified: {user.email}")
-    
-    return {"message": "Email verified successfully"}
+    # Return a more helpful error message
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired verification token. The token may have already been used. If you already verified your email, you can proceed to login."
+    )
 
 
 @router.post("/password-reset/request")
