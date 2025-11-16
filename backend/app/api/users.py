@@ -12,6 +12,7 @@ from app.models.database import User
 from app.core.tenant_context import get_tenant_id
 from app.core.user_context import get_current_user, require_admin
 from app.core.auth import hash_password, generate_email_verification_token
+from app.services.email_sender import get_email_sender
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,19 @@ async def create_user(
     
     logger.info(f"User created by admin {current_user.email}: {user.email} (tenant: {tenant_id})")
     
-    # TODO: Send invitation email if requested
+    # Send invitation email if requested
+    if user_data.send_invitation_email and verification_token:
+        email_sender = get_email_sender()
+        email_sent = await email_sender.send_invitation_email(
+            to_email=user.email,
+            user_name=user.name,
+            verification_token=verification_token,
+            admin_name=current_user.name or current_user.email,
+        )
+        if email_sent:
+            logger.info(f"Invitation email sent to {user.email}")
+        else:
+            logger.warning(f"Failed to send invitation email to {user.email} (check SMTP configuration)")
     
     return UserResponse(
         id=user.id,

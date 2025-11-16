@@ -61,6 +61,14 @@ async def lifespan(app: FastAPI):
         logging.warning(f"⚠️  Failed to initialize default tenant: {e}")
         logging.warning("⚠️  Multi-tenant features may not work correctly.")
     
+    # Check SMTP configuration
+    from app.services.email_sender import get_email_sender
+    email_sender = get_email_sender()
+    if email_sender.is_configured():
+        logging.info("✅ SMTP email sending is configured and enabled")
+    else:
+        logging.info("ℹ️  SMTP email sending is not configured (emails will not be sent)")
+    
     # Health check all services
     from app.core.health_check import get_health_check_service
     health_service = get_health_check_service()
