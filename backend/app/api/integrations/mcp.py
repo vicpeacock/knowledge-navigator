@@ -433,9 +433,15 @@ async def debug_mcp_connection(
             "tools_list": None,
         }
         
-        # Test connection first
+        # Prepare optional auth headers (same as MCPClient)
         import httpx
-        test_client = httpx.AsyncClient(timeout=5.0)
+        from app.core.config import settings as app_settings
+        headers = {}
+        if app_settings.mcp_gateway_auth_token:
+            headers["Authorization"] = f"Bearer {app_settings.mcp_gateway_auth_token}"
+
+        # Test connection first (simple GET on base URL)
+        test_client = httpx.AsyncClient(timeout=5.0, headers=headers)
         try:
             test_response = await test_client.get(f"{client.base_url}/")
             debug_info["connection_test"] = {
@@ -458,40 +464,15 @@ async def debug_mcp_connection(
             await test_client.aclose()
         
         # Test initialize
+        # Test initialize & tools/list using MCPClient abstraction
         try:
-            init_response = await client.client.post(
-                f"{client.base_url}/mcp",
-                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-                timeout=10.0
-            )
-            debug_info["initialize"] = {
-                "status": init_response.status_code,
-                "response": init_response.json()
-            }
-        except httpx.ConnectError as ce:
-            debug_info["initialize"] = {
-                "error": f"Connection error: {str(ce)}",
-                "suggestion": "The MCP server is not reachable. Check: 1) Is it running? 2) Is the URL correct? 3) Is the port exposed?"
-            }
-        except Exception as e:
-            debug_info["initialize"] = {"error": str(e)}
-        
-        # Test tools/list
-        try:
-            tools_response = await client.client.post(
-                f"{client.base_url}/mcp",
-                json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-                timeout=10.0
-            )
+            tools = await client.list_tools()
             debug_info["tools_list"] = {
-                "status": tools_response.status_code,
-                "response": tools_response.json()
+                "status": 200,
+                "count": len(tools),
+                "first_tools": [t.get("name", "") for t in tools[:5]] if isinstance(tools, list) else [],
             }
-        except httpx.ConnectError as ce:
-            debug_info["tools_list"] = {
-                "error": f"Connection error: {str(ce)}",
-                "suggestion": "The MCP server is not reachable. Check: 1) Is it running? 2) Is the URL correct? 3) Is the port exposed?"
-            }
+            debug_info["initialize"] = {"status": 200, "message": "initialize via list_tools OK"}
         except Exception as e:
             debug_info["tools_list"] = {"error": str(e)}
         
