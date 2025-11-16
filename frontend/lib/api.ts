@@ -116,7 +116,7 @@ export const usersApi = {
   create: (data: { email: string; name?: string; password?: string; role?: string; send_invitation_email?: boolean }) =>
     api.post('/api/v1/users', data),
   get: (id: string) => api.get(`/api/v1/users/${id}`),
-  update: (id: string, data: { name?: string; role?: string; active?: boolean }) =>
+  update: (id: string, data: { email?: string; name?: string; role?: string; active?: boolean }) =>
     api.put(`/api/v1/users/${id}`, data),
   delete: (id: string) => api.delete(`/api/v1/users/${id}`),
 }

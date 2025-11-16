@@ -29,6 +29,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
     name: Optional[str] = None
     role: Optional[str] = Field(None, pattern="^(admin|user|viewer)$")
     active: Optional[bool] = None
@@ -225,8 +226,26 @@ async def update_user(
             detail="Cannot deactivate yourself"
         )
     
-    # Update fields
+    # If email is being updated, ensure uniqueness per tenant
     update_data = user_data.model_dump(exclude_unset=True)
+    new_email = update_data.get("email")
+    if new_email and new_email != user.email:
+        # Check if another user with same email exists in this tenant
+        result = await db.execute(
+            select(User).where(
+                User.tenant_id == tenant_id,
+                User.email == new_email,
+                User.id != user_id,
+            )
+        )
+        conflict = result.scalar_one_or_none()
+        if conflict:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Another user with this email already exists",
+            )
+
+    # Update fields
     for key, value in update_data.items():
         setattr(user, key, value)
     
