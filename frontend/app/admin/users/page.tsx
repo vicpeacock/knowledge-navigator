@@ -43,6 +43,19 @@ function UsersListContent() {
     }
   }
 
+  const handleResendInvitation = async (userId: string) => {
+    if (!confirm('Resend verification email to this user?')) {
+      return
+    }
+    try {
+      await usersApi.resendInvitation(userId)
+      alert('Verification email sent (if SMTP is configured).')
+    } catch (err: any) {
+      console.error('Error resending invitation:', err)
+      alert(err.response?.data?.detail || 'Failed to resend verification email')
+    }
+  }
+
   const handleDelete = async (userId: string) => {
     if (!confirm('Are you sure you want to deactivate this user?')) {
       return
@@ -181,13 +194,21 @@ function UsersListContent() {
                     }
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Link
                         href={`/admin/users/${u.id}`}
                         className="text-blue-600 hover:text-blue-900 dark:text-blue-400"
                       >
                         Edit
                       </Link>
+                      {!u.email_verified && (
+                        <button
+                          onClick={() => handleResendInvitation(u.id)}
+                          className="text-amber-600 hover:text-amber-800 dark:text-amber-400 text-sm"
+                        >
+                          Verify Email
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDelete(u.id)}
                         className="text-red-600 hover:text-red-900 dark:text-red-400"

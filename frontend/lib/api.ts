@@ -119,6 +119,8 @@ export const usersApi = {
   update: (id: string, data: { email?: string; name?: string; role?: string; active?: boolean }) =>
     api.put(`/api/v1/users/${id}`, data),
   delete: (id: string) => api.delete(`/api/v1/users/${id}`),
+  resendInvitation: (id: string) =>
+    api.post(`/api/v1/users/${id}/resend-invitation`, {}),
 }
 
 // API Keys API
