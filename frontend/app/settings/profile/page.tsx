@@ -69,7 +69,15 @@ function ProfileContent() {
 
         {/* User Info */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
-          <h2 className="text-2xl font-semibold mb-4">User Information</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-semibold">User Information</h2>
+            <a
+              href="/settings/tools"
+              className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 underline"
+            >
+              Manage Tools
+            </a>
+          </div>
           <dl className="space-y-3">
             <div>
               <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Email</dt>

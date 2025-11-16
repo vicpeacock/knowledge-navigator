@@ -121,6 +121,10 @@ export const usersApi = {
   delete: (id: string) => api.delete(`/api/v1/users/${id}`),
   resendInvitation: (id: string) =>
     api.post(`/api/v1/users/${id}/resend-invitation`, {}),
+  getToolsPreferences: () =>
+    api.get('/api/v1/users/me/tools'),
+  updateToolsPreferences: (enabledTools: string[]) =>
+    api.put('/api/v1/users/me/tools', { enabled_tools: enabledTools }),
 }
 
 // API Keys API

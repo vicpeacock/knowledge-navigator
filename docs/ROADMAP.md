@@ -27,8 +27,24 @@
 - ✅ Home page con solo chat attive
 - ✅ Toggle "Web Search" per forzare ricerca web (come Ollama desktop)
 - ✅ Status panel globale per notifiche non bloccanti
+- ✅ Sistema multi-tenant completo con isolamento dati
+- ✅ Gestione utenti con autenticazione JWT
+- ✅ Admin panel per gestione utenti
+- ✅ Preferenze tools MCP per utente
 
 ### 🚧 In Progress / Da Completare
+
+**User Management & Multi-Tenancy (✅ Completo):**
+- ✅ Sistema multi-tenant con isolamento dati completo
+- ✅ Autenticazione JWT con refresh tokens
+- ✅ Gestione utenti (creazione, modifica, attivazione/disattivazione)
+- ✅ Admin panel per gestione utenti
+- ✅ Email verification e password reset
+- ✅ Ruoli utente (admin, user, viewer)
+- ✅ Isolamento dati per utente (sessioni, integrazioni Calendar/Email)
+- ✅ Preferenze tools MCP per utente
+- ✅ UI semplificata per utenti normali (solo "Manage Tools" per MCP)
+- ✅ Integrazioni Calendar/Email per utente
 
 **Navigazione Web (Fase 1 - ✅ Completa):**
 - ✅ Integrazione MCP Gateway (funzionante)
@@ -38,6 +54,7 @@
 - ✅ Indicizzazione contenuti web visitati in memoria (long-term)
 - ✅ Toggle "Web Search" (force_web_search) - forzare ricerca web come in Ollama desktop
 - ✅ Test suite completa per indicizzazione web (9/9 test passati)
+- ✅ Preferenze tools MCP per utente (selezione tools personalizzata)
 - ❌ Navigazione autonoma web avanzata (Fase 3)
 
 **Proattività (Fase 2 - Non iniziata):**
@@ -159,7 +176,12 @@
 ### Fase 4 - Production Ready (2-3 settimane)
 
 **Sicurezza:**
-- [ ] Autenticazione utente
+- [x] Autenticazione utente (JWT con refresh tokens)
+- [x] Isolamento dati multi-tenant
+- [x] Isolamento dati per utente
+- [x] Password hashing (bcrypt)
+- [x] Email verification
+- [x] Password reset
 - [ ] Cifratura end-to-end (opzionale)
 - [ ] Audit log
 - [ ] Backup automatico

@@ -165,15 +165,14 @@ class ToolManager:
             # },
         ]
     
-    async def get_mcp_tools(self, current_user_id: Optional[UUID] = None) -> List[Dict[str, Any]]:
+    async def get_mcp_tools(self, current_user: Optional["User"] = None) -> List[Dict[str, Any]]:  # type: ignore[name-defined]
         """Get MCP tools from enabled integrations (tenant-level/global).
 
-        MCP integrations are global per tenant (user_id = NULL), so all users in the tenant
-        can see and use them. Per-user tool preferences are applied at a higher level
-        (get_available_tools), so here we only honor integration-level selected_tools.
+        MCP integrations are global per tenant (user_id = NULL), but tool selection
+        is per-user. This method reads per-user tool preferences from user_metadata.
         
         Args:
-            current_user_id: Optional user ID for filtering (not used for MCP, but kept for consistency)
+            current_user: Optional user object to get per-user tool preferences
         """
         if not self.db or not self.tenant_id:
             return []
@@ -194,7 +193,14 @@ class ToolManager:
             mcp_tools = []
             
             for integration in integrations:
-                selected_tools = integration.session_metadata.get("selected_tools", []) if integration.session_metadata else []
+                # Get per-user tool preferences
+                selected_tools = []
+                if current_user:
+                    user_metadata = current_user.user_metadata or {}
+                    mcp_preferences = user_metadata.get("mcp_tools_preferences", {})
+                    selected_tools = mcp_preferences.get(str(integration.id), [])
+                
+                # If no user preferences, skip this integration (user hasn't selected any tools)
                 if not selected_tools:
                     continue
                 
@@ -243,9 +249,19 @@ class ToolManager:
     
     async def get_available_tools(self, current_user: Optional["User"] = None) -> List[Dict[str, Any]]:  # type: ignore[name-defined]
         """Get list of all available tools (base + MCP), filtered by user preferences if provided."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         base_tools = self.get_base_tools()
-        current_user_id = current_user.id if current_user else None
-        mcp_tools = await self.get_mcp_tools(current_user_id=current_user_id)
+        
+        # Try to get MCP tools, but don't fail if they're unavailable
+        mcp_tools = []
+        try:
+            mcp_tools = await self.get_mcp_tools(current_user=current_user)
+        except Exception as e:
+            logger.warning(f"MCP tools unavailable, continuing with base tools only: {e}")
+            # Continue with base tools only
+        
         tools = base_tools + mcp_tools
 
         # Apply per-user tool preferences if available

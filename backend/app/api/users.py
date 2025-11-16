@@ -1,5 +1,5 @@
 """User management endpoints (admin only)"""
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -365,5 +365,101 @@ async def resend_invitation_email(
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Failed to send invitation email",
+    )
+
+
+class ToolPreference(BaseModel):
+    """Tool preference for a user"""
+    tool_name: str
+    enabled: bool
+
+
+class ToolsPreferencesResponse(BaseModel):
+    """Response with available tools and user preferences"""
+    available_tools: List[Dict[str, Any]]
+    user_preferences: List[str]  # List of enabled tool names
+
+
+class ToolsPreferencesUpdate(BaseModel):
+    """Update user tool preferences"""
+    enabled_tools: List[str]  # List of tool names to enable
+
+
+@router.get("/me/tools", response_model=ToolsPreferencesResponse)
+async def get_user_tools_preferences(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+):
+    """Get available tools and user's tool preferences"""
+    from app.core.tool_manager import ToolManager
+    
+    try:
+        # Get all available tools (base + MCP)
+        tool_manager = ToolManager(db=db, tenant_id=tenant_id)
+        available_tools = await tool_manager.get_available_tools(current_user=current_user)
+    except Exception as e:
+        # If MCP tools fail, at least return base tools
+        logger.warning(f"Error loading some tools (MCP may be unavailable): {e}")
+        tool_manager = ToolManager(db=db, tenant_id=tenant_id)
+        # Get only base tools if MCP fails
+        available_tools = tool_manager.get_base_tools()
+        # Try to get MCP tools separately, but don't fail if they're unavailable
+        try:
+            mcp_tools = await tool_manager.get_mcp_tools(current_user=current_user)
+            available_tools.extend(mcp_tools)
+        except Exception as mcp_error:
+            logger.warning(f"MCP tools unavailable: {mcp_error}")
+    
+    # Get user's current preferences
+    user_metadata = current_user.user_metadata or {}
+    enabled_tools = user_metadata.get("enabled_tools", [])
+    
+    # If no preferences set, return all tools as enabled
+    if not enabled_tools:
+        enabled_tools = [tool.get("name") for tool in available_tools if tool.get("name")]
+    
+    return ToolsPreferencesResponse(
+        available_tools=available_tools,
+        user_preferences=enabled_tools,
+    )
+
+
+@router.put("/me/tools", response_model=ToolsPreferencesResponse)
+async def update_user_tools_preferences(
+    preferences: ToolsPreferencesUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+):
+    """Update user's tool preferences"""
+    from app.core.tool_manager import ToolManager
+    
+    # Validate that all requested tools exist
+    tool_manager = ToolManager(db=db, tenant_id=tenant_id)
+    available_tools = await tool_manager.get_available_tools(current_user=current_user)
+    available_tool_names = {tool.get("name") for tool in available_tools if tool.get("name")}
+    
+    # Validate requested tools
+    invalid_tools = set(preferences.enabled_tools) - available_tool_names
+    if invalid_tools:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid tool names: {', '.join(invalid_tools)}"
+        )
+    
+    # Update user metadata
+    user_metadata = current_user.user_metadata or {}
+    user_metadata["enabled_tools"] = preferences.enabled_tools
+    current_user.user_metadata = user_metadata
+    
+    await db.commit()
+    await db.refresh(current_user)
+    
+    logger.info(f"Updated tool preferences for user {current_user.email}: {len(preferences.enabled_tools)} tools enabled")
+    
+    return ToolsPreferencesResponse(
+        available_tools=available_tools,
+        user_preferences=preferences.enabled_tools,
     )
 

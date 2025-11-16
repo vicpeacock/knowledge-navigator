@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { integrationsApi } from '@/lib/api'
 import { Calendar, CheckCircle, XCircle, RefreshCw, ExternalLink, Mail, ArrowLeft, Trash2, Server, Settings, MessageSquare, RotateCcw } from 'lucide-react'
 import { useStatus } from '@/components/StatusPanel'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface Integration {
   id: string
@@ -41,6 +42,8 @@ export default function IntegrationsPage() {
   
   // Use global status panel
   const { addStatusMessage } = useStatus()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
 
   useEffect(() => {
     loadIntegrations()
@@ -104,7 +107,16 @@ export default function IntegrationsPage() {
       return { availableTools, selectedTools: validSelectedTools }
     } catch (error: any) {
       console.error('loadToolsForIntegration - Error loading tools:', error)
-      console.error('Error loading tools:', error.response?.data?.detail || error.message)
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to load MCP tools'
+      console.error('Error loading tools:', errorMessage)
+      
+      // Show user-friendly error message
+      if (error.response?.status === 503) {
+        addStatusMessage('warning', `MCP Gateway unavailable: ${errorMessage}`, 10000)
+      } else {
+        addStatusMessage('error', `Failed to load MCP tools: ${errorMessage}`, 10000)
+      }
+      
       setSelectedMcpIntegration(null)
       setMcpTools([])
       setSelectedTools([])
@@ -820,56 +832,60 @@ export default function IntegrationsPage() {
                       <Settings size={16} />
                       {selectedMcpIntegration === integration.id ? 'Close' : 'Manage Tools'}
                     </button>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const response = await integrationsApi.mcp.test(integration.id)
-                          console.log(`MCP test: Found ${response.data.tools_count || 0} tools`)
-                        } catch (error: any) {
-                          console.error('MCP test failed:', error.response?.data?.detail || error.message)
-                        }
-                      }}
-                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                    >
-                      Test
-                    </button>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const debug = await integrationsApi.mcp.debug(integration.id)
-                          console.log('MCP Debug Info:', debug.data)
-                        } catch (error: any) {
-                          console.error('MCP Debug failed:', error.response?.data?.detail || error.message)
-                        }
-                      }}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-xs"
-                      title="Show raw MCP responses and connection status"
-                    >
-                      Debug
-                    </button>
-                    <button
-                      onClick={async () => {
-                        if (!confirm('Are you sure you want to remove this MCP integration?')) {
-                          return
-                        }
+                    {isAdmin && (
+                      <>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const response = await integrationsApi.mcp.test(integration.id)
+                              console.log(`MCP test: Found ${response.data.tools_count || 0} tools`)
+                            } catch (error: any) {
+                              console.error('MCP test failed:', error.response?.data?.detail || error.message)
+                            }
+                          }}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                        >
+                          Test
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const debug = await integrationsApi.mcp.debug(integration.id)
+                              console.log('MCP Debug Info:', debug.data)
+                            } catch (error: any) {
+                              console.error('MCP Debug failed:', error.response?.data?.detail || error.message)
+                            }
+                          }}
+                          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-xs"
+                          title="Show raw MCP responses and connection status"
+                        >
+                          Debug
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm('Are you sure you want to remove this MCP integration?')) {
+                              return
+                            }
 
-                        try {
-                          await integrationsApi.mcp.deleteIntegration(integration.id)
-                          if (selectedMcpIntegration === integration.id) {
-                            setSelectedMcpIntegration(null)
-                            setMcpTools([])
-                            setSelectedTools([])
-                          }
-                          await loadIntegrations()
-                        } catch (error: any) {
-                          console.error('Error:', error.response?.data?.detail || error.message)
-                        }
-                      }}
-                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
-                    >
-                      <Trash2 size={16} />
-                      Remove
-                    </button>
+                            try {
+                              await integrationsApi.mcp.deleteIntegration(integration.id)
+                              if (selectedMcpIntegration === integration.id) {
+                                setSelectedMcpIntegration(null)
+                                setMcpTools([])
+                                setSelectedTools([])
+                              }
+                              await loadIntegrations()
+                            } catch (error: any) {
+                              console.error('Error:', error.response?.data?.detail || error.message)
+                            }
+                          }}
+                          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+                        >
+                          <Trash2 size={16} />
+                          Remove
+                        </button>
+                      </>
+                    )}
                   </div>
 
                   {selectedMcpIntegration === integration.id && (
@@ -933,8 +949,14 @@ export default function IntegrationsPage() {
                                   )
 
                                   console.log(`Selected ${toolsToSave.length} tools successfully!`)
+                                  
+                                  // Reload tools from server to verify they were saved correctly
+                                  await loadToolsForIntegration(integration.id, true)
+                                  addStatusMessage('success', `Saved ${toolsToSave.length} tool${toolsToSave.length === 1 ? '' : 's'} successfully`)
                                 } catch (error: any) {
                                   console.error('Error saving tools:', error)
+                                  const errorMessage = error.response?.data?.detail || error.message || 'Failed to save tools'
+                                  addStatusMessage('error', `Error saving tools: ${errorMessage}`)
                                 } finally {
                                   setIsSaving(false)
                                 }
@@ -969,13 +991,16 @@ export default function IntegrationsPage() {
             ) : (
               <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
                 <p className="text-sm text-gray-700 dark:text-gray-200">
-                  Nessun server MCP connesso. Aggiungine uno utilizzando il form sottostante.
+                  {isAdmin 
+                    ? 'Nessun server MCP connesso. Aggiungine uno utilizzando il form sottostante.'
+                    : 'Nessun server MCP connesso. Contatta l\'amministratore per configurare un server MCP.'}
                 </p>
               </div>
             )}
 
-            <div className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-              <h3 className="font-semibold mb-3">Connect New MCP Server</h3>
+            {isAdmin && (
+              <div className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                <h3 className="font-semibold mb-3">Connect New MCP Server</h3>
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium mb-1">Server URL</label>
@@ -1041,6 +1066,7 @@ export default function IntegrationsPage() {
                 </button>
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>
