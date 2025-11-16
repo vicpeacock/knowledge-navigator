@@ -68,7 +68,17 @@ function UsersListContent() {
     <div className="min-h-screen p-8">
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-4xl font-bold">User Management</h1>
+          <div>
+            <h1 className="text-4xl font-bold">User Management</h1>
+            <div className="mt-2 flex gap-4 text-sm">
+              <Link
+                href="/"
+                className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
+              >
+                ← Home
+              </Link>
+            </div>
+          </div>
           <Link
             href="/admin/users/new"
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"

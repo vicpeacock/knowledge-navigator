@@ -90,13 +90,23 @@ function EditUserContent() {
     <div className="min-h-screen p-8">
       <div className="max-w-2xl mx-auto">
         <div className="mb-8">
-          <Link
-            href="/admin/users"
-            className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
-          >
-            ← Back to Users
-          </Link>
-          <h1 className="text-4xl font-bold mt-4">Edit User</h1>
+          <div className="flex justify-between items-center">
+            <div>
+              <Link
+                href="/admin/users"
+                className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
+              >
+                ← Back to Users
+              </Link>
+              <h1 className="text-4xl font-bold mt-4">Edit User</h1>
+            </div>
+            <Link
+              href="/"
+              className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+            >
+              Home
+            </Link>
+          </div>
         </div>
 
         {error && (

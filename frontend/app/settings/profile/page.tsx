@@ -57,7 +57,15 @@ function ProfileContent() {
   return (
     <div className="min-h-screen p-8">
       <div className="max-w-2xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8">Profile Settings</h1>
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-4xl font-bold">Profile Settings</h1>
+          <a
+            href="/"
+            className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+          >
+            Home
+          </a>
+        </div>
 
         {/* User Info */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
