@@ -917,10 +917,10 @@ async def chat(
     
     # Initialize tool manager
     from app.core.tool_manager import ToolManager
-    tool_manager = ToolManager(db=db)
+    tool_manager = ToolManager(db=db, tenant_id=tenant_id)
     
     # Get tools for native Ollama tool calling
-    available_tools = await tool_manager.get_available_tools()
+    available_tools = await tool_manager.get_available_tools(current_user=current_user)
     
     # Also get tools description for fallback/prompt-based approach
     tools_description = await tool_manager.get_tools_system_prompt()

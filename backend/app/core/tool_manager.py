@@ -1,14 +1,14 @@
 """
 Tool Manager - Manages available tools and executes them when requested by LLM
 """
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, TYPE_CHECKING
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.services.email_service import EmailService, IntegrationAuthError
 from app.services.calendar_service import CalendarService
 from app.services.date_parser import DateParser
-from app.models.database import Integration
+from app.models.database import Integration, Session as SessionModel
 from app.core.config import settings
 from app.core.mcp_client import MCPClient
 import re
@@ -16,12 +16,17 @@ import json
 import httpx
 import asyncio
 
+if TYPE_CHECKING:
+    # Avoid circular imports at runtime; only for type hints
+    from app.models.database import User
+
 
 class ToolManager:
     """Manages tools available to the LLM"""
     
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: Optional[AsyncSession] = None, tenant_id: Optional[UUID] = None):
         self.db = db
+        self.tenant_id = tenant_id
         self.email_service = EmailService()
         self.calendar_service = CalendarService()
         self.date_parser = DateParser()
@@ -160,18 +165,30 @@ class ToolManager:
             # },
         ]
     
-    async def get_mcp_tools(self) -> List[Dict[str, Any]]:
-        """Get MCP tools from enabled integrations"""
-        if not self.db:
+    async def get_mcp_tools(self, current_user_id: Optional[UUID] = None) -> List[Dict[str, Any]]:
+        """Get MCP tools from enabled integrations (tenant-level/global).
+
+        MCP integrations are global per tenant (user_id = NULL), so all users in the tenant
+        can see and use them. Per-user tool preferences are applied at a higher level
+        (get_available_tools), so here we only honor integration-level selected_tools.
+        
+        Args:
+            current_user_id: Optional user ID for filtering (not used for MCP, but kept for consistency)
+        """
+        if not self.db or not self.tenant_id:
             return []
         
         try:
-            # Get all enabled MCP integrations
-            result = await self.db.execute(
+            # Get all enabled MCP integrations for this tenant
+            # MCP integrations are global (user_id = NULL) so all users can see them
+            query = (
                 select(Integration)
                 .where(Integration.service_type == "mcp_server")
                 .where(Integration.enabled == True)
+                .where(Integration.tenant_id == self.tenant_id)
+                .where(Integration.user_id.is_(None))  # Only global MCP integrations
             )
+            result = await self.db.execute(query)
             integrations = result.scalars().all()
             
             mcp_tools = []
@@ -224,11 +241,27 @@ class ToolManager:
             logger.error(f"Error loading MCP tools: {e}", exc_info=True)
             return []
     
-    async def get_available_tools(self) -> List[Dict[str, Any]]:
-        """Get list of all available tools (base + MCP)"""
+    async def get_available_tools(self, current_user: Optional["User"] = None) -> List[Dict[str, Any]]:  # type: ignore[name-defined]
+        """Get list of all available tools (base + MCP), filtered by user preferences if provided."""
         base_tools = self.get_base_tools()
-        mcp_tools = await self.get_mcp_tools()
-        return base_tools + mcp_tools
+        current_user_id = current_user.id if current_user else None
+        mcp_tools = await self.get_mcp_tools(current_user_id=current_user_id)
+        tools = base_tools + mcp_tools
+
+        # Apply per-user tool preferences if available
+        if current_user is not None:
+            try:
+                metadata = getattr(current_user, "user_metadata", {}) or {}
+                enabled_tools = metadata.get("enabled_tools")
+                if isinstance(enabled_tools, list) and enabled_tools:
+                    # Keep only tools explicitly enabled by the user
+                    enabled_set = set(enabled_tools)
+                    tools = [t for t in tools if t.get("name") in enabled_set]
+            except Exception:
+                # If anything goes wrong, fall back to full set of tools
+                pass
+
+        return tools
     
     async def get_tools_system_prompt(self) -> str:
         """Generate minimal system prompt - tools are passed natively to Ollama"""
@@ -263,7 +296,7 @@ class ToolManager:
                 logger.info(f"MCP Tool {tool_name} completed")
                 return result
             elif tool_name == "get_calendar_events":
-                result = await self._execute_get_calendar_events(parameters, db)
+                result = await self._execute_get_calendar_events(parameters, db, session_id=session_id)
                 logger.info(f"Tool {tool_name} completed, result type: {type(result)}")
                 return result
             elif tool_name == "get_emails":
@@ -271,7 +304,7 @@ class ToolManager:
                 logger.info(f"Tool {tool_name} completed, emails count: {result.get('count', 0) if isinstance(result, dict) else 'unknown'}")
                 return result
             elif tool_name == "summarize_emails":
-                result = await self._execute_summarize_emails(parameters, db)
+                result = await self._execute_summarize_emails(parameters, db, session_id=session_id)
                 logger.info(f"Tool {tool_name} completed, summary length: {len(result.get('summary', '')) if isinstance(result, dict) else 'unknown'}")
                 return result
             elif tool_name == "web_search":
@@ -302,6 +335,7 @@ class ToolManager:
         self,
         parameters: Dict[str, Any],
         db: AsyncSession,
+        session_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """Execute get_calendar_events tool"""
         from app.models.database import Integration
@@ -310,14 +344,33 @@ class ToolManager:
         from datetime import datetime, timezone, timedelta
         
         try:
-            # Get calendar integration
-            result = await db.execute(
+            # Get calendar integration for the session's user (or global)
+            if not session_id:
+                return {"error": "Session ID is required to resolve calendar integration"}
+
+            # Get session to know tenant and user
+            session_result = await db.execute(
+                select(SessionModel).where(SessionModel.id == session_id)
+            )
+            session = session_result.scalar_one_or_none()
+            if not session:
+                return {"error": "Session not found"}
+
+            tenant_id = session.tenant_id
+            user_id = session.user_id
+
+            query = (
                 select(Integration)
                 .where(Integration.provider == "google")
                 .where(Integration.service_type == "calendar")
                 .where(Integration.enabled == True)
-                .limit(1)
+                .where(Integration.tenant_id == tenant_id)
             )
+            from sqlalchemy import or_
+            if user_id is not None:
+                query = query.where(or_(Integration.user_id == user_id, Integration.user_id.is_(None)))
+
+            result = await db.execute(query.limit(1))
             integration = result.scalar_one_or_none()
             
             if not integration:
@@ -385,14 +438,33 @@ class ToolManager:
         from sqlalchemy import select
         
         try:
-            # Get email integration
-            result = await db.execute(
+            # Get email integration for the session's user (or global)
+            if not session_id:
+                return {"error": "Session ID is required to resolve email integration"}
+
+            # Get session to know tenant and user
+            session_result = await db.execute(
+                select(SessionModel).where(SessionModel.id == session_id)
+            )
+            session = session_result.scalar_one_or_none()
+            if not session:
+                return {"error": "Session not found"}
+
+            tenant_id = session.tenant_id
+            user_id = session.user_id
+
+            query = (
                 select(Integration)
                 .where(Integration.provider == "google")
                 .where(Integration.service_type == "email")
                 .where(Integration.enabled == True)
-                .limit(1)
+                .where(Integration.tenant_id == tenant_id)
             )
+            from sqlalchemy import or_
+            if user_id is not None:
+                query = query.where(or_(Integration.user_id == user_id, Integration.user_id.is_(None)))
+
+            result = await db.execute(query.limit(1))
             integration = result.scalar_one_or_none()
             
             if not integration:
@@ -584,6 +656,7 @@ class ToolManager:
         self,
         parameters: Dict[str, Any],
         db: AsyncSession,
+        session_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """Execute summarize_emails tool"""
         from app.models.database import Integration
@@ -592,14 +665,33 @@ class ToolManager:
         from sqlalchemy import select
         
         try:
-            # Get email integration
-            result = await db.execute(
+            # Get email integration for the session's user (or global)
+            if not session_id:
+                return {"error": "Session ID is required to resolve email integration"}
+
+            # Get session to know tenant and user
+            session_result = await db.execute(
+                select(SessionModel).where(SessionModel.id == session_id)
+            )
+            session = session_result.scalar_one_or_none()
+            if not session:
+                return {"error": "Session not found"}
+
+            tenant_id = session.tenant_id
+            user_id = session.user_id
+
+            query = (
                 select(Integration)
                 .where(Integration.provider == "google")
                 .where(Integration.service_type == "email")
                 .where(Integration.enabled == True)
-                .limit(1)
+                .where(Integration.tenant_id == tenant_id)
             )
+            from sqlalchemy import or_
+            if user_id is not None:
+                query = query.where(or_(Integration.user_id == user_id, Integration.user_id.is_(None)))
+
+            result = await db.execute(query.limit(1))
             integration = result.scalar_one_or_none()
             
             if not integration:
