@@ -125,15 +125,16 @@ function CreateUserContent() {
                 checked={sendInvitation}
                 onChange={(e) => setSendInvitation(e.target.checked)}
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                disabled
               />
               <label htmlFor="sendInvitation" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
                 Send invitation email
               </label>
             </div>
-            <p className="ml-6 text-xs text-gray-500 dark:text-gray-400 italic">
-              ⚠️ Email sending not yet configured. Please set a password manually or contact the user directly.
-            </p>
+            {sendInvitation && (
+              <p className="ml-6 text-xs text-amber-600 dark:text-amber-400">
+                ℹ️ Make sure SMTP is configured in backend settings. If not configured, the email will not be sent.
+              </p>
+            )}
           </div>
 
           <div className="flex gap-4">

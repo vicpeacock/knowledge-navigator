@@ -81,6 +81,19 @@ class Settings(BaseSettings):
     google_redirect_uri_calendar: str = "http://localhost:8000/api/integrations/calendars/oauth/callback"
     google_redirect_uri_email: str = "http://localhost:8000/api/integrations/emails/oauth/callback"
     
+    # Email sending (SMTP) - for invitation emails, password reset, etc.
+    smtp_enabled: bool = False  # Set to True to enable email sending
+    smtp_host: Optional[str] = None  # e.g., "smtp.gmail.com"
+    smtp_port: int = 587  # 587 for TLS, 465 for SSL
+    smtp_use_tls: bool = True  # Use TLS (True) or SSL (False)
+    smtp_username: Optional[str] = None  # SMTP username (usually email)
+    smtp_password: Optional[str] = None  # SMTP password or app password
+    smtp_from_email: Optional[str] = None  # From email address
+    smtp_from_name: Optional[str] = "Knowledge Navigator"  # From name
+    
+    # Frontend URL (for email links)
+    frontend_url: str = "http://localhost:3003"
+    
     # Encryption for credentials
     credentials_encryption_key: str = "your-32-byte-encryption-key-change-me"
 
