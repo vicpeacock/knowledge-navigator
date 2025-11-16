@@ -303,3 +303,67 @@ async def delete_user(
     
     return None
 
+
+@router.post("/{user_id}/resend-invitation", status_code=status.HTTP_200_OK)
+async def resend_invitation_email(
+    user_id: UUID,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+):
+    """Resend verification/invitation email to an existing user (admin only)."""
+    # Load user for this tenant
+    result = await db.execute(
+        select(User).where(
+            User.id == user_id,
+            User.tenant_id == tenant_id,
+        )
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    if not user.active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot send invitation to inactive user",
+        )
+    
+    if user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User email is already verified",
+        )
+    
+    # Generate a new verification token
+    verification_token = generate_email_verification_token()
+    user.email_verification_token = verification_token
+    # Ensure email_verified is False until they confirm
+    user.email_verified = False
+    
+    await db.commit()
+    await db.refresh(user)
+    
+    # Send invitation/verification email
+    email_sender = get_email_sender()
+    email_sent = await email_sender.send_invitation_email(
+        to_email=user.email,
+        user_name=user.name,
+        verification_token=verification_token,
+        admin_name=current_user.name or current_user.email,
+    )
+    
+    if email_sent:
+        logger.info(f"Resent invitation email to {user.email}")
+        return {"message": "Invitation email resent successfully"}
+    
+    logger.warning(f"Failed to resend invitation email to {user.email} (check SMTP configuration)")
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Failed to send invitation email",
+    )
+
