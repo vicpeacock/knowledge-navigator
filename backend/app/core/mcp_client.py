@@ -35,6 +35,10 @@ class MCPClient:
         """List available MCP tools"""
         exit_stack = AsyncExitStack()
         try:
+            # Log headers being sent (but not the token value for security)
+            logger.debug(f"Connecting to MCP Gateway at {self.base_url}")
+            logger.debug(f"Headers being sent: {list(self.headers.keys())} (token present: {'Authorization' in self.headers})")
+            
             # Use AsyncExitStack to properly manage nested context managers
             # This ensures all cleanup happens in the same task context
             transport = await exit_stack.enter_async_context(
@@ -61,8 +65,24 @@ class MCPClient:
             return tools
             
         except Exception as e:
-            logger.error(f"❌ Error listing tools: {e}", exc_info=True)
-            raise
+            # Extract the real error from ExceptionGroup/TaskGroup if present
+            real_error = e
+            error_message = str(e)
+            
+            # Check if it's an ExceptionGroup (Python 3.11+)
+            if hasattr(e, 'exceptions') and len(e.exceptions) > 0:
+                # Get the first exception from the group
+                real_error = e.exceptions[0]
+                error_message = str(real_error)
+                logger.warning(f"Extracted error from ExceptionGroup: {error_message}")
+            
+            # Check for HTTP errors (401, 403, etc.)
+            if hasattr(real_error, 'response') or '401' in error_message or 'unauthorized' in error_message.lower():
+                logger.error(f"❌ MCP Gateway authentication error: {error_message}")
+            else:
+                logger.error(f"❌ Error listing tools: {error_message}", exc_info=True)
+            
+            raise real_error
         finally:
             # Properly close all context managers in the same task
             await exit_stack.aclose()

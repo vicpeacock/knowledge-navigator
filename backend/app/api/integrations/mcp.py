@@ -9,11 +9,12 @@ from typing import List, Dict, Any, Optional
 import json
 
 from app.db.database import get_db
-from app.models.database import Integration as IntegrationModel
+from app.models.database import Integration as IntegrationModel, User
 from app.models.schemas import Integration, IntegrationCreate, IntegrationUpdate
 from app.core.mcp_client import MCPClient
 from app.core.config import settings
 from app.core.tenant_context import get_tenant_id
+from app.core.user_context import get_current_user
 
 router = APIRouter()
 
@@ -31,9 +32,8 @@ def _get_mcp_client_for_integration(integration: IntegrationModel) -> MCPClient:
     if not server_url:
         server_url = settings.mcp_gateway_url  # Default
     
-    # Create client with custom URL
-    client = MCPClient()
-    client.base_url = server_url
+    # Create client with custom URL - pass it to constructor to ensure headers are set correctly
+    client = MCPClient(base_url=server_url)
     return client
 
 
@@ -119,8 +119,9 @@ async def get_mcp_tools(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get available tools from an MCP integration (for current tenant)"""
+    """Get available tools from an MCP integration (with per-user selected tools)"""
     result = await db.execute(
         select(IntegrationModel)
         .where(IntegrationModel.id == integration_id)
@@ -142,13 +143,48 @@ async def get_mcp_tools(
         
         client = _get_mcp_client_for_integration(integration)
         logger.info(f"Created MCP client with base_url: {client.base_url}")
+        logger.info(f"MCP client headers: {list(client.headers.keys())} (token configured: {bool(settings.mcp_gateway_auth_token)})")
         
         try:
             tools = await client.list_tools()
             logger.info(f"list_tools() returned: type={type(tools)}, length={len(tools) if isinstance(tools, list) else 'N/A'}")
         except Exception as list_error:
-            logger.error(f"Error in list_tools(): {list_error}", exc_info=True)
-            raise
+            # Extract the real error from ExceptionGroup/TaskGroup if present
+            real_error = list_error
+            error_message = str(list_error)
+            
+            # Check if it's an ExceptionGroup (Python 3.11+)
+            if hasattr(list_error, 'exceptions') and len(list_error.exceptions) > 0:
+                # Get the first exception from the group
+                real_error = list_error.exceptions[0]
+                error_message = str(real_error)
+                logger.warning(f"Extracted error from ExceptionGroup: {error_message}")
+            
+            logger.error(f"Error in list_tools(): {error_message}", exc_info=True)
+            
+            # Log the full error for debugging
+            error_str = error_message.lower()
+            error_detail = error_message
+            
+            # Check if it's an authentication error
+            if "401" in error_str or "unauthorized" in error_str or (hasattr(real_error, 'status_code') and real_error.status_code == 401):
+                logger.warning(f"MCP Gateway authentication error. Token configured: {bool(settings.mcp_gateway_auth_token)}")
+                # Re-raise the original error with a clearer message
+                raise HTTPException(
+                    status_code=401,
+                    detail=f"MCP Gateway authentication failed: {error_detail[:200]}. Please check MCP_GATEWAY_AUTH_TOKEN configuration."
+                )
+            elif "connection" in error_str or "refused" in error_str or "connect" in error_str:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"MCP Gateway is not available: {error_detail[:200]}. Please check if the gateway is running."
+                )
+            else:
+                # For other errors, re-raise with original error details
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"MCP Gateway error: {error_detail[:200]}"
+                )
         finally:
             try:
                 await client.close()
@@ -167,27 +203,12 @@ async def get_mcp_tools(
             else:
                 logger.warning("Tools list is empty!")
         
-        # Get selected tools from metadata
-        # session_metadata is JSONB, ensure it's a dict
-        metadata = integration.session_metadata
-        if metadata is None:
-            metadata = {}
-        elif not isinstance(metadata, dict):
-            # JSONB might be returned as a string or other type, convert it
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse session_metadata as JSON: {metadata}")
-                    metadata = {}
-            else:
-                logger.warning(f"session_metadata is not a dict: {type(metadata)}, value: {metadata}")
-                metadata = {}
+        # Get selected tools from user_metadata (per-user preferences)
+        user_metadata = current_user.user_metadata or {}
+        mcp_preferences = user_metadata.get("mcp_tools_preferences", {})
+        selected_tools = mcp_preferences.get(str(integration_id), [])
         
-        selected_tools = metadata.get("selected_tools", [])
-        
-        logger.info(f"Retrieved selected_tools for integration {integration_id}: {selected_tools} (type: {type(selected_tools)}, length: {len(selected_tools) if isinstance(selected_tools, list) else 'N/A'})")
-        logger.info(f"Full metadata: {metadata}")
+        logger.info(f"Retrieved selected_tools for user {current_user.email}, integration {integration_id}: {selected_tools} (type: {type(selected_tools)}, length: {len(selected_tools) if isinstance(selected_tools, list) else 'N/A'})")
         
         # Ensure selected_tools is a list
         if not isinstance(selected_tools, list):
@@ -200,6 +221,9 @@ async def get_mcp_tools(
             "available_tools": tools,
             "selected_tools": selected_tools,
         }
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 503 for auth errors) as-is
+        raise
     except Exception as e:
         logger.error(f"Error fetching tools from MCP integration {integration_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching tools: {str(e)}")
@@ -215,8 +239,9 @@ async def select_mcp_tools(
     request: SelectToolsRequest,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Select which MCP tools to enable for this integration (for current tenant)"""
+    """Select which MCP tools to enable for this integration (per-user preferences)"""
     result = await db.execute(
         select(IntegrationModel)
         .where(
@@ -269,47 +294,38 @@ async def select_mcp_tools(
                 detail=f"Invalid tool names: {invalid_tools}. Available: {available_tool_names[:20]}...",
             )
         
-        # Update metadata with selected tools (metadata already loaded above)
-        # Create a new dict to ensure SQLAlchemy detects the change
-        new_metadata = dict(metadata)  # Copy the existing metadata
-        new_metadata["selected_tools"] = request.tool_names
+        # Save selected tools in user_metadata instead of integration metadata (per-user preferences)
+        # Get current user_metadata (create a copy to ensure SQLAlchemy detects the change)
+        current_metadata = current_user.user_metadata or {}
+        user_metadata = dict(current_metadata)  # Create a new dict to ensure SQLAlchemy detects the change
         
-        logger.info(f"Saving selected_tools for integration {integration_id}: {request.tool_names} (count: {len(request.tool_names)})")
-        logger.info(f"Full metadata being saved: {new_metadata}")
+        # Store MCP tools preferences as a dict: {integration_id: [tool_names]}
+        if "mcp_tools_preferences" not in user_metadata:
+            user_metadata["mcp_tools_preferences"] = {}
+        
+        # Create a new dict for mcp_tools_preferences to ensure SQLAlchemy detects the change
+        mcp_prefs = dict(user_metadata.get("mcp_tools_preferences", {}))
+        mcp_prefs[str(integration_id)] = request.tool_names
+        user_metadata["mcp_tools_preferences"] = mcp_prefs
+        
+        logger.info(f"Saving selected_tools for user {current_user.email}, integration {integration_id}: {request.tool_names} (count: {len(request.tool_names)})")
         
         # Use explicit UPDATE statement to ensure JSONB is saved correctly
         # This is more reliable than modifying the object directly with AsyncSession
         await db.execute(
-            update(IntegrationModel)
-            .where(
-                IntegrationModel.id == integration_id,
-                IntegrationModel.tenant_id == tenant_id
-            )
-            .values(session_metadata=new_metadata)
+            update(User)
+            .where(User.id == current_user.id)
+            .values(user_metadata=user_metadata)
         )
         await db.commit()
+        await db.refresh(current_user)
         
-        # Refresh to get the updated object
-        await db.refresh(integration)
+        # Verify the save worked by reading from user_metadata
+        saved_user_metadata = current_user.user_metadata or {}
+        saved_mcp_prefs = saved_user_metadata.get("mcp_tools_preferences", {})
+        saved_selected = saved_mcp_prefs.get(str(integration_id), [])
         
-        # Verify the save worked by reading from database
-        await db.refresh(integration)
-        saved_metadata = integration.session_metadata or {}
-        
-        # Handle case where session_metadata might be a string or other type
-        if not isinstance(saved_metadata, dict):
-            if isinstance(saved_metadata, str):
-                try:
-                    saved_metadata = json.loads(saved_metadata)
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse saved metadata as JSON: {saved_metadata}")
-                    saved_metadata = {}
-            else:
-                logger.error(f"Saved metadata is not a dict: {type(saved_metadata)}, value: {saved_metadata}")
-                saved_metadata = {}
-        
-        saved_selected = saved_metadata.get("selected_tools", [])
-        logger.info(f"Verified saved selected_tools: {saved_selected} (count: {len(saved_selected) if isinstance(saved_selected, list) else 0})")
+        logger.info(f"Verified saved selected_tools for user {current_user.email}: {saved_selected} (count: {len(saved_selected) if isinstance(saved_selected, list) else 0})")
         
         # Double-check: if saved_selected is empty but we saved tools, something went wrong
         if not saved_selected and request.tool_names:
