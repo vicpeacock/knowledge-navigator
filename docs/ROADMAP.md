@@ -200,22 +200,61 @@
 
 ---
 
+### Fase 5 - Kaggle Challenge Submission (3-4 settimane) - 🎯 In Corso
+
+**Preparazione per Agents Intensive Capstone Project** (Scadenza: 1 Dicembre 2025)
+
+**Observability:**
+- [ ] Tracing implementation (OpenTelemetry)
+- [ ] Metrics collection e dashboard
+- [ ] Logging avanzato
+
+**Agent Evaluation:**
+- [ ] Evaluation framework
+- [ ] Test cases per scenari comuni
+- [ ] Report generation
+
+**Deployment:**
+- [ ] Cloud Run deployment
+- [ ] Database setup su cloud
+- [ ] Documentazione deployment
+
+**Gemini Support (Opzionale):**
+- [ ] Integrazione Gemini API
+- [ ] Supporto multi-LLM (Ollama/Gemini)
+
+**Video & Submission:**
+- [ ] Video dimostrativo <3 min
+- [ ] Writeup completo
+- [ ] Final submission su Kaggle
+
+📋 **Roadmap dettagliata**: Vedi `docs/KAGGLE_SUBMISSION_ROADMAP.md`
+
+---
+
 ## 🎯 Prossimi Passi Suggeriti
 
-**Opzione 1: Completare Fase 1** ✅ (Quasi completa)
+**Opzione 1: Kaggle Challenge Submission** 🎯 (Priorità Alta - Scadenza 1 Dic)
+- Observability (tracing, metrics)
+- Agent Evaluation system
+- Cloud Run deployment
+- Video dimostrativo
+- Writeup finale
+
+**Opzione 2: Completare Fase 1** ✅ (Quasi completa)
 - ✅ Navigazione web avanzata
 - ✅ Indicizzazione email in memoria
 - ✅ Indicizzazione contenuti web in memoria
 - ✅ Toggle Web Search
 - ⏸️ WhatsApp integration (pianificata con Business API)
 
-**Opzione 2: Iniziare Fase 2** (Raccomandato)
+**Opzione 3: Iniziare Fase 2** (Dopo Kaggle)
 - Sistema eventi
 - WebSocket per proattività
 - Notifiche real-time
 - Monitoraggio email/calendario
 
-**Opzione 3: Miglioramenti Core**
+**Opzione 4: Miglioramenti Core**
 - Auto-apprendimento memoria
 - Ricerca semantica avanzata
 - UI/UX improvements
