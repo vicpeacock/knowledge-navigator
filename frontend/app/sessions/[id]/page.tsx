@@ -6,10 +6,11 @@ import ChatInterface from '@/components/ChatInterface'
 import SessionList from '@/components/SessionList'
 import SessionDetails from '@/components/SessionDetails'
 import { AgentActivityProvider } from '@/components/AgentActivityContext'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { sessionsApi } from '@/lib/api'
 import { Session } from '@/types'
 
-export default function SessionPage() {
+function SessionPageContent() {
   const params = useParams()
   const sessionId = params.id as string
   const [session, setSession] = useState<Session | null>(null)
@@ -55,6 +56,14 @@ export default function SessionPage() {
         </AgentActivityProvider>
       </div>
     </div>
+  )
+}
+
+export default function SessionPage() {
+  return (
+    <ProtectedRoute>
+      <SessionPageContent />
+    </ProtectedRoute>
   )
 }
 

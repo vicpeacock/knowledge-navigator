@@ -1,6 +1,7 @@
 import './globals.css'
 import { StatusProvider } from '@/components/StatusPanel'
 import { BackendStatus } from '@/components/BackendStatus'
+import { AuthProviderWrapper } from '@/components/AuthProviderWrapper'
 
 export const metadata = {
   title: 'Knowledge Navigator',
@@ -16,9 +17,11 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <BackendStatus>
-          <StatusProvider>
-            {children}
-          </StatusProvider>
+          <AuthProviderWrapper>
+            <StatusProvider>
+              {children}
+            </StatusProvider>
+          </AuthProviderWrapper>
         </BackendStatus>
       </body>
     </html>

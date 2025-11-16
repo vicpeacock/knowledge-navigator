@@ -11,8 +11,9 @@ import os
 from fastapi.responses import StreamingResponse
 
 from app.db.database import get_db
-from app.models.database import Session as SessionModel, Message as MessageModel
+from app.models.database import Session as SessionModel, Message as MessageModel, User
 from app.core.tenant_context import get_tenant_id
+from app.core.user_context import get_current_user
 from app.models.schemas import (
     Session,
     SessionCreate,
@@ -132,9 +133,14 @@ async def list_sessions(
     status: Optional[str] = None,  # Filter by status: active, archived, deleted
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all sessions for current tenant, optionally filtered by status"""
-    query = select(SessionModel).where(SessionModel.tenant_id == tenant_id)
+    """List all sessions for current user, optionally filtered by status"""
+    # Filter by tenant_id AND user_id to ensure user isolation
+    query = select(SessionModel).where(
+        SessionModel.tenant_id == tenant_id,
+        SessionModel.user_id == current_user.id
+    )
     if status:
         query = query.where(SessionModel.status == status)
     query = query.order_by(SessionModel.updated_at.desc())
@@ -162,15 +168,17 @@ async def create_session(
     session_data: SessionCreate,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Create a new session for current tenant"""
+    """Create a new session for current user"""
     session_dict = session_data.model_dump()
     # Map metadata to session_metadata for database model
     if 'metadata' in session_dict:
         metadata_value = session_dict.pop('metadata')
         session_dict['session_metadata'] = metadata_value
-    # Assign tenant_id
+    # Assign tenant_id and user_id
     session_dict['tenant_id'] = tenant_id
+    session_dict['user_id'] = current_user.id
     session = SessionModel(**session_dict)
     db.add(session)
     await db.commit()
@@ -194,12 +202,14 @@ async def get_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get a session by ID (for current tenant)"""
+    """Get a session by ID (for current user)"""
     result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
@@ -227,12 +237,14 @@ async def update_session(
     session_data: SessionUpdate,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Update a session (for current tenant)"""
+    """Update a session (for current user)"""
     result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
@@ -271,14 +283,16 @@ async def archive_session(
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Archive a session and index it semantically in long-term memory (for current tenant)"""
+    """Archive a session and index it semantically in long-term memory (for current user)"""
     from datetime import datetime, timezone
     
     result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
@@ -348,12 +362,14 @@ async def restore_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Restore an archived session back to active (for current tenant)"""
+    """Restore an archived session back to active (for current user)"""
     result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
@@ -387,12 +403,14 @@ async def delete_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Delete a session (soft delete by setting status to deleted) - for current tenant"""
+    """Delete a session (soft delete by setting status to deleted) - for current user"""
     result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
@@ -411,16 +429,18 @@ async def get_session_messages(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get all messages for a session (for current tenant)"""
+    """Get all messages for a session (for current user)"""
     import logging
     logger = logging.getLogger(__name__)
     
-    # First verify session belongs to tenant
+    # First verify session belongs to user
     session_result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
     session = session_result.scalar_one_or_none()
@@ -695,13 +715,15 @@ async def chat(
     agent_activity_stream: AgentActivityStream = Depends(get_agent_activity_stream),
     background_tasks: BackgroundTaskManager = Depends(get_background_task_manager),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Send a message and get AI response (for current tenant)"""
-    # Verify session exists and belongs to tenant
+    """Send a message and get AI response (for current user)"""
+    # Verify session exists and belongs to user
     result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
@@ -1560,21 +1582,64 @@ async def stream_agent_activity(
     request: Request,
     db: AsyncSession = Depends(get_db),
     agent_activity_stream: AgentActivityStream = Depends(get_agent_activity_stream),
+    tenant_id: UUID = Depends(get_tenant_id),
+    token: Optional[str] = Query(None, description="JWT token for authentication (for SSE)"),
 ):
     """
     Server-Sent Events endpoint streaming real-time agent activity telemetry
     for the requested session.
+    
+    Note: EventSource doesn't support custom headers, so token is passed as query param.
     """
     import logging
+    from app.core.user_context import get_current_user
+    from app.core.auth import decode_token
+    from sqlalchemy import select as sql_select
+    
     logger = logging.getLogger(__name__)
     
     logger.info(f"🔌 SSE connection request for session {session_id}")
 
-    # Ensure session exists and belongs to tenant before establishing stream
+    # Get user from token (query param for SSE, or header for regular requests)
+    current_user = None
+    if token:
+        # Decode token from query parameter
+        payload = decode_token(token)
+        if payload:
+            user_id = payload.get("sub")
+            if user_id:
+                try:
+                    user_uuid = UUID(str(user_id))
+                    result = await db.execute(
+                        sql_select(User).where(
+                            User.id == user_uuid,
+                            User.tenant_id == tenant_id,
+                            User.active == True
+                        )
+                    )
+                    current_user = result.scalar_one_or_none()
+                except ValueError:
+                    pass
+    
+    # Fallback to header if query param not provided
+    if not current_user:
+        try:
+            authorization = request.headers.get("Authorization")
+            if authorization:
+                current_user = await get_current_user(authorization=authorization, db=db, tenant_id=tenant_id)
+        except HTTPException:
+            pass
+    
+    if not current_user:
+        logger.warning(f"❌ Unauthorized SSE connection attempt for session {session_id}")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Ensure session exists and belongs to user before establishing stream
     result = await db.execute(
         select(SessionModel.id).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
     if result.scalar_one_or_none() is None:
@@ -1621,15 +1686,17 @@ async def get_session_memory(
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get memory information for a session (for current tenant)"""
+    """Get memory information for a session (for current user)"""
     logger = logging.getLogger(__name__)
     
-    # Verify session belongs to tenant
+    # Verify session belongs to user
     session_result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
     session = session_result.scalar_one_or_none()

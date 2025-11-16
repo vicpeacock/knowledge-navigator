@@ -11,9 +11,17 @@ const api = axios.create({
   timeout: 120000, // 2 minutes - increased for longer responses (file summaries can take time)
 })
 
-// Multi-tenant support: Add tenant headers if configured
+// Request interceptor: Add JWT token and multi-tenant headers
 api.interceptors.request.use((config) => {
-  // Add X-API-Key header if available (from localStorage or env)
+  // Add JWT token if available (priority 1: authentication)
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
+  }
+  
+  // Add X-API-Key header if available (for API key auth, fallback)
   const apiKey = typeof window !== 'undefined' 
     ? localStorage.getItem('api_key') || process.env.NEXT_PUBLIC_API_KEY
     : process.env.NEXT_PUBLIC_API_KEY
@@ -33,6 +41,85 @@ api.interceptors.request.use((config) => {
   
   return config
 })
+
+// Response interceptor: Handle 401 (token expired) with automatic refresh
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config
+
+    // If 401 and not already retrying
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true
+
+      try {
+        // Try to refresh token
+        const refreshToken = typeof window !== 'undefined' 
+          ? localStorage.getItem('refresh_token')
+          : null
+
+        if (refreshToken) {
+          const response = await api.post('/api/v1/auth/refresh', {
+            refresh_token: refreshToken
+          })
+
+          const { access_token } = response.data
+          
+          // Update token in localStorage
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('access_token', access_token)
+          }
+
+          // Update authorization header and retry original request
+          originalRequest.headers['Authorization'] = `Bearer ${access_token}`
+          return api(originalRequest)
+        }
+      } catch (refreshError) {
+        // Refresh failed, clear tokens and redirect to login
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+          // Redirect will be handled by middleware or component
+        }
+        return Promise.reject(refreshError)
+      }
+    }
+
+    return Promise.reject(error)
+  }
+)
+
+// Auth API
+export const authApi = {
+  login: (data: { email: string; password: string }) =>
+    api.post('/api/v1/auth/login', data),
+  register: (data: { email: string; password: string; name?: string; tenant_id?: string }) =>
+    api.post('/api/v1/auth/register', data),
+  logout: () => api.post('/api/v1/auth/logout'),
+  refresh: (data: { refresh_token: string }) =>
+    api.post('/api/v1/auth/refresh', data),
+  me: () => api.get('/api/v1/auth/me'),
+  changePassword: (data: { current_password: string; new_password: string }) =>
+    api.post('/api/v1/auth/change-password', data),
+  verifyEmail: (token: string) =>
+    api.get('/api/v1/auth/verify-email', { params: { token } }),
+  requestPasswordReset: (data: { email: string }) =>
+    api.post('/api/v1/auth/password-reset/request', data),
+  confirmPasswordReset: (data: { token: string; new_password: string }) =>
+    api.post('/api/v1/auth/password-reset/confirm', data),
+}
+
+// Users API (admin only)
+export const usersApi = {
+  list: (filters?: { role?: string; active?: boolean }) =>
+    api.get('/api/v1/users', { params: filters }),
+  create: (data: { email: string; name?: string; password?: string; role?: string; send_invitation_email?: boolean }) =>
+    api.post('/api/v1/users', data),
+  get: (id: string) => api.get(`/api/v1/users/${id}`),
+  update: (id: string, data: { name?: string; role?: string; active?: boolean }) =>
+    api.put(`/api/v1/users/${id}`, data),
+  delete: (id: string) => api.delete(`/api/v1/users/${id}`),
+}
 
 // API Keys API
 export const apikeysApi = {
@@ -57,7 +144,7 @@ export const sessionsApi = {
   restore: (id: string) => api.post(`/api/sessions/${id}/restore`),
   getMessages: (id: string) => api.get(`/api/sessions/${id}/messages`),
   chat: (id: string, message: string, useMemory: boolean = true, forceWebSearch: boolean = false) =>
-    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: useMemory, force_web_search: forceWebSearch }, { timeout: 180000 }), // 3 minutes to allow long-running background tasks
+    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: useMemory, force_web_search: forceWebSearch }, { timeout: 300000 }), // 5 minutes to allow long-running background tasks
   getMemory: (id: string) => api.get(`/api/sessions/${id}/memory`),
   cleanContradictionNotifications: () => api.delete('/api/sessions/notifications/contradictions'),
 }

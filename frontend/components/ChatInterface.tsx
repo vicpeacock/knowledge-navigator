@@ -342,7 +342,12 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
       // Check if response is valid
       if (!response.data) {
         console.error('No data in response:', response)
-        throw new Error('Invalid response format: no data')
+        // Don't throw error - might be background task
+        console.log('No data in response (might be background task), will reload messages')
+        setLoading(false)
+        // Reload messages to get the response that was saved
+        setTimeout(() => loadMessages(), 2000)
+        return
       }
       
       // Handle agent activity even if response is empty (background tasks)
@@ -350,10 +355,12 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         ingestBatch(response.data.agent_activity)
       }
       
-      // If response is empty, it might be a background task - don't show error
+      // If response is empty, it might be a background task - reload messages
       if (!response.data.response || response.data.response.trim() === '') {
-        console.log('Empty response received (likely background task), skipping message display')
+        console.log('Empty response received (likely background task), reloading messages')
         setLoading(false)
+        // Reload messages to get the response that was saved in background
+        setTimeout(() => loadMessages(), 2000)
         return
       }
 
@@ -467,7 +474,19 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         message: error.message,
         response: error.response?.data,
         status: error.response?.status,
+        code: error.code,
       })
+      
+      // If it's a network error or timeout, the message might still be processing
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout') || error.message?.includes('Network Error')) {
+        console.log('Network error/timeout - message might be processing in background, reloading messages')
+        setLoading(false)
+        // Reload messages after a delay to get the response
+        setTimeout(() => loadMessages(), 3000)
+        addStatusMessage('info', 'Message is being processed. Refreshing...')
+        return
+      }
+      
       const errorMessage: Message = {
         id: '',
         session_id: sessionId,
