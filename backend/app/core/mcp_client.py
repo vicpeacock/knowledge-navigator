@@ -21,9 +21,15 @@ class MCPClient:
     
     def __init__(self, base_url: Optional[str] = None):
         self.base_url = base_url or settings.mcp_gateway_url
-        # Remove /mcp suffix if present
-        if self.base_url.endswith('/mcp'):
+        # Remove /mcp suffix if present (streamable_http will add it)
+        if self.base_url.endswith("/mcp"):
             self.base_url = self.base_url[:-4]
+
+        # Prepare optional auth headers for MCP Gateway
+        self.headers: Dict[str, str] = {}
+        if settings.mcp_gateway_auth_token:
+            # MCP Gateway advertises Bearer auth
+            self.headers["Authorization"] = f"Bearer {settings.mcp_gateway_auth_token}"
     
     async def list_tools(self) -> List[Dict[str, Any]]:
         """List available MCP tools"""
@@ -32,7 +38,7 @@ class MCPClient:
             # Use AsyncExitStack to properly manage nested context managers
             # This ensures all cleanup happens in the same task context
             transport = await exit_stack.enter_async_context(
-                streamablehttp_client(self.base_url, headers={})
+                streamablehttp_client(self.base_url, headers=self.headers)
             )
             read_stream, write_stream, session_info = transport
             
@@ -76,7 +82,7 @@ class MCPClient:
             # Use AsyncExitStack to properly manage nested context managers
             # This ensures all cleanup happens in the same task context
             transport = await exit_stack.enter_async_context(
-                streamablehttp_client(self.base_url, headers={})
+                streamablehttp_client(self.base_url, headers=self.headers)
             )
             read_stream, write_stream, session_info = transport
             

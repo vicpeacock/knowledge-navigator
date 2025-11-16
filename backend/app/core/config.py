@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     # Use host.docker.internal:8080 if backend runs inside Docker
     # Users can override this when connecting via the UI
     mcp_gateway_url: str = "http://localhost:8080"  # Docker MCP Gateway default port
+    # Optional Bearer token for MCP Gateway (if it requires auth)
+    mcp_gateway_auth_token: Optional[str] = None
 
     # Security
     secret_key: str = "your-secret-key-change-in-production"
