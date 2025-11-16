@@ -56,16 +56,28 @@ function UsersListContent() {
     }
   }
 
-  const handleDelete = async (userId: string) => {
-    if (!confirm('Are you sure you want to deactivate this user?')) {
+  const handleToggleActive = async (user: UserResponse) => {
+    const action = user.active ? 'deactivate' : 'activate'
+    if (!confirm(`Are you sure you want to ${action} this user?`)) {
       return
     }
 
     try {
-      await usersApi.delete(userId)
-      loadUsers() // Reload list
+      if (user.active) {
+        // Deactivate via DELETE endpoint (soft delete)
+        await usersApi.delete(user.id)
+      } else {
+        // Reactivate via update endpoint
+        await usersApi.update(user.id, { active: true })
+      }
+      loadUsers()
     } catch (err: any) {
-      alert(`Error: ${err.response?.data?.detail || 'Failed to deactivate user'}`)
+      alert(
+        `Error: ${
+          err.response?.data?.detail ||
+          (user.active ? 'Failed to deactivate user' : 'Failed to activate user')
+        }`,
+      )
     }
   }
 
@@ -210,7 +222,7 @@ function UsersListContent() {
                         </button>
                       )}
                       <button
-                        onClick={() => handleDelete(u.id)}
+                        onClick={() => handleToggleActive(u)}
                         className="text-red-600 hover:text-red-900 dark:text-red-400"
                       >
                         {u.active ? 'Deactivate' : 'Activate'}
