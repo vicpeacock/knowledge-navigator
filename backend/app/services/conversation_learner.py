@@ -208,9 +208,24 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                 errors.append(f"Knowledge item: {str(e)}")
                 logger.error(f"Error indexing knowledge item: {e}")
         
+        # Build stats before integrity check
+        stats = {
+            "indexed": indexed_count,
+            "errors": errors,
+            "total": len(knowledge_items),
+        }
+        
         # Schedule background integrity check (fire and forget)
-        # Check contradictions for ALL items (including duplicates) - duplicates might still be contradictions
+        # IMPORTANT: Only check contradictions if we actually indexed NEW knowledge to long-term memory
+        # This prevents the integrity agent from being activated when no knowledge was extracted or indexed
+        # CRITICAL: Only schedule integrity check if we actually indexed NEW knowledge (not just duplicates)
+        if indexed_count == 0:
+            logger.info(f"⏭️  Skipping integrity check: no new knowledge indexed (indexed_count=0, items_to_check={len(items_to_check_contradictions)})")
+            return stats
+        
+        # Only proceed if we have items to check AND we actually indexed something
         if items_to_check_contradictions:
+            
             try:
                 import asyncio
                 from app.db.database import AsyncSessionLocal
@@ -219,6 +234,8 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                 
                 async def _check_integrity_background():
                     """Background task to check integrity of knowledge (including duplicates)"""
+                    # IMPORTANT: This runs silently in background - no activity events published
+                    # Activity events are only published when contradictions are actually found (in process_new_knowledge)
                     async with AsyncSessionLocal() as db_session:
                         try:
                             agent = BackgroundAgent(
@@ -229,10 +246,11 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                             )
                             
                             # Process each knowledge item (including duplicates) for contradiction check
+                            # This runs silently - no telemetry events unless contradictions are found
                             for item in items_to_check_contradictions:
                                 content = item.get("content", "")
                                 if content:
-                                    logger.info(f"🔍 Checking contradictions for: {content[:50]}...")
+                                    logger.debug(f"🔍 Checking contradictions for: {content[:50]}...")
                                     await agent.process_new_knowledge(
                                         knowledge_item=item,
                                         session_id=session_id,
@@ -241,17 +259,17 @@ Se non ci sono conoscenze importanti da estrarre, restituisci {{"knowledge": []}
                             logger.warning(f"Error in background integrity check: {e}", exc_info=True)
                 
                 # Schedule background task (don't await to avoid blocking)
+                # NOTE: This runs silently in background - no telemetry events are published
+                # The integrity agent will only appear active if contradictions are found (handled in process_new_knowledge)
                 asyncio.create_task(_check_integrity_background())
-                logger.info(f"🔍 Scheduled background integrity check for {len(items_to_check_contradictions)} knowledge items (including duplicates)")
+                logger.debug(f"🔍 Scheduled background integrity check for {len(items_to_check_contradictions)} knowledge items ({indexed_count} newly indexed) - running silently")
                 
             except Exception as e:
                 logger.warning(f"Error scheduling background integrity check: {e}", exc_info=True)
+        else:
+            logger.debug("No knowledge items to check for contradictions (no items extracted or all filtered)")
         
-        return {
-            "indexed": indexed_count,
-            "errors": errors,
-            "total": len(knowledge_items),
-        }
+        return stats
     
     async def _check_duplicate_knowledge(
         self,

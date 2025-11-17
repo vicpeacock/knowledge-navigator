@@ -15,6 +15,7 @@ from app.services.embedding_service import EmbeddingService
 from app.core.dependencies import get_memory_manager
 from app.core.memory_manager import MemoryManager
 from app.core.tenant_context import get_tenant_id
+from app.core.user_context import get_current_user
 
 router = APIRouter()
 file_processor = FileProcessor()
@@ -120,27 +121,42 @@ async def get_session_files(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user = Depends(get_current_user),
 ):
-    """Get all files for a session (for current tenant)"""
-    # Verify session belongs to tenant
+    """Get all files for a session (for current tenant and user)"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"📁 Getting files for session {session_id} (user: {current_user.email})")
+    
+    # Verify session belongs to tenant AND user
     session_result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
         )
     )
-    if not session_result.scalar_one_or_none():
+    session = session_result.scalar_one_or_none()
+    if not session:
+        logger.warning(f"   Session {session_id} not found for user {current_user.email}")
         raise HTTPException(status_code=404, detail="Session not found")
     
-    result = await db.execute(
-        select(FileModel)
-        .where(
-            FileModel.session_id == session_id,
-            FileModel.tenant_id == tenant_id
+    logger.info(f"   Session found, retrieving files...")
+    
+    try:
+        result = await db.execute(
+            select(FileModel)
+            .where(
+                FileModel.session_id == session_id,
+                FileModel.tenant_id == tenant_id
+            )
+            .order_by(FileModel.uploaded_at.desc())
         )
-        .order_by(FileModel.uploaded_at.desc())
-    )
-    files = result.scalars().all()
+        files = result.scalars().all()
+        logger.info(f"   Found {len(files)} files for session {session_id}")
+    except Exception as e:
+        logger.error(f"   Error querying files: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving files: {str(e)}")
     # Map session_metadata to metadata for response
     return [
         FileSchema(

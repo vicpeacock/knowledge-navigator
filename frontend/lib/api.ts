@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getCurrentTraceId, trackApiRequest, trackApiResponse } from './tracing'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -11,8 +12,11 @@ const api = axios.create({
   timeout: 120000, // 2 minutes - increased for longer responses (file summaries can take time)
 })
 
-// Request interceptor: Add JWT token and multi-tenant headers
+// Request interceptor: Add JWT token, multi-tenant headers, and trace ID
 api.interceptors.request.use((config) => {
+  // Preserve existing metadata if present (for retries)
+  const existingMetadata = (config as any).metadata
+  
   // Add JWT token if available (priority 1: authentication)
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('access_token')
@@ -39,14 +43,75 @@ api.interceptors.request.use((config) => {
     config.headers['X-Tenant-ID'] = tenantId
   }
   
+  // Add trace ID for observability (only if not already set)
+  if (!existingMetadata) {
+    try {
+      const traceId = getCurrentTraceId()
+      if (traceId) {
+        config.headers['X-Trace-ID'] = traceId
+        
+        // Store metadata for response tracking
+        const startTime = Date.now()
+        ;(config as any).metadata = { startTime, traceId }
+        
+        // Track request
+        trackApiRequest(config.method?.toUpperCase() || 'GET', config.url || '', traceId, startTime)
+      }
+    } catch (error) {
+      // If tracing fails, continue without it (don't break the request)
+      console.warn('Failed to add trace ID to request:', error)
+    }
+  } else {
+    // Preserve existing metadata and trace ID
+    if (existingMetadata.traceId) {
+      config.headers['X-Trace-ID'] = existingMetadata.traceId
+    }
+  }
+  
   return config
 })
 
-// Response interceptor: Handle 401 (token expired) with automatic refresh
+// Response interceptor: Track responses and handle 401 (token expired) with automatic refresh
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Track successful response (only if config exists)
+    if (response.config) {
+      const metadata = (response.config as any).metadata
+      if (metadata) {
+        const duration = Date.now() - metadata.startTime
+        trackApiResponse(
+          response.config.method?.toUpperCase() || 'GET',
+          response.config.url || '',
+          metadata.traceId,
+          response.status,
+          duration
+        )
+        
+        // Store backend trace ID if present
+        const backendTraceId = response.headers['x-trace-id']
+        if (backendTraceId && process.env.NODE_ENV === 'development') {
+          console.log(`[Trace: ${metadata.traceId}] Backend Trace ID: ${backendTraceId}`)
+        }
+      }
+    }
+    return response
+  },
   async (error) => {
     const originalRequest = error.config
+    
+    // Track error response
+    const metadata = originalRequest?.metadata
+    if (metadata) {
+      const duration = Date.now() - metadata.startTime
+      trackApiResponse(
+        originalRequest?.method?.toUpperCase() || 'GET',
+        originalRequest?.url || '',
+        metadata.traceId,
+        error.response?.status || 0,
+        duration,
+        error
+      )
+    }
 
     // If 401 and not already retrying
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -72,6 +137,8 @@ api.interceptors.response.use(
 
           // Update authorization header and retry original request
           originalRequest.headers['Authorization'] = `Bearer ${access_token}`
+          
+          // Metadata will be preserved automatically by request interceptor
           return api(originalRequest)
         }
       } catch (refreshError) {
@@ -149,9 +216,9 @@ export const sessionsApi = {
   archive: (id: string) => api.post(`/api/sessions/${id}/archive`),
   restore: (id: string) => api.post(`/api/sessions/${id}/restore`),
   getMessages: (id: string) => api.get(`/api/sessions/${id}/messages`),
-  chat: (id: string, message: string, useMemory: boolean = true, forceWebSearch: boolean = false) =>
-    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: useMemory, force_web_search: forceWebSearch }, { timeout: 300000 }), // 5 minutes to allow long-running background tasks
-  getMemory: (id: string) => api.get(`/api/sessions/${id}/memory`),
+  chat: (id: string, message: string) =>
+    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: true, force_web_search: false }, { timeout: 300000 }), // 5 minutes to allow long-running background tasks
+  getMemory: (id: string) => api.get(`/api/sessions/${id}/memory`, { timeout: 30000 }), // 30 seconds
   cleanContradictionNotifications: () => api.delete('/api/sessions/notifications/contradictions'),
 }
 
@@ -164,7 +231,7 @@ export const filesApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  list: (sessionId: string) => api.get(`/api/files/session/${sessionId}`),
+  list: (sessionId: string) => api.get(`/api/files/session/${sessionId}`, { timeout: 30000 }), // 30 seconds
   get: (fileId: string) => api.get(`/api/files/id/${fileId}`),
   delete: (fileId: string) => api.delete(`/api/files/id/${fileId}`),
   search: (sessionId: string, query: string, nResults: number = 5) =>
@@ -237,6 +304,8 @@ export const integrationsApi = {
       api.post(`/api/integrations/mcp/${integrationId}/tools/select`, { tool_names: toolNames }),
     deleteIntegration: (integrationId: string) =>
       api.delete(`/api/integrations/mcp/integrations/${integrationId}`),
+    updateIntegration: (integrationId: string, name: string) =>
+      api.put(`/api/integrations/mcp/integrations/${integrationId}`, { name }),
     test: (integrationId: string) => api.post(`/api/integrations/mcp/${integrationId}/test`, { timeout: 45000 }),
     debug: (integrationId: string) => api.get(`/api/integrations/mcp/${integrationId}/debug`),
   },

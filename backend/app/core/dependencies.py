@@ -56,9 +56,13 @@ def init_clients():
 
     if _planner_client is None:
         try:
+            # Use planner URL if set, otherwise fallback to main Ollama URL
+            planner_url = settings.ollama_planner_base_url or settings.ollama_base_url
+            planner_model = settings.ollama_planner_model or settings.ollama_model
+            logger.info(f"Initializing planner client: URL={planner_url}, model={planner_model}")
             _planner_client = OllamaClient(
-                base_url=settings.ollama_planner_base_url,
-                model=settings.ollama_planner_model,
+                base_url=planner_url,
+                model=planner_model,
             )
         except Exception as exc:
             logger.error("Failed to initialize planner client: %s", exc, exc_info=True)

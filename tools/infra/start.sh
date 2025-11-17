@@ -60,21 +60,90 @@ fi
 # Avvio Backend
 echo "⚙️  Avvio backend..."
 cd "$PROJECT_ROOT/backend"
-source venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload &
+
+# Termina processi esistenti sulla porta 8000
+if lsof -ti:8000 > /dev/null 2>&1; then
+    echo "⚠️  Trovati processi sulla porta 8000, terminazione..."
+    lsof -ti:8000 | xargs kill -9 2>/dev/null
+    sleep 2
+fi
+
+# Attiva virtual environment
+if [ -d "venv" ]; then
+    source venv/bin/activate
+elif [ -d ".venv" ]; then
+    source .venv/bin/activate
+else
+    echo "❌ Virtual environment non trovato!"
+    exit 1
+fi
+
+# Avvia il backend
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > "$PROJECT_ROOT/backend/backend.log" 2>&1 &
 BACKEND_PID=$!
 echo $BACKEND_PID > /tmp/backend.pid
 cd ..
 
+# Attendi che il backend sia pronto
+echo "⏳ Attesa avvio backend..."
+BACKEND_READY=false
+for i in {1..30}; do
+    if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+        BACKEND_READY=true
+        echo "✅ Backend pronto"
+        break
+    fi
+    sleep 1
+done
+
+if [ "$BACKEND_READY" = false ]; then
+    echo "❌ Backend non risponde dopo 30 secondi. Controlla i log: tail -f backend/backend.log"
+    exit 1
+fi
+
 # Avvio Frontend
 echo "🎨 Avvio frontend..."
+
+# Termina processi esistenti sulla porta 3003
+if lsof -ti:3003 > /dev/null 2>&1; then
+    echo "⚠️  Trovati processi sulla porta 3003, terminazione..."
+    lsof -ti:3003 | xargs kill -9 2>/dev/null
+    sleep 2
+fi
+
 cd "$PROJECT_ROOT/frontend"
-npm run dev &
+
+# Verifica che node_modules esista
+if [ ! -d "node_modules" ]; then
+    echo "📦 Installazione dipendenze frontend..."
+    npm install
+fi
+
+# Avvia il frontend
+npm run dev > /tmp/frontend.log 2>&1 &
 FRONTEND_PID=$!
 echo $FRONTEND_PID > /tmp/frontend.pid
 cd ..
 
-sleep 5
+# Attendi che il frontend sia pronto
+echo "⏳ Attesa avvio frontend..."
+FRONTEND_READY=false
+for i in {1..60}; do
+    if curl -s http://localhost:3003 > /dev/null 2>&1; then
+        # Verifica che i chunk siano accessibili
+        if curl -s http://localhost:3003/_next/static/chunks/webpack.js > /dev/null 2>&1; then
+            FRONTEND_READY=true
+            echo "✅ Frontend pronto"
+            break
+        fi
+    fi
+    sleep 1
+done
+
+if [ "$FRONTEND_READY" = false ]; then
+    echo "⚠️  Frontend non completamente pronto dopo 60 secondi. Controlla i log: tail -f /tmp/frontend.log"
+    echo "   Il frontend potrebbe essere ancora in avvio..."
+fi
 
 echo ""
 echo "✅ Servizi avviati!"
@@ -86,6 +155,10 @@ echo "  API Docs: http://localhost:8000/docs"
 if [ -f /tmp/llama_background.pid ]; then
     echo "  llama.cpp: http://localhost:11435/v1"
 fi
+echo ""
+echo "📋 Log:"
+echo "  Backend:  tail -f backend/backend.log"
+echo "  Frontend: tail -f /tmp/frontend.log"
 echo ""
 echo "🛑 Per fermare: ./stop.sh"
 

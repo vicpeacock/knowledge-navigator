@@ -19,7 +19,8 @@ export default function FileManager({ sessionId, isOpen, onClose, onFileUploaded
   const [deleting, setDeleting] = useState<string | null>(null)
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && sessionId) {
+      console.log('[FileManager] Loading files for session:', sessionId)
       loadFiles()
     }
   }, [isOpen, sessionId])
@@ -27,11 +28,15 @@ export default function FileManager({ sessionId, isOpen, onClose, onFileUploaded
   const loadFiles = async () => {
     setLoading(true)
     try {
+      console.log('[FileManager] Calling filesApi.list for session:', sessionId)
       const response = await filesApi.list(sessionId)
-      setFiles(response.data)
-    } catch (error) {
-      console.error('Error loading files:', error)
-      alert('Error loading files')
+      console.log('[FileManager] Files loaded:', response.data)
+      setFiles(response.data || [])
+    } catch (error: any) {
+      console.error('[FileManager] Error loading files:', error)
+      const errorMessage = error.response?.data?.detail || error.message || 'Errore nel caricamento dei file'
+      alert(`Error loading files: ${errorMessage}`)
+      setFiles([])
     } finally {
       setLoading(false)
     }
@@ -74,16 +79,21 @@ export default function FileManager({ sessionId, isOpen, onClose, onFileUploaded
 
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-50 z-[110] flex items-center justify-center"
-      style={{ zIndex: 110 }}
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+      style={{ zIndex: 9999 }}
       onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
         if (e.target === e.currentTarget) {
           console.log('[FileManager] Backdrop clicked, closing')
           onClose()
         }
       }}
     >
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+      <div 
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="text-xl font-semibold">File in Memoria</h2>
           <button

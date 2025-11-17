@@ -28,6 +28,7 @@ async def run_main_agent_pipeline(
     retrieved_memory: List[str],
     memory_used: Dict[str, Any],
     tenant_id: Optional[UUID] = None,
+    current_user: Optional[Any] = None,  # User model for tool filtering
 ) -> ChatResponse:
     """
     Esegue l'attuale pipeline principale (tool calling + generazione risposta) e
@@ -36,14 +37,23 @@ async def run_main_agent_pipeline(
     Questo metodo è condiviso sia dal percorso legacy (endpoint /chat) sia dai
     nodi LangGraph, in modo da evitare duplicazione della logica.
     """
-
+    # Set up tool manager with tenant context
+    # CRITICAL: Always pass current_user to respect user preferences
     tool_manager = ToolManager(db=db, tenant_id=tenant_id)
-    available_tools = await tool_manager.get_available_tools()
+    available_tools = await tool_manager.get_available_tools(current_user=current_user)
     tools_description = await tool_manager.get_tools_system_prompt()
+    
+    # Log available tools for debugging
+    tool_names = [t.get("name", "unknown") for t in available_tools]
+    mcp_tools = [t for t in tool_names if t.startswith("mcp_")]
+    logger.info(f"🔧 Available tools: {len(available_tools)} total, {len(mcp_tools)} MCP tools")
+    if mcp_tools:
+        logger.info(f"   MCP tools: {', '.join(mcp_tools[:10])}{'...' if len(mcp_tools) > 10 else ''}")
 
     tools_used: List[str] = []
     tool_iteration = 0
     max_tool_iterations = 3
+    tools_disabled = False  # Flag to disable tools after first tool execution
 
     # Context temporale / geografico
     try:
@@ -141,32 +151,20 @@ L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool g
         logger.info("Tool calling iteration %s, prompt length: %s", tool_iteration, len(current_prompt))
         iteration_tool_results: List[Dict[str, Any]] = []
 
-        # Force web_search se richiesto la prima volta
+        # Force web_search solo se richiesto E non ci sono tool più appropriati disponibili
+        # Lasciamo che Ollama scelga il tool migliore, anche quando force_web_search è attivo
+        # web_search verrà usato solo se Ollama lo seleziona o come fallback
+        # Questo permette di usare tool specialistici (es. Google Maps) quando disponibili
         if request.force_web_search and tool_iteration == 0:
-            logger.info("🔍 Force web_search abilitato - query: %s", request.message)
-            try:
-                web_search_result = await tool_manager.execute_tool(
-                    "web_search",
-                    {"query": request.message},
-                    db=db,
-                    session_id=session_id,
-                )
-                iteration_tool_results.append(
-                    {
-                        "tool": "web_search",
-                        "parameters": {"query": request.message},
-                        "result": web_search_result,
-                    }
-                )
-                tools_used.append("web_search")
-                tool_iteration += 1
-            except Exception as exc:
-                logger.error("Errore durante force_web_search: %s", exc, exc_info=True)
+            logger.info("🔍 Force web_search abilitato, ma lasciando che Ollama scelga il tool migliore tra quelli disponibili")
+            # Non forziamo più web_search qui - lasciamo che Ollama scelga
+            # Se Ollama non seleziona un tool appropriato, web_search sarà comunque disponibile
 
         if not iteration_tool_results:
             try:
-                pass_tools = available_tools if tool_iteration == 0 else None
-                pass_tools_description = tools_description if tool_iteration == 0 and not available_tools else None
+                # Only pass tools on first iteration, or if tools are not disabled
+                pass_tools = available_tools if tool_iteration == 0 and not tools_disabled else None
+                pass_tools_description = tools_description if tool_iteration == 0 and not tools_disabled else None
                 ollama._time_context = time_context
 
                 response_data = await ollama.generate_with_context(
@@ -203,9 +201,49 @@ L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool g
                 response_text = f"Errore nella chiamata al modello: {exc}"
                 break
 
+            # If we have tool results but no response text and no tool calls, we need to generate a response
             if not response_text.strip() and not tool_calls:
-                response_text = "Mi scuso, ho riscontrato un problema nella generazione della risposta. Per favore riprova."
-                break
+                if tool_results:
+                    # We have tool results but no response - force a final response generation
+                    logger.warning("No response text after tool execution, forcing final response generation")
+                    # Generate response from tool results immediately
+                    tool_results_text = "\n\n=== Risultati Tool Chiamati ===\n"
+                    for tr in tool_results:
+                        tool_name = tr["tool"]
+                        wrapper_result = tr["result"]
+                        tool_results_text += f"Tool: {tool_name}\n"
+                        if isinstance(wrapper_result, dict):
+                            result_str = json_lib.dumps(wrapper_result, indent=2, ensure_ascii=False, default=str)
+                        else:
+                            result_str = str(wrapper_result)
+                        tool_results_text += f"{result_str}\n\n"
+                    
+                    final_prompt = f"""{request.message}
+
+{tool_results_text}
+
+IMPORTANTE: Genera una risposta testuale completa e utile per l'utente basata sui risultati dei tool sopra. Fornisci direttamente la risposta finale in italiano."""
+                    try:
+                        logger.info("Generating final response from tool results (iteration %s)", tool_iteration)
+                        final_response = await ollama.generate_with_context(
+                            prompt=final_prompt,
+                            session_context=session_context,
+                            retrieved_memory=retrieved_memory if retrieved_memory else None,
+                            tools=None,  # No tools - force text response
+                            tools_description=None,
+                        )
+                        if isinstance(final_response, dict):
+                            response_text = final_response.get("content", "")
+                        else:
+                            response_text = str(final_response) or ""
+                        logger.info("Final response generated, length: %s", len(response_text))
+                    except Exception as exc:
+                        logger.error("Error generating final response: %s", exc, exc_info=True)
+                        response_text = "Mi scuso, ho riscontrato un problema nella generazione della risposta finale. Per favore riprova."
+                    break
+                else:
+                    response_text = "Mi scuso, ho riscontrato un problema nella generazione della risposta. Per favore riprova."
+                    break
 
         if tool_calls:
             for tool_call in tool_calls:
@@ -213,7 +251,7 @@ L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool g
                 tool_params = tool_call.get("parameters", {})
                 if tool_name:
                     try:
-                        result = await tool_manager.execute_tool(tool_name, tool_params, db, session_id=session_id)
+                        result = await tool_manager.execute_tool(tool_name, tool_params, db, session_id=session_id, current_user=current_user)
                         iteration_tool_results.append(
                             {
                                 "tool": tool_name,
@@ -248,10 +286,12 @@ L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool g
 
 {tool_results_text}
 
-Alla luce dei risultati dei tool sopra, genera ora la risposta finale per l'utente."""
+IMPORTANTE: Hai già eseguito i tool necessari. Ora DEVI generare una risposta testuale completa e utile per l'utente basata sui risultati dei tool sopra. NON chiamare altri tool. Fornisci direttamente la risposta finale in italiano, utilizzando le informazioni ottenute dai tool."""
             tool_results.extend(iteration_tool_results)
             tool_calls = []
             tool_iteration += 1
+            # Disable tools in next iteration to force text response
+            tools_disabled = True
             continue
 
         break

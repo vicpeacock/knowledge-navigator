@@ -253,16 +253,14 @@ export function BackendStatus({ children }: BackendStatusProps) {
   }
 
   if (backendStatus === 'checking') {
-    // Render children even while checking - show overlay instead of blocking
-    // Use lower z-index so popups can appear above it
+    // Render children immediately - don't block rendering
+    // Show a non-blocking status indicator instead
     return (
       <>
         {children}
-        <div className="fixed inset-0 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm flex items-center justify-center z-40 pointer-events-none">
-          <div className="text-center bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg pointer-events-auto">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-400">Verifica connessione al backend...</p>
-          </div>
+        <div className="fixed bottom-4 right-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-4 z-50 flex items-center gap-3">
+          <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Verifica connessione al backend...</p>
         </div>
       </>
     )

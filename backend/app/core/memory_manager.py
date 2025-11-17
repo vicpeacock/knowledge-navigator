@@ -140,8 +140,22 @@ class MemoryManager:
         db: AsyncSession,
         session_id: UUID,
         context_data: Dict[str, Any],
+        tenant_id: Optional[UUID] = None,
     ):
         """Update short-term memory"""
+        # Get tenant_id from parameter, self, or session
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            # Fallback: get tenant_id from session
+            from app.models.database import Session as SessionModel
+            session_result = await db.execute(
+                select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+            )
+            effective_tenant_id = session_result.scalar_one_or_none()
+        
+        if not effective_tenant_id:
+            raise ValueError(f"Cannot update short-term memory: tenant_id is required for session {session_id}")
+        
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.short_term_memory_ttl)
         
         # Update in-memory cache
@@ -152,15 +166,22 @@ class MemoryManager:
         
         # Update database
         result = await db.execute(
-            select(MemoryShort).where(MemoryShort.session_id == session_id)
+            select(MemoryShort).where(
+                MemoryShort.session_id == session_id,
+                MemoryShort.tenant_id == effective_tenant_id
+            )
         )
         memory_short = result.scalar_one_or_none()
         
         if memory_short:
             memory_short.context_data = context_data
             memory_short.expires_at = expires_at
+            # Ensure tenant_id is set if it was missing
+            if not memory_short.tenant_id:
+                memory_short.tenant_id = effective_tenant_id
         else:
             memory_short = MemoryShort(
+                tenant_id=effective_tenant_id,
                 session_id=session_id,
                 context_data=context_data,
                 expires_at=expires_at,
@@ -206,18 +227,36 @@ class MemoryManager:
         tenant_id: Optional[UUID] = None,
     ) -> List[str]:
         """Retrieve relevant medium-term memory for a session (for specific tenant)"""
-        query_embedding = self.embedding_service.generate_embedding(query)
+        import asyncio
+        import logging
+        logger = logging.getLogger(__name__)
         
-        # Get tenant-specific collection
-        collection = self._get_collection("session_memory", tenant_id or self.tenant_id)
-        
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where={"session_id": str(session_id)},
-        )
-        
-        return results.get("documents", [[]])[0] if results else []
+        try:
+            # Run embedding generation in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            query_embedding = await loop.run_in_executor(
+                None, 
+                self.embedding_service.generate_embedding, 
+                query
+            )
+            
+            # Get tenant-specific collection
+            collection = self._get_collection("session_memory", tenant_id or self.tenant_id)
+            
+            # Run ChromaDB query in thread pool (ChromaDB is synchronous)
+            results = await loop.run_in_executor(
+                None,
+                lambda: collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=n_results,
+                    where={"session_id": str(session_id)},
+                )
+            )
+            
+            return results.get("documents", [[]])[0] if results else []
+        except Exception as e:
+            logger.error(f"Error in retrieve_medium_term_memory: {e}", exc_info=True)
+            return []
 
     # Long-term Memory
     async def add_long_term_memory(
@@ -273,23 +312,41 @@ class MemoryManager:
         tenant_id: Optional[UUID] = None,
     ) -> List[str]:
         """Retrieve relevant long-term memory (for specific tenant)"""
-        query_embedding = self.embedding_service.generate_embedding(query)
+        import asyncio
+        import logging
+        logger = logging.getLogger(__name__)
         
-        # Get tenant-specific collection
-        effective_tenant_id = tenant_id or self.tenant_id
-        collection = self._get_collection("long_term_memory", effective_tenant_id)
-        
-        where = {}
-        if min_importance is not None:
-            where["importance_score"] = {"$gte": min_importance}
-        
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where if where else None,
-        )
-        
-        return results.get("documents", [[]])[0] if results else []
+        try:
+            # Run embedding generation in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            query_embedding = await loop.run_in_executor(
+                None,
+                self.embedding_service.generate_embedding,
+                query
+            )
+            
+            # Get tenant-specific collection
+            effective_tenant_id = tenant_id or self.tenant_id
+            collection = self._get_collection("long_term_memory", effective_tenant_id)
+            
+            where = {}
+            if min_importance is not None:
+                where["importance_score"] = {"$gte": min_importance}
+            
+            # Run ChromaDB query in thread pool (ChromaDB is synchronous)
+            results = await loop.run_in_executor(
+                None,
+                lambda: collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=n_results,
+                    where=where if where else None,
+                )
+            )
+            
+            return results.get("documents", [[]])[0] if results else []
+        except Exception as e:
+            logger.error(f"Error in retrieve_long_term_memory: {e}", exc_info=True)
+            return []
 
     async def should_store_in_long_term(
         self,

@@ -77,16 +77,21 @@ export default function MemoryViewer({ sessionId, isOpen, onClose }: MemoryViewe
 
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[110]"
-      style={{ zIndex: 110 }}
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+      style={{ zIndex: 9999 }}
       onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
         if (e.target === e.currentTarget) {
           console.log('[MemoryViewer] Backdrop clicked, closing')
           onClose()
         }
       }}
     >
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] p-6 flex flex-col">
+      <div 
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] p-6 flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex justify-between items-center border-b pb-3 mb-4">
           <div className="flex items-center gap-2">
             <Brain size={24} className="text-blue-600 dark:text-blue-400" />

@@ -247,8 +247,12 @@ def log_agent_activity(
 
     manager = state.get("agent_activity_manager")
     session_id = state.get("session_id")
+    logger = logging.getLogger(__name__)
     if manager and session_id:
+        logger.error("📡📡📡 Publishing agent activity: %s (%s) for session %s - CRITICAL LOG", agent_id, status, session_id)
         manager.publish(session_id, entry)
+    else:
+        logger.error("⚠️⚠️⚠️  Cannot publish agent activity: manager=%s, session_id=%s - CRITICAL LOG", manager is not None, session_id is not None)
 
 
 def _ensure_notification_center(state: LangGraphChatState) -> NotificationCenter:
@@ -485,10 +489,11 @@ def log_planning_status(
 
 
 async def analyze_message_for_plan(
-    planner_client: OllamaClient,
+    planner_client: Optional[OllamaClient],
     request: ChatRequest,
     available_tools: List[Dict[str, Any]],
     session_context: List[Dict[str, str]],
+    ollama_client: Optional[OllamaClient] = None,
 ) -> Dict[str, Any]:
     tool_catalog = build_tool_catalog(available_tools)
     analysis_prompt = (
@@ -527,7 +532,10 @@ async def analyze_message_for_plan(
     )
 
     try:
-        client = planner_client
+        client = planner_client or ollama_client
+        if client is None:
+            logging.getLogger(__name__).warning("Planner client is None, using fallback")
+            return {"needs_plan": False, "reason": "planner_unavailable", "steps": []}
         response = await client.generate(
             prompt=analysis_prompt + f"\n\nRichiesta utente:\n{request.message}",
             context=session_context[-3:] if session_context else None,
@@ -537,8 +545,8 @@ async def analyze_message_for_plan(
         parsed = safe_json_loads(content)
         if isinstance(parsed, dict):
             return parsed
-    except Exception:
-        logging.getLogger(__name__).warning("Planner analysis failed", exc_info=True)
+    except Exception as exc:
+        logging.getLogger(__name__).warning(f"Planner analysis failed: {exc}", exc_info=True)
 
     return {"needs_plan": False, "reason": "fallback", "steps": []}
 
@@ -650,11 +658,14 @@ async def execute_plan_steps(
 
         try:
             logger.info("Executing planned tool %s", tool_name)
+            # Get current_user from state
+            current_user = state.get("current_user")
             result = await tool_manager.execute_tool(
                 tool_name,
                 step.get("inputs", {}),
                 db=db,
                 session_id=session_id,
+                current_user=current_user,
             )
             step["status"] = "complete"
             preview = json.dumps(result, ensure_ascii=False)[:500]
@@ -741,7 +752,9 @@ class LangGraphChatState(TypedDict, total=False):
 
 async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
     """Normalizza l'evento in arrivo e aggiorna la history."""
-
+    logger = logging.getLogger(__name__)
+    logger.error("📥📥📥 Event Handler node executing - CRITICAL LOG")
+    logger.info("📥 Event Handler node executing")
     log_agent_activity(state, agent_id="event_handler", status="started")
     try:
         messages = state.get("messages", [])
@@ -750,9 +763,11 @@ async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
         content = event.get("content", "")
         messages.append({"role": role, "content": content})
         state["messages"] = messages
+        logger.error("✅✅✅ Event Handler completed, returning state - CRITICAL LOG")
         log_agent_activity(state, agent_id="event_handler", status="completed")
         return state
     except Exception as exc:
+        logger.error("❌❌❌ Event Handler ERROR: %s", exc, exc_info=True)
         log_agent_activity(
             state,
             agent_id="event_handler",
@@ -764,13 +779,18 @@ async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
 
 async def orchestrator_node(state: LangGraphChatState) -> LangGraphChatState:
     """Per ora instrada sempre verso il main agent."""
-
+    logger = logging.getLogger(__name__)
+    logger.error("🎯🎯🎯 Orchestrator node executing - CRITICAL LOG")
+    logger.info("🎯 Orchestrator node executing")
     log_agent_activity(state, agent_id="orchestrator", status="started")
     try:
         state["routing_decision"] = "tool_loop"
+        logger.error("✅✅✅ Orchestrator completed, routing to tool_loop - CRITICAL LOG")
+        logger.info("✅ Orchestrator completed, routing to tool_loop")
         log_agent_activity(state, agent_id="orchestrator", status="completed")
         return state
     except Exception as exc:
+        logger.error("❌❌❌ Orchestrator ERROR: %s", exc, exc_info=True)
         log_agent_activity(
             state,
             agent_id="orchestrator",
@@ -782,9 +802,9 @@ async def orchestrator_node(state: LangGraphChatState) -> LangGraphChatState:
 
 async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
     """Gestisce pianificazione, esecuzione tool e fallback legacy."""
-
-    log_agent_activity(state, agent_id="tool_loop", status="started")
     logger = logging.getLogger(__name__)
+    logger.info("🔧 Tool Loop node executing")
+    log_agent_activity(state, agent_id="tool_loop", status="started")
     request = state["request"]
     acknowledgement = state.get("acknowledgement", False)
 
@@ -830,7 +850,8 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             tenant_id = None
 
         tool_manager = ToolManager(db=db, tenant_id=tenant_id)
-        available_tools = await tool_manager.get_available_tools()
+        current_user = state.get("current_user")
+        available_tools = await tool_manager.get_available_tools(current_user=current_user)
         available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
 
         if task_queue and session_id:
@@ -870,16 +891,23 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     return handled_state
 
         # Se non abbiamo un piano corrente e il messaggio non è solo conferma, valutiamo la necessità di un piano
-        if not plan and not acknowledgement:
+        # IMPORTANTE: Non chiamare il planner se il messaggio è vuoto o è un messaggio automatico senza contenuto reale
+        message_content = request.message.strip()
+        is_auto_task = message_content.startswith("[auto-task]")
+        should_plan = not plan and not acknowledgement and message_content and not is_auto_task
+        
+        if should_plan:
             planner_client = state.get("planner_client") or state["ollama"]
             log_agent_activity(state, agent_id="planner", status="started")
             try:
                 logger.info(f"🔍 Planning for message: {request.message[:100]}")
+                logger.info(f"   Message length: {len(message_content)}, is_auto_task: {is_auto_task}, acknowledgement: {acknowledgement}")
                 analysis = await analyze_message_for_plan(
                     planner_client,
                     request,
                     available_tools,
                     state.get("session_context", []),
+                    ollama_client=state.get("ollama"),
                 )
                 logger.info(f"📋 Planner analysis: needs_plan={analysis.get('needs_plan')}, reason={analysis.get('reason')}, steps_count={len(analysis.get('steps', []))}")
                 if analysis.get("steps"):
@@ -922,7 +950,9 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 else:
                     logger.warning("⚠️  Plan analysis returned no valid steps after normalization")
             else:
-                logger.warning(f"⚠️  Planner returned needs_plan={analysis.get('needs_plan')}, steps={len(analysis.get('steps', []))} - falling back to legacy pipeline")
+                logger.info(f"ℹ️  Planner returned needs_plan={analysis.get('needs_plan')}, steps={len(analysis.get('steps', []))} - will generate direct response")
+        else:
+            logger.info(f"⏭️  Skipping planner: plan={bool(plan)}, acknowledgement={acknowledgement}, message_content='{message_content[:50]}...', is_auto_task={is_auto_task}")
 
         # Esegui piano se presente
         if plan:
@@ -1012,12 +1042,9 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             log_agent_activity(state, agent_id="tool_loop", status="completed")
             return state
 
-        # Fallback legacy pipeline con heuristica per web search
-        force_web = should_force_web_search(request, acknowledgement)
-        effective_request = request
-        if force_web != request.force_web_search:
-            effective_request = request.model_copy(update={"force_web_search": force_web})
-
+        # No plan - generate direct response using Ollama (but continue through graph nodes)
+        logger.info("📝 No plan needed - generating direct response, graph will continue")
+        
         # Get tenant_id from session
         from app.models.database import Session as SessionModel
         from sqlalchemy import select
@@ -1026,40 +1053,206 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         )
         tenant_id = tenant_result.scalar_one_or_none()
         
-        chat_response = await run_main_agent_pipeline(
-            db=state["db"],
-            session_id=state["session_id"],
-            request=effective_request,
-            ollama=state["ollama"],
-            session_context=state["session_context"],
-            retrieved_memory=list(state["retrieved_memory"]),
-            memory_used=state["memory_used"],
-            tenant_id=tenant_id,
-        )
-        state["chat_response"] = chat_response.model_copy(
-            update={"agent_activity": state.get("agent_activity", [])}
-        )
-        state["response"] = chat_response.response
-        state["plan_completed"] = True
-        state["assistant_message_saved"] = True
-        state.setdefault("tool_results", [])
-        if chat_response.tool_details:
-            for detail in chat_response.tool_details:
-                state["tool_results"].append(
-                    {
-                        "tool": detail.tool_name,
-                        "parameters": detail.parameters,
-                        "result": detail.result,
-                    }
-                )
-        _snapshot_notifications(state)
-        if acknowledgement and plan:
-            log_planning_status(
-                state,
-                status="acknowledged_no_plan",
-                plan=plan,
+        current_user = state.get("current_user")
+        tool_manager = ToolManager(db=state["db"], tenant_id=tenant_id)
+        available_tools = await tool_manager.get_available_tools(current_user=current_user)
+        
+        # Generate response using Ollama with tool calling capability
+        # This allows Ollama to decide if it needs tools or can respond directly
+        ollama = state["ollama"]
+        session_context = state["session_context"]
+        retrieved_memory = list(state["retrieved_memory"])
+        
+        # Use Ollama's native tool calling
+        tools_description = await tool_manager.get_tools_system_prompt()
+        
+        try:
+            response_data = await ollama.generate_with_context(
+                prompt=request.message,
+                session_context=session_context,
+                retrieved_memory=retrieved_memory if retrieved_memory else None,
+                tools=available_tools,
+                tools_description=tools_description,
+                return_raw=True,
             )
+        except Exception as ollama_error:
+            logger.error(f"❌ Ollama error in tool_loop_node: {ollama_error}", exc_info=True)
+            log_agent_activity(
+                state,
+                agent_id="tool_loop",
+                status="error",
+                message=f"Ollama connection failed: {str(ollama_error)}",
+            )
+            # Return a fallback response so the graph can continue
+            state["response"] = "Mi dispiace, ma al momento non posso rispondere perché il servizio di intelligenza artificiale non è disponibile. Verifica che Ollama sia in esecuzione."
+            state["tools_used"] = []
+            state.setdefault("tool_results", [])
+            state["plan_completed"] = True
+            state["assistant_message_saved"] = False
+            log_agent_activity(state, agent_id="tool_loop", status="completed")
+            return state
+        
+        # Extract response and tool calls
+        response_text = ""
+        tool_calls = []
+        tools_used = []
+        tool_results = []
+        
+        if isinstance(response_data, dict):
+            response_text = response_data.get("content", "")
+            parsed_tc = response_data.get("_parsed_tool_calls")
+            if parsed_tc:
+                tool_calls = parsed_tc
+            else:
+                message = response_data.get("raw_result", {}).get("message")
+                if isinstance(message, dict) and "tool_calls" in message:
+                    tool_calls = [
+                        {
+                            "name": tc.get("function", {}).get("name"),
+                            "parameters": tc.get("function", {}).get("arguments", {}),
+                        }
+                        for tc in message["tool_calls"]
+                        if isinstance(tc, dict)
+                    ]
+        else:
+            response_text = response_data or ""
+        
+        # Execute tool calls if any
+        if tool_calls:
+            logger.error(f"🔧🔧🔧 Found {len(tool_calls)} tool call(s) to execute")
+            for idx, tool_call in enumerate(tool_calls):
+                tool_name = tool_call.get("name")
+                tool_params = tool_call.get("parameters", {})
+                logger.error(f"🔧🔧🔧 Executing tool {idx+1}/{len(tool_calls)}: {tool_name} with params: {tool_params}")
+                if tool_name:
+                    try:
+                        result = await tool_manager.execute_tool(
+                            tool_name, tool_params, state["db"], 
+                            session_id=state["session_id"],
+                            current_user=current_user
+                        )
+                        logger.error(f"✅✅✅ Tool {tool_name} executed successfully. Result type: {type(result)}, keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+                        tool_results.append({
+                            "tool": tool_name,
+                            "parameters": tool_params,
+                            "result": result,
+                        })
+                        tools_used.append(tool_name)
+                    except Exception as exc:
+                        logger.error(f"❌❌❌ Errore eseguendo tool {tool_name}: {exc}", exc_info=True)
+                        tool_results.append({
+                            "tool": tool_name,
+                            "parameters": tool_params,
+                            "result": {"error": str(exc)},
+                        })
+            logger.error(f"🔧🔧🔧 Tool execution complete. Total results: {len(tool_results)}")
+        else:
+            logger.error(f"🔧🔧🔧 No tool calls found in response")
+        
+        # After all tool calls are executed, generate final response if we have tool results
+        # IMPORTANT: Always generate a response after tool execution, even if response_text already exists
+        if tool_results:
+            logger.error(f"🔍🔍🔍 Tool results found: {len(tool_results)}. Generating final response...")
+            tool_results_text = "\n\n=== Risultati Tool ===\n"
+            for tr in tool_results:
+                tool_name = tr.get('tool', 'unknown')
+                tool_result = tr.get('result', {})
+                tool_results_text += f"Tool: {tool_name}\n"
+                if isinstance(tool_result, dict):
+                    # Check for errors first
+                    if "error" in tool_result:
+                        tool_results_text += f"ERRORE: {tool_result['error']}\n\n"
+                    else:
+                        result_str = json.dumps(tool_result, indent=2, ensure_ascii=False, default=str)
+                        tool_results_text += f"{result_str}\n\n"
+                else:
+                    result_str = str(tool_result)
+                    tool_results_text += f"{result_str}\n\n"
+            
+            logger.error(f"🔍🔍🔍 Tool results text length: {len(tool_results_text)}")
+            
+            # Use existing response_text as context if available, otherwise use the original request
+            context_text = response_text if response_text else request.message
+            final_prompt = f"""{context_text}
+
+{tool_results_text}
+
+IMPORTANTE: Genera una risposta testuale completa e utile per l'utente basata sui risultati dei tool sopra. 
+La risposta deve essere in italiano e spiegare chiaramente cosa è stato trovato o calcolato.
+Se c'è un errore, spiega all'utente cosa è andato storto e come può risolvere."""
+            try:
+                logger.error(f"🔍🔍🔍 Calling Ollama to generate final response. Prompt length: {len(final_prompt)}")
+                # IMPORTANT: When tools=None, generate_with_context returns a string, not a dict
+                # So we don't need return_raw=True here
+                final_response = await ollama.generate_with_context(
+                    prompt=final_prompt,
+                    session_context=session_context,
+                    retrieved_memory=retrieved_memory if retrieved_memory else None,
+                    tools=None,  # No tools - force text response
+                    tools_description=None,
+                    return_raw=False,  # Return string, not dict
+                )
+                logger.error(f"🔍🔍🔍 Ollama response type: {type(final_response)}")
+                # When return_raw=False, generate_with_context returns a string
+                if isinstance(final_response, str):
+                    response_text = final_response
+                    logger.error(f"🔍🔍🔍 String response length: {len(response_text)}")
+                elif isinstance(final_response, dict):
+                    # Fallback: if it's a dict, extract content
+                    content = final_response.get("content", "")
+                    if not content:
+                        raw_result = final_response.get("raw_result", {})
+                        if isinstance(raw_result, dict):
+                            message = raw_result.get("message", {})
+                            if isinstance(message, dict):
+                                content = message.get("content", "")
+                            elif isinstance(message, str):
+                                content = message
+                    response_text = content
+                    logger.error(f"🔍🔍🔍 Extracted content from dict, length: {len(response_text)}")
+                    if not response_text:
+                        logger.error(f"🔍🔍🔍 Full response structure: {list(final_response.keys())}")
+                else:
+                    response_text = str(final_response) or ""
+                    logger.error(f"🔍🔍🔍 Converted to string, length: {len(response_text)}")
+                
+                if not response_text:
+                    logger.error("⚠️⚠️⚠️  Final response is EMPTY, using fallback")
+                    # Create a more detailed fallback
+                    fallback_parts = []
+                    for tr in tool_results:
+                        tool_name = tr.get('tool', 'unknown')
+                        tool_result = tr.get('result', {})
+                        if isinstance(tool_result, dict) and "error" in tool_result:
+                            fallback_parts.append(f"Tool {tool_name}: ERRORE - {tool_result['error']}")
+                        else:
+                            fallback_parts.append(f"Tool {tool_name}: Eseguito con successo")
+                    response_text = f"Ho eseguito {len(tool_results)} tool(s). " + "; ".join(fallback_parts)
+                else:
+                    logger.error(f"✅✅✅ Generated final response: {len(response_text)} characters. Preview: {response_text[:200]}")
+            except Exception as final_error:
+                logger.error(f"❌❌❌ Error generating final response: {final_error}", exc_info=True)
+                # Use a simple summary of tool results as fallback
+                response_text = f"Ho eseguito {len(tool_results)} tool(s). Risultati: {json.dumps(tool_results, indent=2, ensure_ascii=False, default=str)[:500]}"
+        
+        # Store response in state (will be finalized by response_formatter_node)
+        # DO NOT create chat_response here - let response_formatter_node do it
+        logger.error(f"🔍 Tool Loop: Storing response in state. Length: {len(response_text) if response_text else 0}")
+        logger.error(f"🔍 Tool Loop: Response preview: {response_text[:200] if response_text else 'EMPTY'}")
+        logger.error(f"🔍 Tool Loop: tools_used: {len(tools_used)}, tool_results: {len(tool_results)}")
+        state["response"] = response_text
+        state["tools_used"] = tools_used
+        state.setdefault("tool_results", [])
+        state["tool_results"].extend(tool_results)
+        state["plan_completed"] = True
+        state["assistant_message_saved"] = False  # Will be saved by response_formatter_node
+        
+        # Update memory_used if needed
+        if not state.get("memory_used"):
+            state["memory_used"] = {}
+        
         log_agent_activity(state, agent_id="tool_loop", status="completed")
+        # Continue to next node (knowledge_agent) - don't return early
         return state
     except Exception as exc:
         log_agent_activity(
@@ -1073,7 +1266,8 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
 
 async def knowledge_agent_node(state: LangGraphChatState) -> LangGraphChatState:
     """Aggiorna la memoria breve e avvia auto-learning in background se necessario."""
-
+    logger = logging.getLogger(__name__)
+    logger.info("🧠 Knowledge Agent node executing")
     log_agent_activity(state, agent_id="knowledge_agent", status="started")
     try:
         request = state["request"]
@@ -1105,10 +1299,18 @@ async def knowledge_agent_node(state: LangGraphChatState) -> LangGraphChatState:
                 "last_assistant_message": response_text,
                 "message_count": len(state.get("previous_messages", [])) + 2,
             }
+            # Get tenant_id from session
+            from app.models.database import Session as SessionModel
+            from sqlalchemy import select
+            tenant_result = await state["db"].execute(
+                select(SessionModel.tenant_id).where(SessionModel.id == state["session_id"])
+            )
+            tenant_id = tenant_result.scalar_one_or_none()
             await memory_manager.update_short_term_memory(
                 state["db"],
                 state["session_id"],
                 new_context,
+                tenant_id=tenant_id,
             )
             state.setdefault("memory_used", {})["short_term"] = True
         except Exception:  # pragma: no cover - log warning
@@ -1180,7 +1382,8 @@ async def knowledge_agent_node(state: LangGraphChatState) -> LangGraphChatState:
 
 async def notification_collector_node(state: LangGraphChatState) -> LangGraphChatState:
     """Aggrega le notifiche raccolte dagli agenti specializzati."""
-
+    logger = logging.getLogger(__name__)
+    logger.info("🔔 Notification Collector node executing")
     log_agent_activity(state, agent_id="notification_collector", status="started")
     try:
         _snapshot_notifications(state)
@@ -1198,19 +1401,42 @@ async def notification_collector_node(state: LangGraphChatState) -> LangGraphCha
 
 async def response_formatter_node(state: LangGraphChatState) -> LangGraphChatState:
     """Garantisce che un ChatResponse sia presente nello stato finale."""
-
+    logger = logging.getLogger(__name__)
+    logger.info("📝 Response Formatter node executing")
     log_agent_activity(state, agent_id="response_formatter", status="started")
     try:
         if "chat_response" not in state or state["chat_response"] is None:
             _snapshot_notifications(state)
             notifications = state.get("notifications", [])
             high_priority_notifications = state.get("high_urgency_notifications", [])
+            
+            # Extract tools_used and tool_details from state
+            tools_used = state.get("tools_used", [])
+            tool_results = state.get("tool_results", [])
+            
+            # Convert tool_results to ToolExecutionDetail format
+            from app.models.schemas import ToolExecutionDetail
+            tool_details = [
+                ToolExecutionDetail(
+                    tool_name=tr.get("tool", ""),
+                    parameters=tr.get("parameters", {}),
+                    result=tr.get("result", {}),
+                    success=not isinstance(tr.get("result"), dict) or "error" not in tr.get("result", {}),
+                )
+                for tr in tool_results
+            ]
+            
+            response_text = state.get("response", "")
+            logger.error(f"🔍 Response Formatter: response text length: {len(response_text) if response_text else 0}")
+            logger.error(f"🔍 Response Formatter: response preview: {response_text[:100] if response_text else 'EMPTY'}")
+            logger.error(f"🔍 Response Formatter: tools_used: {len(tools_used)}, tool_results: {len(tool_results)}")
+            
             state["chat_response"] = ChatResponse(
-                response=state.get("response", ""),
+                response=response_text,
                 session_id=state["session_id"],
                 memory_used=state.get("memory_used", {}),
-                tools_used=[],
-                tool_details=[],
+                tools_used=tools_used,
+                tool_details=tool_details,
                 notifications_count=len(notifications),
                 high_urgency_notifications=high_priority_notifications,
                 agent_activity=state.get("agent_activity", []),
@@ -1274,6 +1500,7 @@ async def run_langgraph_chat(
     memory_used: Dict[str, Any],
     previous_messages: Optional[List[Dict[str, str]]] = None,
     pending_plan: Optional[Dict[str, Any]] = None,
+    current_user: Optional[Any] = None,  # User model for tool filtering
 ) -> LangGraphResult:
     app = build_langgraph_app()
     acknowledgement = is_acknowledgement(request.message)
@@ -1311,8 +1538,32 @@ async def run_langgraph_chat(
         "agent_activity_manager": agent_activity_stream,
         "task_queue": get_task_queue(),
         "current_task": None,
+        "current_user": current_user,  # Store current_user for tool filtering
     }
-    final_state = await app.ainvoke(state)
+    logger = logging.getLogger(__name__)
+    logger.error("🚀🚀🚀 Starting LangGraph execution for session %s - CRITICAL LOG", session_id)
+    logger.info("🚀 Starting LangGraph execution for session %s", session_id)
+    
+    # Log initial state
+    logger.info("   Initial state keys: %s", list(state.keys()))
+    logger.info("   Event: %s", state.get("event", {}).get("content", "N/A")[:100])
+    
+    logger.error("🔍🔍🔍 About to invoke LangGraph app.ainvoke() - CRITICAL LOG")
+    try:
+        final_state = await app.ainvoke(state)
+        logger.error("✅✅✅ LangGraph app.ainvoke() completed successfully - CRITICAL LOG")
+    except Exception as exc:
+        logger.error("❌❌❌ LangGraph app.ainvoke() FAILED: %s", exc, exc_info=True)
+        raise
+    
+    # Log final state
+    agent_activity = final_state.get("agent_activity", [])
+    logger.info("✅ LangGraph execution completed. Agent activity events: %d", len(agent_activity))
+    if agent_activity:
+        # agent_activity contains dicts, not Pydantic models
+        agent_ids = [e.get("agent_id") if isinstance(e, dict) else getattr(e, "agent_id", "unknown") for e in agent_activity]
+        logger.info("   Agents that logged activity: %s", set(agent_ids))
+    
     chat_response = final_state["chat_response"]
 
     plan_metadata: Optional[Dict[str, Any]] = None

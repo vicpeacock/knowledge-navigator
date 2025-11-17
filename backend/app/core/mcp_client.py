@@ -26,18 +26,29 @@ class MCPClient:
             self.base_url = self.base_url[:-4]
 
         # Prepare optional auth headers for MCP Gateway
+        # NOTE: If MCP Gateway generates a new token on each startup, we need to either:
+        # 1. Not use authentication (if gateway allows it)
+        # 2. Read the token from gateway logs/endpoint after startup
+        # 3. Configure gateway to use a fixed token
         self.headers: Dict[str, str] = {}
         if settings.mcp_gateway_auth_token:
             # MCP Gateway advertises Bearer auth
             self.headers["Authorization"] = f"Bearer {settings.mcp_gateway_auth_token}"
+            logger.debug(f"MCP Gateway auth token configured (length: {len(settings.mcp_gateway_auth_token)})")
+        else:
+            logger.debug("No MCP Gateway auth token configured - attempting connection without authentication")
     
     async def list_tools(self) -> List[Dict[str, Any]]:
         """List available MCP tools"""
         exit_stack = AsyncExitStack()
         try:
             # Log headers being sent (but not the token value for security)
-            logger.debug(f"Connecting to MCP Gateway at {self.base_url}")
-            logger.debug(f"Headers being sent: {list(self.headers.keys())} (token present: {'Authorization' in self.headers})")
+            logger.info(f"🔌 Connecting to MCP Gateway at {self.base_url}")
+            logger.info(f"   Headers being sent: {list(self.headers.keys())} (token present: {'Authorization' in self.headers})")
+            if 'Authorization' in self.headers:
+                logger.info(f"   Authorization header format: Bearer <token> (length: {len(self.headers['Authorization'])})")
+            else:
+                logger.warning(f"   ⚠️  No Authorization header! Token configured: {bool(settings.mcp_gateway_auth_token)}")
             
             # Use AsyncExitStack to properly manage nested context managers
             # This ensures all cleanup happens in the same task context
@@ -76,9 +87,20 @@ class MCPClient:
                 error_message = str(real_error)
                 logger.warning(f"Extracted error from ExceptionGroup: {error_message}")
             
+            # Also check for TaskGroup exceptions (from asyncio)
+            if hasattr(e, '__cause__') and e.__cause__:
+                real_error = e.__cause__
+                error_message = str(real_error)
+                logger.warning(f"Extracted error from __cause__: {error_message}")
+            
             # Check for HTTP errors (401, 403, etc.)
             if hasattr(real_error, 'response') or '401' in error_message or 'unauthorized' in error_message.lower():
                 logger.error(f"❌ MCP Gateway authentication error: {error_message}")
+                logger.error(f"   Base URL: {self.base_url}")
+                logger.error(f"   Headers present: {list(self.headers.keys())}")
+                logger.error(f"   Token configured: {bool(settings.mcp_gateway_auth_token)}")
+                if settings.mcp_gateway_auth_token:
+                    logger.error(f"   Token preview: {settings.mcp_gateway_auth_token[:20]}...")
             else:
                 logger.error(f"❌ Error listing tools: {error_message}", exc_info=True)
             

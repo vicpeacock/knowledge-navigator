@@ -85,26 +85,26 @@ class AgentScheduler:
 
             logger.debug("Polling scheduled agent %s", agent.name)
             
-            # Publish activity event for agent polling
-            if self._agent_activity_stream:
-                self._publish_activity(
-                    agent_id="task_scheduler",
-                    agent_name="Task Scheduler",
-                    status="started",
-                    message=f"Polling {agent.name}",
-                )
+            # DON'T publish activity event for polling - only publish when tasks are actually found
+            # This prevents the integrity agent from appearing active when there are no contradictions
             
             try:
                 tasks = await agent.poller()
                 
-                # Publish activity event for tasks found
+                # Only publish activity event if tasks are actually found
+                # This ensures the integrity agent only appears active when there are real contradictions to process
                 if self._agent_activity_stream and tasks:
+                    logger.info(f"📋 Found {len(tasks)} tasks from {agent.name}, publishing activity events")
                     self._publish_activity(
                         agent_id="background_integrity_agent",
                         agent_name="Background Integrity Agent",
                         status="started",
                         message=f"Found {len(tasks)} pending contradiction(s)",
                     )
+                elif tasks:
+                    logger.debug(f"Found {len(tasks)} tasks from {agent.name}, but no activity stream available")
+                else:
+                    logger.debug(f"No tasks found from {agent.name}, skipping activity events")
             except Exception as exc:  # pragma: no cover - safeguard
                 logger.warning(
                     "Scheduled agent %s failed during poll: %s",
@@ -143,21 +143,18 @@ class AgentScheduler:
                         message=f"Enqueued {task.type} task",
                     )
 
-            # Publish completion event
-            if self._agent_activity_stream:
-                if tasks:
-                    self._publish_activity(
-                        agent_id="background_integrity_agent",
-                        agent_name="Background Integrity Agent",
-                        status="completed",
-                        message=f"Processed {len(tasks)} contradiction(s)",
-                    )
+            # Publish completion event ONLY if tasks were found
+            # This prevents the integrity agent from appearing active when there are no contradictions
+            if self._agent_activity_stream and tasks:
                 self._publish_activity(
-                    agent_id="task_scheduler",
-                    agent_name="Task Scheduler",
+                    agent_id="background_integrity_agent",
+                    agent_name="Background Integrity Agent",
                     status="completed",
-                    message=f"Polled {agent.name}",
+                    message=f"Processed {len(tasks)} contradiction(s)",
                 )
+                # NOTE: task_scheduler events are now suppressed in _publish_activity
+                # to prevent the scheduler from appearing active when idle
+            # If no tasks found, don't publish any events - the agent should appear idle
 
             agent.last_run = now
 
@@ -200,6 +197,16 @@ class AgentScheduler:
         """Publish activity event to all active sessions (with subscribers)."""
         if not self._agent_activity_stream:
             logger.warning("Agent activity stream not available, skipping publish")
+            return
+        
+        # IMPORTANT: Don't publish task_scheduler events unless there are actual tasks
+        # This prevents the integrity agent from appearing active when idle
+        if agent_id == "task_scheduler" and status in ["started", "completed"]:
+            # Only log at debug level - don't publish to frontend
+            logger.debug(
+                "Skipping task_scheduler event (%s) - only publish when tasks are found",
+                status
+            )
             return
         
         event = {
