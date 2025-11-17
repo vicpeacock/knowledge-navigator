@@ -58,9 +58,13 @@
 - ❌ Navigazione autonoma web avanzata (Fase 3)
 
 **Proattività (Fase 2 - 🚧 In Corso):**
-- 🚧 Sistema eventi per monitorare email/calendario (in sviluppo)
+- ✅ Sistema eventi per monitorare email/calendario (implementato)
+- ✅ Email Poller - rileva automaticamente nuove email
+- ✅ Calendar Watcher - rileva eventi imminenti (15min, 5min prima)
+- ✅ Event Monitor Service - orchestratore principale
+- ✅ Integrazione con sistema notifiche esistente
 - ❌ WebSocket per notifiche real-time
-- ❌ Motore decisionale per priorità eventi
+- ❌ Motore decisionale avanzato per priorità eventi
 - ❌ Notifiche push frontend
 
 **WhatsApp Integration (Fase 1 - ⏸️ Temporaneamente Disabilitata):**
@@ -113,10 +117,12 @@
 ### Fase 2 - Proattività (3-4 settimane) - 🚧 In Corso
 
 **Sistema Eventi:**
-- [x] Event Monitor Service (in sviluppo)
-- [x] Email Poller (controllo nuove email) - 🚧 In sviluppo
-- [x] Calendar Watcher (eventi imminenti) - 🚧 In sviluppo
-- [ ] WhatsApp Monitor (messaggi in arrivo)
+- [x] Event Monitor Service ✅ (implementato e integrato nel backend)
+- [x] Email Poller (controllo nuove email) ✅ (implementato)
+- [x] Calendar Watcher (eventi imminenti) ✅ (implementato con reminder 15min e 5min)
+- [x] Integrazione con NotificationService ✅ (notifiche create automaticamente)
+- [x] Endpoint API per test manuale ✅ (`POST /api/notifications/check-events`)
+- [ ] WhatsApp Monitor (messaggi in arrivo) - In attesa Business API
 
 **WebSocket & Notifiche:**
 - [ ] WebSocket server (FastAPI)
