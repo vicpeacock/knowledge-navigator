@@ -148,29 +148,33 @@ Implementare sistema di evaluation per testare e validare l'agent.
 ### Obiettivo
 Deployare l'applicazione su Cloud Run per ottenere bonus points.
 
+### ✅ Status: IN CORSO (3.1 completato, 3.2 da fare)
+
 ### Task Dettagliati
 
-#### 3.1 Preparazione Deployment (1 giorno)
-- [ ] **Docker Optimization**
-  - [ ] Ottimizzare Dockerfile backend
-  - [ ] Ottimizzare Dockerfile frontend
-  - [ ] Multi-stage builds se necessario
-  - [ ] Ridurre dimensioni immagini
-- [ ] **Environment Configuration**
-  - [ ] Preparare variabili ambiente per Cloud Run
-  - [ ] Configurare secrets management
-  - [ ] Documentare variabili necessarie
-- [ ] **Database Setup**
-  - [ ] Configurare Cloud SQL o database esterno
-  - [ ] Preparare script migrazione
-  - [ ] Documentare setup database
+#### 3.1 Preparazione Deployment (1 giorno) - ✅ COMPLETATO
+- [x] **Docker Optimization** ✅
+  - [x] Ottimizzare Dockerfile backend ✅
+  - [x] Ottimizzare Dockerfile frontend ✅
+  - [x] Multi-stage builds se necessario ✅
+  - [x] Ridurre dimensioni immagini ✅
+- [x] **Environment Configuration** ✅
+  - [x] Preparare variabili ambiente per Cloud Run ✅
+  - [x] Configurare secrets management (documentato) ✅
+  - [x] Documentare variabili necessarie ✅
+- [x] **Database Setup** ✅
+  - [x] Configurare Cloud SQL o database esterno (documentato) ✅
+  - [x] Preparare script migrazione (documentato) ✅
+  - [x] Documentare setup database ✅
 
-**File da modificare/creare**:
-- `Dockerfile.backend` (ottimizzare)
-- `Dockerfile.frontend` (ottimizzare)
-- `cloud-run/` (nuova directory)
-- `cloud-run/deploy.sh` (script deployment)
-- `cloud-run/README.md` (documentazione deployment)
+**File creati**:
+- ✅ `Dockerfile.backend` (multi-stage build ottimizzato)
+- ✅ `Dockerfile.frontend` (multi-stage build con standalone output)
+- ✅ `cloud-run/` (directory creata)
+- ✅ `cloud-run/deploy.sh` (script deployment completo)
+- ✅ `cloud-run/README.md` (documentazione deployment completa)
+- ✅ `cloud-run/env.example` (template variabili ambiente)
+- ✅ `cloud-run/.dockerignore` (ottimizzazione build)
 
 #### 3.2 Cloud Run Deployment (1-2 giorni)
 - [ ] **Backend Deployment**
