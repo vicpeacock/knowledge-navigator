@@ -1,0 +1,60 @@
+# Multi-stage build per Next.js
+FROM node:20-alpine AS deps
+
+# Installa dipendenze necessarie per build
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+# Copia file package per installare dipendenze
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+# Stage di build
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copia dipendenze dallo stage precedente
+COPY --from=deps /app/node_modules ./node_modules
+COPY frontend/ ./
+
+# Variabili ambiente per build
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NODE_ENV=production
+
+# Build applicazione
+RUN npm run build
+
+# Stage runtime - immagine minimale
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000
+
+# Crea utente non-root per sicurezza
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Copia file necessari per runtime
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Crea symlink per .next se necessario
+RUN ln -sf ./.next/standalone/.next ./.next || true
+
+USER nextjs
+
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:${PORT}/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" || exit 1
+
+# Avvia applicazione
+CMD ["node", "server.js"]
+

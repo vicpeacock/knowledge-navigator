@@ -1,0 +1,56 @@
+# Multi-stage build per ottimizzare dimensioni immagine
+FROM python:3.11-slim as builder
+
+# Installa dipendenze di sistema necessarie per build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Crea directory di lavoro
+WORKDIR /app
+
+# Copia requirements e installa dipendenze Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Stage finale - immagine runtime minimale
+FROM python:3.11-slim
+
+# Installa solo runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libmagic1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia dipendenze Python dallo stage builder
+COPY --from=builder /root/.local /root/.local
+
+# Assicura che le librerie siano nel PATH
+ENV PATH=/root/.local/bin:$PATH
+
+# Crea directory di lavoro
+WORKDIR /app
+
+# Copia codice applicazione
+COPY backend/ ./backend/
+COPY alembic.ini ./
+
+# Crea directory necessarie
+RUN mkdir -p logs uploads
+
+# Variabili ambiente
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000
+
+# Esponi porta (Cloud Run usa PORT env var)
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Comando di avvio
+CMD ["sh", "-c", "cd backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+
