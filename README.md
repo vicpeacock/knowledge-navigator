@@ -6,10 +6,10 @@ Personal AI Assistant - Sistema multi-agente per gestione conoscenza e automazio
 
 ```bash
 # Avvia tutti i servizi
-./start.sh
+./scripts/start.sh
 
 # Ferma tutti i servizi
-./stop.sh
+./scripts/stop.sh
 
 # Riavvia solo il backend
 ./scripts/restart_backend.sh
@@ -42,6 +42,6 @@ Tutti gli script sono in `scripts/`:
 
 Vedi `docs/SCRIPTS.md` per la documentazione completa.
 
-## Link Simbolici
+## Script di Servizio
 
-Gli script `start.sh` e `stop.sh` nella root sono link simbolici a `scripts/start.sh` e `scripts/stop.sh` per comodità.
+Tutti gli script di servizio sono nella directory `scripts/`. Usa `./scripts/start.sh` e `./scripts/stop.sh` per avviare e fermare i servizi.
