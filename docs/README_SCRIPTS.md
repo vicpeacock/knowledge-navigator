@@ -4,15 +4,10 @@ Tutti gli script di servizio sono organizzati nella directory `scripts/`.
 
 ## Script Disponibili
 
-### Script Principali (link simbolici nella root)
+Tutti gli script sono nella directory `scripts/`:
 
-- **`start.sh`** → `scripts/start.sh` - Avvia tutti i servizi (backend, frontend, Docker, Ollama, llama.cpp)
-- **`stop.sh`** → `scripts/stop.sh` - Ferma tutti i servizi
-
-### Script in `scripts/`
-
-- **`start.sh`** - Script completo per avviare tutti i servizi
-- **`stop.sh`** - Script completo per fermare tutti i servizi
+- **`start.sh`** - Avvia tutti i servizi (backend, frontend, Docker, Ollama, llama.cpp)
+- **`stop.sh`** - Ferma tutti i servizi
 - **`restart_backend.sh`** - Riavvia solo il backend (utile dopo modifiche configurazione)
 - **`start-mcp-gateway.sh`** - Wrapper per avviare il Docker MCP Gateway
 - **`stop-mcp-gateway.sh`** - Wrapper per fermare il Docker MCP Gateway
@@ -25,9 +20,9 @@ Tutti gli script di servizio sono organizzati nella directory `scripts/`.
 
 ```bash
 # Dalla root del progetto
-./start.sh              # Avvia tutto
-./stop.sh               # Ferma tutto
-./scripts/restart_backend.sh  # Riavvia solo il backend
+./scripts/start.sh              # Avvia tutto
+./scripts/stop.sh               # Ferma tutto
+./scripts/restart_backend.sh    # Riavvia solo il backend
 
 # Oppure direttamente da scripts/
 cd scripts
@@ -52,7 +47,7 @@ scripts/
 
 ## Note
 
-- Gli script nella root (`start.sh`, `stop.sh`) sono link simbolici che puntano a `scripts/`
+- Tutti gli script sono nella directory `scripts/` e devono essere chiamati con `./scripts/script_name.sh`
 - Tutti gli script usano `PROJECT_ROOT` per trovare la directory del progetto
 - Gli script gestiscono automaticamente la terminazione di processi esistenti sulle porte utilizzate
 - Gli script wrapper (MCP Gateway, cleanup) chiamano gli script completi in `tools/infra/`
