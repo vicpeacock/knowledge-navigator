@@ -57,8 +57,8 @@
 - ✅ Preferenze tools MCP per utente (selezione tools personalizzata)
 - ❌ Navigazione autonoma web avanzata (Fase 3)
 
-**Proattività (Fase 2 - Non iniziata):**
-- ❌ Sistema eventi per monitorare email/calendario/WhatsApp
+**Proattività (Fase 2 - 🚧 In Corso):**
+- 🚧 Sistema eventi per monitorare email/calendario (in sviluppo)
 - ❌ WebSocket per notifiche real-time
 - ❌ Motore decisionale per priorità eventi
 - ❌ Notifiche push frontend
@@ -110,12 +110,12 @@
 
 ---
 
-### Fase 2 - Proattività (3-4 settimane)
+### Fase 2 - Proattività (3-4 settimane) - 🚧 In Corso
 
 **Sistema Eventi:**
-- [ ] Event Monitor Service
-- [ ] Email Poller (controllo nuove email)
-- [ ] Calendar Watcher (eventi imminenti)
+- [x] Event Monitor Service (in sviluppo)
+- [x] Email Poller (controllo nuove email) - 🚧 In sviluppo
+- [x] Calendar Watcher (eventi imminenti) - 🚧 In sviluppo
 - [ ] WhatsApp Monitor (messaggi in arrivo)
 
 **WebSocket & Notifiche:**
@@ -205,19 +205,19 @@
 **Preparazione per Agents Intensive Capstone Project** (Scadenza: 1 Dicembre 2025)
 
 **Observability:**
-- [ ] Tracing implementation (OpenTelemetry)
-- [ ] Metrics collection e dashboard
-- [ ] Logging avanzato
+- [x] Tracing implementation (OpenTelemetry) ✅
+- [x] Metrics collection e dashboard ✅
+- [x] Logging avanzato ✅
 
 **Agent Evaluation:**
-- [ ] Evaluation framework
-- [ ] Test cases per scenari comuni
-- [ ] Report generation
+- [x] Evaluation framework ✅
+- [x] Test cases per scenari comuni ✅
+- [x] Report generation ✅
 
 **Deployment:**
-- [ ] Cloud Run deployment
+- [x] Cloud Run deployment preparation (Dockerfiles, scripts, docs) ✅
+- [ ] Cloud Run deployment effettivo (richiede GCP setup)
 - [ ] Database setup su cloud
-- [ ] Documentazione deployment
 
 **Gemini Support (Opzionale):**
 - [ ] Integrazione Gemini API

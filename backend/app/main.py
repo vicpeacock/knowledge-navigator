@@ -94,10 +94,33 @@ async def lifespan(app: FastAPI):
         logging.warning("⚠️  Some services are not healthy. Check logs above for details.")
         logging.warning("⚠️  Backend will start but some features may not work correctly.")
     
+    # Start Event Monitor (proactive event monitoring)
+    if settings.event_monitor_enabled:
+        try:
+            from app.services.event_monitor import EventMonitor
+            event_monitor = EventMonitor()
+            await event_monitor.start()
+            logging.info("✅ Event Monitor started (proactive email/calendar monitoring)")
+        except Exception as e:
+            logging.warning(f"⚠️  Failed to start Event Monitor: {e}")
+            logging.warning("⚠️  Proactive event monitoring will not be available.")
+    else:
+        logging.info("ℹ️  Event Monitor disabled (event_monitor_enabled=false)")
+    
     yield
     
     # Shutdown
     logging.info("🛑 Shutting down Knowledge Navigator backend...")
+    
+    # Stop Event Monitor
+    if settings.event_monitor_enabled:
+        try:
+            from app.services.event_monitor import EventMonitor
+            event_monitor = EventMonitor()
+            await event_monitor.stop()
+        except Exception as e:
+            logging.warning(f"Error stopping Event Monitor: {e}")
+    
     ollama = get_ollama_client()
     mcp = get_mcp_client()
     if ollama:
