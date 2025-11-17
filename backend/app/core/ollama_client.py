@@ -39,6 +39,11 @@ class OllamaClient:
         Returns:
             Response from Ollama API
         """
+        from app.core.tracing import trace_span, set_trace_attribute, add_trace_event
+        from app.core.metrics import increment_counter, observe_histogram
+        import time
+        
+        start_time = time.time()
         messages = []
         
         if system:
@@ -55,12 +60,44 @@ class OllamaClient:
             "stream": stream,
         }
         
-        response = await self.client.post(
-            f"{self.base_url}/api/chat",
-            json=payload,
-        )
-        response.raise_for_status()
-        return response.json()
+        with trace_span("llm.generate", {
+            "llm.model": self.model,
+            "llm.stream": str(stream),
+            "llm.messages_count": len(messages),
+            "llm.prompt_length": len(prompt)
+        }):
+            set_trace_attribute("llm.model", self.model)
+            add_trace_event("llm.request.started", {"model": self.model})
+            
+            increment_counter("llm_requests_total", labels={"model": self.model, "stream": str(stream)})
+            
+            try:
+                response = await self.client.post(
+                    f"{self.base_url}/api/chat",
+                    json=payload,
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                duration = time.time() - start_time
+                observe_histogram("llm_request_duration_seconds", duration, labels={"model": self.model, "stream": str(stream)})
+                
+                # Extract response length if available
+                response_text = result.get("message", {}).get("content", "")
+                if response_text:
+                    set_trace_attribute("llm.response_length", len(response_text))
+                    add_trace_event("llm.response.completed", {
+                        "model": self.model,
+                        "response_length": len(response_text)
+                    })
+                
+                return result
+            except Exception as e:
+                duration = time.time() - start_time
+                observe_histogram("llm_request_duration_seconds", duration, labels={"model": self.model, "error": "true"})
+                increment_counter("llm_requests_errors_total", labels={"model": self.model, "error_type": type(e).__name__})
+                add_trace_event("llm.response.error", {"model": self.model, "error": str(e)})
+                raise
 
     async def generate_with_context(
         self,
@@ -132,7 +169,18 @@ Sei un assistente AI conversazionale integrato nel sistema Knowledge Navigator, 
    - Se hai informazioni rilevanti in memoria, usale per rispondere
    - Se non hai informazioni sufficienti, puoi fare ricerche web o chiedere chiarimenti
 
-3. **Naturalità:**
+    3. **Selezione dei Tool:**
+       - Leggi attentamente le descrizioni di tutti i tool disponibili
+       - Scegli il tool più appropriato per la richiesta dell'utente basandoti sulla descrizione del tool
+       - **IMPORTANTE**: Se l'utente chiede informazioni su luoghi, indirizzi, mappe, direzioni, distanze, o cerca punti di interesse, DEVI usare i tool Google Maps (mcp_maps_*) invece di web_search
+       - Se l'utente chiede di cercare luoghi, ristoranti, negozi, o punti di interesse, usa mcp_maps_search_places
+       - Se l'utente chiede indicazioni o come arrivare da un luogo a un altro, usa mcp_maps_directions
+       - Se l'utente chiede distanze o tempi di percorrenza, usa mcp_maps_distance_matrix
+       - Se l'utente fornisce un indirizzo e hai bisogno delle coordinate, usa mcp_maps_geocode
+       - Preferisci SEMPRE tool specialistici (Google Maps, Calendar, Email) rispetto a tool generici (web_search, web_fetch)
+       - Usa web_search o web_fetch SOLO quando non esiste un tool più specifico per la richiesta
+
+4. **Naturalità:**
    - Sii naturale e conversazionale
    - Non essere verboso quando non necessario
    - Mostra che ricordi informazioni precedenti quando rilevanti
@@ -200,13 +248,28 @@ Sei un assistente AI conversazionale integrato nel sistema Knowledge Navigator, 
         
         # Add tools if provided (native Ollama tool calling)
         if tools:
+            # CRITICAL: Filter out web_search and web_fetch BEFORE converting to Ollama format
+            # This is a safety net in case tool_manager didn't filter them correctly
+            filtered_tools = []
+            for tool in tools:
+                tool_name = tool.get("name", "")
+                # NEVER pass web_search or web_fetch to Ollama - they are internal tools
+                # Ollama has its own web_search API that we call directly, not via tool calling
+                if tool_name in ["web_search", "web_fetch"]:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"🚨🚨🚨 CRITICAL: Filtering out {tool_name} before passing to Ollama - this should have been filtered by tool_manager!")
+                    continue
+                filtered_tools.append(tool)
+            
             # Convert our tool format to Ollama/OpenAI format
             ollama_tools = []
-            for tool in tools:
+            for tool in filtered_tools:
+                tool_name = tool.get("name", "")
                 ollama_tool = {
                     "type": "function",
                     "function": {
-                        "name": tool.get("name", ""),
+                        "name": tool_name,
                         "description": tool.get("description", ""),
                         "parameters": tool.get("parameters", {}),
                     }
@@ -215,7 +278,32 @@ Sei un assistente AI conversazionale integrato nel sistema Knowledge Navigator, 
             payload["tools"] = ollama_tools
             import logging
             logger = logging.getLogger(__name__)
-            logger.info(f"Passing {len(ollama_tools)} tools to Ollama in native format")
+            logger.info(f"Passing {len(ollama_tools)} tools to Ollama in native format (filtered from {len(tools)} original tools)")
+            # Log tool names for debugging
+            tool_names = [t.get("function", {}).get("name", "unknown") for t in ollama_tools]
+            mcp_tools = [n for n in tool_names if n.startswith("mcp_")]
+            web_tools = [n for n in tool_names if "web" in n.lower()]
+            logger.info(f"   Tool breakdown: {len(mcp_tools)} MCP tools, {len(web_tools)} web tools")
+            if mcp_tools:
+                logger.info(f"   MCP tools: {', '.join(mcp_tools[:5])}{'...' if len(mcp_tools) > 5 else ''}")
+            if web_tools:
+                logger.error(f"   🚨🚨🚨 CRITICAL: Web tools still found after filtering: {', '.join(web_tools)}")
+            else:
+                logger.info(f"   ✅ No web tools (web_search/web_fetch) in tools list - correctly filtered")
+            
+            # CRITICAL CHECK: Verify web_search is NOT in the list
+            if "web_search" in tool_names:
+                logger.error(f"🚨🚨🚨 CRITICAL ERROR: web_search is STILL in tools passed to Ollama after filtering!")
+                logger.error(f"   All tools: {tool_names}")
+                import sys
+                print(f"[OLLAMA_CLIENT] ERROR: web_search in tools list after filtering: {tool_names}", file=sys.stderr)
+                # Remove it as a last resort
+                ollama_tools = [t for t in ollama_tools if t.get("function", {}).get("name") != "web_search"]
+                payload["tools"] = ollama_tools
+                tool_names = [t.get("function", {}).get("name", "unknown") for t in ollama_tools]
+                logger.error(f"   Removed web_search as last resort. New tool count: {len(ollama_tools)}")
+            else:
+                logger.info(f"✅ Verified: web_search NOT in tools passed to Ollama")
         
         # Add format if specified (for JSON mode)
         if format:

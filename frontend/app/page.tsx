@@ -81,9 +81,14 @@ function DashboardContent() {
                   {user.name || user.email}
                 </Link>
                 {user.role === 'admin' && (
-                  <Link href="/admin/users" className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400">
-                    Admin
-                  </Link>
+                  <>
+                    <Link href="/admin/users" className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400">
+                      Admin
+                    </Link>
+                    <Link href="/admin/metrics" className="text-sm text-purple-600 hover:text-purple-700 dark:text-purple-400">
+                      Metrics
+                    </Link>
+                  </>
                 )}
               </div>
             )}

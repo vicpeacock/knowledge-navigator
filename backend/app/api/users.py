@@ -392,32 +392,50 @@ async def get_user_tools_preferences(
     tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Get available tools and user's tool preferences"""
+    import asyncio
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔧 Getting tools preferences for user {current_user.email}")
+    
     from app.core.tool_manager import ToolManager
     
+    # Get base tools (fast, synchronous)
+    tool_manager = ToolManager(db=db, tenant_id=tenant_id)
+    base_tools = tool_manager.get_base_tools()
+    logger.info(f"   Found {len(base_tools)} base tools")
+    
+    # Get MCP tools with timeout (may be slow or unavailable)
+    mcp_tools = []
     try:
-        # Get all available tools (base + MCP)
-        tool_manager = ToolManager(db=db, tenant_id=tenant_id)
-        available_tools = await tool_manager.get_available_tools(current_user=current_user)
+        logger.info("   Fetching MCP tools with 10 second timeout...")
+        mcp_tools = await asyncio.wait_for(
+            tool_manager.get_mcp_tools(current_user=current_user, include_all=True),
+            timeout=10.0  # 10 second timeout
+        )
+        logger.info(f"   Found {len(mcp_tools)} MCP tools")
+    except asyncio.TimeoutError:
+        logger.warning("   Timeout fetching MCP tools (MCP servers may be slow or unavailable)")
+        mcp_tools = []
     except Exception as e:
-        # If MCP tools fail, at least return base tools
-        logger.warning(f"Error loading some tools (MCP may be unavailable): {e}")
-        tool_manager = ToolManager(db=db, tenant_id=tenant_id)
-        # Get only base tools if MCP fails
-        available_tools = tool_manager.get_base_tools()
-        # Try to get MCP tools separately, but don't fail if they're unavailable
-        try:
-            mcp_tools = await tool_manager.get_mcp_tools(current_user=current_user)
-            available_tools.extend(mcp_tools)
-        except Exception as mcp_error:
-            logger.warning(f"MCP tools unavailable: {mcp_error}")
+        logger.warning(f"   Error loading MCP tools: {e}")
+        mcp_tools = []
+    
+    available_tools = base_tools + mcp_tools
+    logger.info(f"✅ Total available tools: {len(available_tools)}")
     
     # Get user's current preferences
     user_metadata = current_user.user_metadata or {}
-    enabled_tools = user_metadata.get("enabled_tools", [])
+    # Check if preferences key exists (distinguish between None/not set vs empty list)
+    enabled_tools = user_metadata.get("enabled_tools")
     
-    # If no preferences set, return all tools as enabled
-    if not enabled_tools:
+    # If preferences key doesn't exist (None), return all tools as enabled (first time)
+    # If preferences key exists but is empty list, return empty list (user explicitly deselected all)
+    if enabled_tools is None:
         enabled_tools = [tool.get("name") for tool in available_tools if tool.get("name")]
+    elif not isinstance(enabled_tools, list):
+        # If it's not a list, treat as not set
+        enabled_tools = [tool.get("name") for tool in available_tools if tool.get("name")]
+    # else: enabled_tools is already a list (empty or with values), use it as-is
     
     return ToolsPreferencesResponse(
         available_tools=available_tools,
@@ -435,10 +453,12 @@ async def update_user_tools_preferences(
     """Update user's tool preferences"""
     from app.core.tool_manager import ToolManager
     
-    # Validate that all requested tools exist
+    # Get all available tools (not filtered by user preferences) for validation
     tool_manager = ToolManager(db=db, tenant_id=tenant_id)
-    available_tools = await tool_manager.get_available_tools(current_user=current_user)
-    available_tool_names = {tool.get("name") for tool in available_tools if tool.get("name")}
+    base_tools = tool_manager.get_base_tools()
+    mcp_tools = await tool_manager.get_mcp_tools(current_user=current_user, include_all=True)
+    all_available_tools = base_tools + mcp_tools
+    available_tool_names = {tool.get("name") for tool in all_available_tools if tool.get("name")}
     
     # Validate requested tools
     invalid_tools = set(preferences.enabled_tools) - available_tool_names
@@ -448,18 +468,27 @@ async def update_user_tools_preferences(
             detail=f"Invalid tool names: {', '.join(invalid_tools)}"
         )
     
-    # Update user metadata
+    # Update user metadata - use explicit UPDATE to ensure JSONB is saved correctly
     user_metadata = current_user.user_metadata or {}
+    user_metadata = dict(user_metadata)  # Create a copy to ensure SQLAlchemy detects the change
     user_metadata["enabled_tools"] = preferences.enabled_tools
-    current_user.user_metadata = user_metadata
     
+    # Use explicit UPDATE statement to ensure JSONB is saved correctly
+    from sqlalchemy import update
+    from app.models.database import User
+    await db.execute(
+        update(User)
+        .where(User.id == current_user.id)
+        .values(user_metadata=user_metadata)
+    )
     await db.commit()
     await db.refresh(current_user)
     
     logger.info(f"Updated tool preferences for user {current_user.email}: {len(preferences.enabled_tools)} tools enabled")
     
+    # Return all available tools (not filtered) with user's preferences
     return ToolsPreferencesResponse(
-        available_tools=available_tools,
+        available_tools=all_available_tools,
         user_preferences=preferences.enabled_tools,
     )
 

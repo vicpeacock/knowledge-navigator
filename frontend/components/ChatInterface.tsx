@@ -3,10 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { sessionsApi } from '@/lib/api'
 import { Message, ChatResponse } from '@/types'
-import FileUpload from './FileUpload'
-import FileManager from './FileManager'
-import MemoryViewer from './MemoryViewer'
-import { FileText, Brain } from 'lucide-react'
+// FileUpload, FileManager, MemoryViewer, ToolsPreferences moved to SessionDetails
 import { format } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -22,10 +19,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingMessages, setLoadingMessages] = useState(true)
-  const [useMemory, setUseMemory] = useState(true)
-  const [forceWebSearch, setForceWebSearch] = useState(false)
-  const [showFileManager, setShowFileManager] = useState(false)
-  const [showMemoryViewer, setShowMemoryViewer] = useState(false)
+  // FileManager, MemoryViewer, ToolsPreferences modals moved to SessionDetails
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const [isUserAtBottom, setIsUserAtBottom] = useState(true)
@@ -336,7 +330,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
     setLoading(true)
 
     try {
-      const response = await sessionsApi.chat(sessionId, input, useMemory, forceWebSearch)
+      const response = await sessionsApi.chat(sessionId, input)
       console.log('Chat response received:', response.data)
       
       // Check if response is valid
@@ -510,72 +504,6 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between p-4 border-b bg-white dark:bg-gray-800">
-        <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={useMemory}
-              onChange={(e) => setUseMemory(e.target.checked)}
-              className="rounded"
-            />
-            <span className="text-sm">Use Memory</span>
-          </label>
-          <label className="flex items-center gap-2" title="Forza ricerca web (come toggle Ollama)">
-            <input
-              type="checkbox"
-              checked={forceWebSearch}
-              onChange={(e) => setForceWebSearch(e.target.checked)}
-              className="rounded"
-            />
-            <span className="text-sm">🌐 Web Search</span>
-          </label>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              console.log('Opening Memory Viewer')
-              setShowMemoryViewer(true)
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
-            title="Visualizza contenuto memoria"
-          >
-            <Brain size={16} />
-            Memoria
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              console.log('Opening File Manager')
-              setShowFileManager(true)
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm"
-            title="Visualizza file in memoria"
-          >
-            <FileText size={16} />
-            File
-          </button>
-          <FileUpload sessionId={sessionId} onUploaded={() => setShowFileManager(false)} />
-        </div>
-      </div>
-
-      <FileManager
-        sessionId={sessionId}
-        isOpen={showFileManager}
-        onClose={() => setShowFileManager(false)}
-        onFileUploaded={() => {}}
-      />
-
-      <MemoryViewer
-        sessionId={sessionId}
-        isOpen={showMemoryViewer}
-        onClose={() => setShowMemoryViewer(false)}
-      />
 
       <div 
         ref={messagesContainerRef}

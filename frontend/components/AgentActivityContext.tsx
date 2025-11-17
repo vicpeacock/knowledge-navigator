@@ -37,7 +37,8 @@ const AGENT_ORDER = [
   'response_formatter',
 ]
 
-const ACTIVE_WINDOW_MS = 1500
+// Increased ACTIVE_WINDOW_MS to ensure "started" events are shown even for fast-executing agents
+const ACTIVE_WINDOW_MS = 5000  // 5 seconds - enough time to see "in esecuzione" even for quick operations
 const WAITING_WINDOW_MS = 12000
 const ERROR_WINDOW_MS = 15000
 const COMPLETED_WINDOW_MS = 4000
@@ -215,6 +216,17 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
 
       let fallback: AgentStatusSummary | null = null
 
+      // First pass: find the most recent "completed" event
+      let mostRecentCompleted: AgentActivityEvent | null = null
+      for (let i = history.length - 1; i >= 0; i -= 1) {
+        const evt = history[i]
+        if (evt.status === 'completed') {
+          mostRecentCompleted = evt
+          break
+        }
+      }
+
+      // Second pass: check for active states, but respect "completed" if it's more recent
       for (let i = history.length - 1; i >= 0; i -= 1) {
         const evt = history[i]
         const evtTime = new Date(evt.timestamp).getTime()
@@ -228,6 +240,18 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
           timestamp: evt.timestamp,
         }
 
+        // If there's a "completed" event more recent than this "started" event, prioritize "completed"
+        if (mostRecentCompleted && evt.status === 'started') {
+          const completedTime = new Date(mostRecentCompleted.timestamp).getTime()
+          if (completedTime > evtTime) {
+            // "completed" is more recent, skip this "started" event
+            continue
+          }
+        }
+
+        // Prioritize active states (error, waiting, started) over completed
+        // This ensures that if an agent is currently running, we show that state
+        // even if there's a more recent "completed" event
         if (evt.status === 'error' && age <= ERROR_WINDOW_MS) {
           return summaryBase
         }
@@ -235,23 +259,108 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
           return summaryBase
         }
         if (evt.status === 'started' && age <= ACTIVE_WINDOW_MS) {
-          return summaryBase
+          // If we find a "started" event within the active window, show it immediately
+          // This ensures the agent appears as "in esecuzione" even if it completes quickly
+          // BUT only if there's no more recent "completed" event
+          if (!mostRecentCompleted || new Date(mostRecentCompleted.timestamp).getTime() <= evtTime) {
+            return summaryBase
+          }
         }
+        // Store the most recent event as fallback (but prioritize active states above)
         if (!fallback) {
           fallback = summaryBase
         }
       }
 
       if (fallback) {
-        if (fallback.status === 'completed' && fallback.timestamp) {
-          const completedTime = new Date(fallback.timestamp).getTime()
+        // Check if the fallback event is still recent enough to be shown
+        const fallbackTime = new Date(fallback.timestamp).getTime()
+        const fallbackAge = Number.isFinite(fallbackTime) ? now - fallbackTime : Number.POSITIVE_INFINITY
+        
+        // If there's a "completed" event more recent than the fallback, use that instead
+        if (mostRecentCompleted) {
+          const completedTime = new Date(mostRecentCompleted.timestamp).getTime()
           const completedAge = Number.isFinite(completedTime) ? now - completedTime : Number.POSITIVE_INFINITY
-          if (completedAge > COMPLETED_WINDOW_MS) {
+          
+          // If "completed" is more recent than fallback, use "completed"
+          if (completedTime > fallbackTime) {
+            if (completedAge <= COMPLETED_WINDOW_MS) {
+              return {
+                agentId,
+                agentName: mostRecentCompleted.agent_name || agentNameFallback,
+                status: 'completed',
+                message: mostRecentCompleted.message,
+                timestamp: mostRecentCompleted.timestamp,
+              }
+            } else {
+              // "completed" is too old, show as idle
+              return {
+                agentId,
+                agentName: mostRecentCompleted.agent_name || agentNameFallback,
+                status: 'idle',
+              }
+            }
+          }
+        }
+        
+        // IMPORTANT: Check for "started" events, but only if there's no more recent "completed"
+        if (fallback.status === 'started' && fallbackAge <= ACTIVE_WINDOW_MS) {
+          // Only show "started" if there's no more recent "completed"
+          if (!mostRecentCompleted || new Date(mostRecentCompleted.timestamp).getTime() <= fallbackTime) {
+            return fallback
+          }
+        }
+        
+        // For "completed" status, only show it if it's within the completed window
+        if (fallback.status === 'completed') {
+          if (fallbackAge > COMPLETED_WINDOW_MS) {
             return {
               agentId,
               agentName: fallback.agentName,
               status: 'idle',
             }
+          }
+        }
+        // For other statuses (waiting, error), only show if recent
+        // If the event is too old, show as idle
+        else if (fallback.status === 'waiting' && fallbackAge > WAITING_WINDOW_MS) {
+          return {
+            agentId,
+            agentName: fallback.agentName,
+            status: 'idle',
+          }
+        }
+        else if (fallback.status === 'error' && fallbackAge > ERROR_WINDOW_MS) {
+          return {
+            agentId,
+            agentName: fallback.agentName,
+            status: 'idle',
+          }
+        }
+        // If fallback is "started" but too old, check if there's a more recent "started" event
+        else if (fallback.status === 'started' && fallbackAge > ACTIVE_WINDOW_MS) {
+          // Look for a more recent "started" event in the history
+          for (let j = history.length - 1; j >= 0; j -= 1) {
+            const recentEvt = history[j]
+            if (recentEvt.status === 'started') {
+              const recentTime = new Date(recentEvt.timestamp).getTime()
+              const recentAge = Number.isFinite(recentTime) ? now - recentTime : Number.POSITIVE_INFINITY
+              if (recentAge <= ACTIVE_WINDOW_MS) {
+                return {
+                  agentId,
+                  agentName: recentEvt.agent_name || fallback.agentName,
+                  status: 'started',
+                  message: recentEvt.message,
+                  timestamp: recentEvt.timestamp,
+                }
+              }
+            }
+          }
+          // No recent "started" event found, show as idle
+          return {
+            agentId,
+            agentName: fallback.agentName,
+            status: 'idle',
           }
         }
         return fallback

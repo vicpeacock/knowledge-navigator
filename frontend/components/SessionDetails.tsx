@@ -21,10 +21,16 @@ import {
   ShieldCheck,
   BellRing,
   MessageSquare,
+  FileText,
+  Wrench,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAgentActivity } from './AgentActivityContext'
 import NotificationBell from './NotificationBell'
+import FileUpload from './FileUpload'
+import FileManager from './FileManager'
+import MemoryViewer from './MemoryViewer'
+import ToolsPreferences from './ToolsPreferences'
 
 interface SessionDetailsProps {
   session: Session
@@ -37,6 +43,9 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
   const [description, setDescription] = useState(session.description || '')
   const [loading, setLoading] = useState(false)
   const [showAgentActivity, setShowAgentActivity] = useState(false)
+  const [showFileManager, setShowFileManager] = useState(false)
+  const [showMemoryViewer, setShowMemoryViewer] = useState(false)
+  const [showToolsPreferences, setShowToolsPreferences] = useState(false)
 
   const { agentStatuses, events, connectionState } = useAgentActivity()
 
@@ -345,7 +354,50 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
               <Edit2 size={18} />
             </button>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                console.log('[SessionDetails] Opening Memory Viewer')
+                setShowMemoryViewer(true)
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm"
+              title="Visualizza contenuto memoria"
+            >
+              <Brain size={14} />
+              Memoria
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                console.log('[SessionDetails] Opening Tools Preferences')
+                setShowToolsPreferences(true)
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm"
+              title="Gestisci tools disponibili"
+            >
+              <Wrench size={14} />
+              Tools
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                console.log('[SessionDetails] Opening File Manager')
+                setShowFileManager(true)
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
+              title="Visualizza file in memoria"
+            >
+              <FileText size={14} />
+              File
+            </button>
+            <FileUpload sessionId={session.id} onUploaded={() => setShowFileManager(false)} />
             {session.status === 'active' && (
               <>
                 <button
@@ -379,6 +431,75 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
                 Restore
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modals - Always render, control visibility with isOpen prop */}
+      <FileManager
+        sessionId={session.id}
+        isOpen={showFileManager}
+        onClose={() => {
+          console.log('[SessionDetails] Closing File Manager')
+          setShowFileManager(false)
+        }}
+        onFileUploaded={() => {}}
+      />
+
+      <MemoryViewer
+        sessionId={session.id}
+        isOpen={showMemoryViewer}
+        onClose={() => {
+          console.log('[SessionDetails] Closing Memory Viewer')
+          setShowMemoryViewer(false)
+        }}
+      />
+
+      {/* Tools Preferences Modal */}
+      {showToolsPreferences && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+          style={{ zIndex: 9999 }}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (e.target === e.currentTarget) {
+              console.log('[SessionDetails] Closing Tools Preferences')
+              setShowToolsPreferences(false)
+            }
+          }}
+        >
+          <div 
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b pb-3 px-6 pt-6">
+              <div className="flex items-center gap-2">
+                <Wrench size={24} className="text-indigo-600 dark:text-indigo-400" />
+                <h2 className="text-xl font-semibold">Tools Preferences</h2>
+              </div>
+              <button
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  console.log('[SessionDetails] Closing Tools Preferences via button')
+                  setShowToolsPreferences(false)
+                }}
+                className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              <ToolsPreferences 
+                showHeader={false}
+                showCancelButton={false}
+                onClose={() => {
+                  console.log('[SessionDetails] Closing Tools Preferences via component')
+                  setShowToolsPreferences(false)
+                }}
+              />
+            </div>
           </div>
         </div>
       )}

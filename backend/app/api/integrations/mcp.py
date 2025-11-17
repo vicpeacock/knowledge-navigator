@@ -388,6 +388,64 @@ async def list_mcp_integrations(
     }
 
 
+class MCPUpdateRequest(BaseModel):
+    name: str
+
+
+@router.put("/integrations/{integration_id}")
+async def update_mcp_integration(
+    integration_id: UUID,
+    request: MCPUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """Update MCP integration name (admin only)"""
+    # Check if user is admin
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can update MCP integrations")
+    
+    result = await db.execute(
+        select(IntegrationModel)
+        .where(
+            IntegrationModel.id == integration_id,
+            IntegrationModel.tenant_id == tenant_id,
+            IntegrationModel.service_type == "mcp_server"
+        )
+    )
+    integration = result.scalar_one_or_none()
+    
+    if not integration:
+        raise HTTPException(status_code=404, detail="MCP integration not found")
+    
+    # Update name in session_metadata
+    session_metadata = integration.session_metadata or {}
+    session_metadata = dict(session_metadata)  # Create a copy to ensure SQLAlchemy detects the change
+    session_metadata["name"] = request.name
+    
+    # Use explicit UPDATE statement to ensure JSONB is saved correctly
+    await db.execute(
+        update(IntegrationModel)
+        .where(
+            IntegrationModel.id == integration_id,
+            IntegrationModel.tenant_id == tenant_id
+        )
+        .values(session_metadata=session_metadata)
+    )
+    await db.commit()
+    await db.refresh(integration)
+    
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"MCP integration {integration_id} name updated to '{request.name}' by admin {current_user.email}")
+    
+    return {
+        "id": str(integration.id),
+        "name": request.name,
+        "server_url": session_metadata.get("server_url", ""),
+    }
+
+
 @router.delete("/integrations/{integration_id}")
 async def delete_mcp_integration(
     integration_id: UUID,
@@ -523,7 +581,14 @@ async def test_mcp_connection(
         raise HTTPException(status_code=404, detail="MCP integration not found")
     
     try:
+        # DEBUG: Log settings token
+        from app.core.config import settings as debug_settings
+        logger.error(f"🔍 DEBUG - settings.mcp_gateway_auth_token: {debug_settings.mcp_gateway_auth_token[:30] if debug_settings.mcp_gateway_auth_token else 'NONE'}...")
+        
         client = _get_mcp_client_for_integration(integration)
+        
+        logger.error(f"🔍 DEBUG - client.base_url: {client.base_url}")
+        logger.error(f"🔍 DEBUG - client.headers: {client.headers}")
         
         logger.info(f"Testing connection for {integration.session_metadata.get('server_url', '')}")
         

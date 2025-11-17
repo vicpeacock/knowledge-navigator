@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from typing import Optional
 import os
 from pathlib import Path
@@ -11,6 +11,24 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+    
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        # Give priority to .env file over environment variables
+        # This ensures that .env file values are used even if env vars are set
+        return (
+            init_settings,
+            dotenv_settings,  # .env file first
+            env_settings,     # Then environment variables
+            file_secret_settings,
+        )
     # Database
     database_url: str = "postgresql+asyncpg://knavigator:knavigator_pass@localhost:5432/knowledge_navigator"
     postgres_host: str = "localhost"
@@ -75,13 +93,16 @@ class Settings(BaseSettings):
     integrity_min_importance: float = 0.7  # Importanza minima delle memorie da controllare (filtra memorie poco importanti)
     
     # Feature flags
-    use_langgraph_prototype: bool = False
+    use_langgraph_prototype: bool = True  # Enable LangGraph by default for proper agent telemetry
     
     # Google OAuth2 (for Calendar/Email)
     google_client_id: Optional[str] = None
     google_client_secret: Optional[str] = None
     google_redirect_uri_calendar: str = "http://localhost:8000/api/integrations/calendars/oauth/callback"
     google_redirect_uri_email: str = "http://localhost:8000/api/integrations/emails/oauth/callback"
+    
+    # Google Maps API Key (for MCP Gateway)
+    google_maps_api_key: Optional[str] = None
     
     # Email sending (SMTP) - for invitation emails, password reset, etc.
     smtp_enabled: bool = False  # Set to True to enable email sending

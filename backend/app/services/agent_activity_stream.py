@@ -68,6 +68,9 @@ class AgentActivityStream:
 
     def publish(self, session_id: UUID, event: Dict[str, Any]) -> None:
         """Publish a new telemetry event to all subscribers."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         serialised = self._serialize_event(event)
         history = self._history[session_id]
         history.append(serialised)
@@ -77,9 +80,17 @@ class AgentActivityStream:
         # Make a thread-safe copy of subscribers list
         with self._sync_lock:
             subscribers = list(self._subscribers.get(session_id, []))
+            all_sessions = list(self._subscribers.keys())
+        
+        # event is a dict (serialized), not a Pydantic model
+        agent_id = event.get('agent_id', 'unknown') if isinstance(event, dict) else getattr(event, 'agent_id', 'unknown')
+        status = event.get('status', 'unknown') if isinstance(event, dict) else getattr(event, 'status', 'unknown')
         
         if not subscribers:
+            logger.error(f"⚠️⚠️⚠️  No subscribers for session {session_id}. Event will not be delivered: {agent_id} ({status}). Active sessions: {all_sessions} - CRITICAL LOG")
             return
+        
+        logger.error(f"📡📡📡 Publishing event to {len(subscribers)} subscriber(s) for session {session_id}: {agent_id} ({status}) - CRITICAL LOG")
 
         # Process subscribers outside the lock to avoid blocking
         for subscriber in subscribers:

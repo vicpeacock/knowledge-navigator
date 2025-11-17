@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { authApi } from '@/lib/api'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
@@ -71,12 +72,12 @@ function ProfileContent() {
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-semibold">User Information</h2>
-            <a
+            <Link
               href="/settings/tools"
               className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 underline"
             >
               Manage Tools
-            </a>
+            </Link>
           </div>
           <dl className="space-y-3">
             <div>

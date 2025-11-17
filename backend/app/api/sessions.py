@@ -731,13 +731,9 @@ async def chat(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Schedule contradiction analysis in true background mode (fire-and-forget)
-    background_tasks.schedule_contradiction_check(
-        session_id=session_id,
-        message=request.message,
-        memory_manager=memory,
-        agent_activity_stream=agent_activity_stream,
-    )
+    # NOTE: Integrity contradiction check is now handled automatically by ConversationLearner
+    # when new knowledge is indexed to long-term memory. We don't need to call it here for every message.
+    # The scheduler will pick up any pending contradiction notifications and process them.
     
     # Get session context (previous messages) - filtered by tenant
     messages_result = await db.execute(
@@ -858,26 +854,50 @@ async def chat(
     await db.commit()
     
     # LangGraph branch
+    logger = logging.getLogger(__name__)
+    logger.error(f"🔍🔍🔍 Checking LangGraph flag: use_langgraph_prototype={settings.use_langgraph_prototype}")
+    import sys
+    print(f"[SESSIONS] LangGraph flag: {settings.use_langgraph_prototype}", file=sys.stderr)
+    
     if settings.use_langgraph_prototype:
+        logger.error("✅✅✅ Using LangGraph pipeline")
+        print(f"[SESSIONS] Using LangGraph pipeline", file=sys.stderr)
         existing_metadata = dict(session.session_metadata or {})
         pending_plan = existing_metadata.get("pending_plan")
 
-        langgraph_result = await run_langgraph_chat(
-            db=db,
-            session_id=session_id,
-            request=request,
-            ollama=ollama,
-            planner_client=planner_client,
-            agent_activity_stream=agent_activity_stream,
-            memory_manager=memory,
-            session_context=session_context,
-            retrieved_memory=retrieved_memory,
-            memory_used=memory_used,
-            previous_messages=all_messages_dict,
-            pending_plan=pending_plan,
-        )
+        try:
+            logger.error("🚀🚀🚀 Calling run_langgraph_chat...")
+            print(f"[SESSIONS] Calling run_langgraph_chat", file=sys.stderr)
+            langgraph_result = await run_langgraph_chat(
+                db=db,
+                session_id=session_id,
+                request=request,
+                ollama=ollama,
+                planner_client=planner_client,
+                agent_activity_stream=agent_activity_stream,
+                memory_manager=memory,
+                session_context=session_context,
+                retrieved_memory=retrieved_memory,
+                memory_used=memory_used,
+                previous_messages=all_messages_dict,
+                pending_plan=pending_plan,
+                current_user=current_user,
+            )
+            logger.error("✅✅✅ LangGraph completed successfully")
+            print(f"[SESSIONS] LangGraph completed successfully", file=sys.stderr)
+        except Exception as e:
+            logger.error(f"❌❌❌ LangGraph failed with error: {e}", exc_info=True)
+            print(f"[SESSIONS] LangGraph failed: {e}", file=sys.stderr)
+            raise  # Re-raise to see the error
 
+        # Debug: Log the result structure
+        logger.error(f"🔍 LangGraph result type: {type(langgraph_result)}")
+        logger.error(f"🔍 LangGraph result keys: {list(langgraph_result.keys()) if isinstance(langgraph_result, dict) else 'N/A'}")
+        
         chat_response = langgraph_result["chat_response"]
+        logger.error(f"🔍 Chat response type: {type(chat_response)}")
+        logger.error(f"🔍 Chat response content: {chat_response.response[:100] if chat_response and chat_response.response else 'NONE'}")
+        
         new_plan_metadata = langgraph_result.get("plan_metadata")
 
         if new_plan_metadata:
@@ -900,8 +920,14 @@ async def chat(
             )
             db.add(assistant_message)
 
-        await db.commit()
-        await db.refresh(session)
+        try:
+            await db.commit()
+            await db.refresh(session)
+        except Exception as commit_error:
+            logger.error(f"❌ Error committing to database: {commit_error}", exc_info=True)
+            await db.rollback()
+            # Try to get the response anyway, even if commit failed
+            logger.warning("⚠️  Database commit failed, but returning response anyway")
 
         agent_events = [
             normalized
@@ -1025,42 +1051,13 @@ L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool g
     while tool_iteration < max_tool_iterations:
         logger.info(f"Tool calling iteration {tool_iteration}, prompt length: {len(current_prompt)}")
         
-        # Force web_search if requested (like Ollama's web toggle)
-        if request.force_web_search and tool_iteration == 0:
-            logger.info(f"🔍 Force web_search enabled - executing web_search with query: '{request.message}'")
-            try:
-                # Execute web_search directly with the message as query
-                web_search_result = await tool_manager.execute_tool(
-                    "web_search",
-                    {"query": request.message},
-                    db=db,
-                    session_id=session_id
-                )
-                logger.info(f"Force web_search completed, result keys: {list(web_search_result.keys()) if isinstance(web_search_result, dict) else 'not a dict'}")
-                
-                # Add to iteration_tool_results (same structure as regular tool calls)
-                iteration_tool_results = [{
-                    "tool": "web_search",
-                    "parameters": {"query": request.message},
-                    "result": web_search_result,
-                }]
-                tools_used.append("web_search")
-                
-                # Skip tool calling loop and go directly to LLM generation with results
-                # (same logic as after regular tool execution)
-                tool_iteration += 1
-                # Continue to tool results formatting below (don't call LLM for tool selection)
-                
-            except Exception as e:
-                logger.error(f"Error in force web_search: {e}", exc_info=True)
-                # Continue normally - don't block if force web_search fails
-                iteration_tool_results = []
+        # Note: force_web_search is deprecated - tools are now managed via user preferences
+        # If web_search is not in available_tools (user disabled it), it won't be available
+        # We no longer force web_search here - let Ollama choose from available tools
         
-        # Check if we already have tool results from force_web_search
-        if 'iteration_tool_results' not in locals():
-            iteration_tool_results = []
+        iteration_tool_results = []
         
-        # Generate response with tools available (skip if we already have tool results from force_web_search)
+        # Generate response with tools available
         if not iteration_tool_results:
             try:
                 # Use native tool calling if tools are available, otherwise fallback to prompt-based
@@ -1183,7 +1180,8 @@ L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool g
             
             # Log what tools are available for debugging
             if tool_iteration == 0:
-                available_tools = await tool_manager.get_available_tools()
+                # CRITICAL: Always pass current_user to respect user preferences
+                available_tools = await tool_manager.get_available_tools(current_user=current_user)
                 browser_tools = [t.get('name') for t in available_tools if 'browser' in t.get('name', '').lower()]
                 logger.info(f"Available browser tools: {browser_tools}")
             
@@ -1465,7 +1463,7 @@ Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:""
             "last_assistant_message": response_text,
             "message_count": len(previous_messages) + 2,
         }
-        await memory.update_short_term_memory(db, session_id, new_context)
+        await memory.update_short_term_memory(db, session_id, new_context, tenant_id=tenant_id)
         
         # Extract and index knowledge from conversation (auto-learning)
         # Run in background to avoid blocking the response
@@ -1647,14 +1645,18 @@ async def stream_agent_activity(
         raise HTTPException(status_code=404, detail="Session not found")
 
     async def event_generator():
-        logger.info(f"✅ Starting SSE stream for session {session_id}")
+        logger.error(f"✅✅✅ Starting SSE stream for session {session_id} - CRITICAL LOG")
         snapshot_payload = agent_activity_stream.snapshot_sse_payload(session_id)
+        snapshot_events = agent_activity_stream.snapshot(session_id)
         if snapshot_payload:
-            logger.debug(f"📸 Sending snapshot with {len(agent_activity_stream.snapshot(session_id))} events")
+            logger.error(f"📸📸📸 Sending snapshot with {len(snapshot_events)} events - CRITICAL LOG")
             yield snapshot_payload
+        else:
+            logger.error(f"📸📸📸 No snapshot available (history empty) - CRITICAL LOG")
 
         queue = await agent_activity_stream.register(session_id)
-        logger.info(f"📡 Registered subscriber for session {session_id}, active sessions: {len(agent_activity_stream.get_active_sessions())}")
+        active_sessions = agent_activity_stream.get_active_sessions()
+        logger.error(f"📡📡📡 Registered subscriber for session {session_id}, active sessions: {len(active_sessions)} - {active_sessions} - CRITICAL LOG")
         try:
             while True:
                 if await request.is_disconnected():
@@ -1662,10 +1664,13 @@ async def stream_agent_activity(
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=1.0)
-                    logger.debug(f"📨 Sending event to session {session_id}: {event.get('agent_id', 'unknown')} ({event.get('status', 'unknown')})")
+                    # event is a dict (serialized), not a Pydantic model
+                    agent_id = event.get('agent_id', 'unknown') if isinstance(event, dict) else getattr(event, 'agent_id', 'unknown')
+                    status = event.get('status', 'unknown') if isinstance(event, dict) else getattr(event, 'status', 'unknown')
+                    logger.error(f"📨📨📨 Sending event to session {session_id}: {agent_id} ({status})")
+                    yield agent_activity_stream.as_sse_payload(event)
                 except asyncio.TimeoutError:
                     continue
-                yield agent_activity_stream.as_sse_payload(event)
         finally:
             await agent_activity_stream.unregister(session_id, queue)
             logger.info(f"🔌 Unregistered subscriber for session {session_id}, active sessions: {len(agent_activity_stream.get_active_sessions())}")
@@ -1690,6 +1695,7 @@ async def get_session_memory(
 ):
     """Get memory information for a session (for current user)"""
     logger = logging.getLogger(__name__)
+    logger.info(f"📋 Getting memory info for session {session_id} (user: {current_user.email})")
     
     # Verify session belongs to user
     session_result = await db.execute(
@@ -1703,39 +1709,79 @@ async def get_session_memory(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Get short-term memory
+    # Get short-term memory (fast, from database)
     try:
         short_term = await memory.get_short_term_memory(db, session_id)
     except Exception as e:
         logger.warning(f"Error retrieving short-term memory: {e}")
         short_term = None
     
-    # Get sample medium-term memories (recent ones) - use a generic query
-    try:
-        medium_samples = await memory.retrieve_medium_term_memory(
-            session_id, "sessione conversazione", n_results=5, tenant_id=tenant_id
-        )
-    except Exception as e:
-        logger.warning(f"Error retrieving medium-term memory: {e}")
-        medium_samples = []
-    
-    # Get sample long-term memories - use a generic query (for backward compatibility)
-    try:
-        long_samples = await memory.retrieve_long_term_memory(
-            "conoscenza apprendimento", n_results=5, tenant_id=tenant_id
-        )
-    except Exception as e:
-        logger.warning(f"Error retrieving long-term memory samples: {e}")
-        long_samples = []
-    
-    # Get ALL long-term memories from database with full metadata (filtered by tenant)
+    # Get ALL long-term memories from database FIRST (fast, no ChromaDB)
     from app.models.database import MemoryLong as MemoryLongModel
-    long_term_result = await db.execute(
-        select(MemoryLongModel)
-        .where(MemoryLongModel.tenant_id == tenant_id)
-        .order_by(MemoryLongModel.created_at.desc())
-    )
-    all_long_term = long_term_result.scalars().all()
+    try:
+        long_term_result = await db.execute(
+            select(MemoryLongModel)
+            .where(MemoryLongModel.tenant_id == tenant_id)
+            .order_by(MemoryLongModel.created_at.desc())
+        )
+        all_long_term = long_term_result.scalars().all()
+    except Exception as e:
+        logger.warning(f"Error retrieving long-term memories from database: {e}")
+        all_long_term = []
+    
+    # Get sample medium-term and long-term memories from ChromaDB in parallel with timeout
+    import asyncio
+    medium_samples = []
+    long_samples = []
+    
+    async def get_medium_samples():
+        try:
+            return await asyncio.wait_for(
+                memory.retrieve_medium_term_memory(
+                    session_id, "sessione conversazione", n_results=5, tenant_id=tenant_id
+                ),
+                timeout=5.0  # 5 second timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Timeout retrieving medium-term memory from ChromaDB")
+            return []
+        except Exception as e:
+            logger.warning(f"Error retrieving medium-term memory: {e}")
+            return []
+    
+    async def get_long_samples():
+        try:
+            return await asyncio.wait_for(
+                memory.retrieve_long_term_memory(
+                    "conoscenza apprendimento", n_results=5, tenant_id=tenant_id
+                ),
+                timeout=5.0  # 5 second timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Timeout retrieving long-term memory samples from ChromaDB")
+            return []
+        except Exception as e:
+            logger.warning(f"Error retrieving long-term memory samples: {e}")
+            return []
+    
+    # Execute ChromaDB queries in parallel
+    try:
+        medium_samples, long_samples = await asyncio.gather(
+            get_medium_samples(),
+            get_long_samples(),
+            return_exceptions=True
+        )
+        # Handle exceptions from gather
+        if isinstance(medium_samples, Exception):
+            logger.warning(f"Error in parallel medium-term retrieval: {medium_samples}")
+            medium_samples = []
+        if isinstance(long_samples, Exception):
+            logger.warning(f"Error in parallel long-term retrieval: {long_samples}")
+            long_samples = []
+    except Exception as e:
+        logger.warning(f"Error in parallel memory retrieval: {e}")
+        medium_samples = []
+        long_samples = []
     
     # Convert to schema format
     long_term_memories = []
