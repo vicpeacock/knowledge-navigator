@@ -84,3 +84,31 @@ async def mark_all_notifications_read(
     )
     return {"message": f"Marked {count} notifications as read", "count": count}
 
+
+@router.post("/check-events")
+async def check_events_manual(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+):
+    """
+    Manually trigger event check (email and calendar).
+    Useful for testing proactive monitoring.
+    """
+    from app.services.event_monitor import EventMonitor
+    
+    event_monitor = EventMonitor()
+    await event_monitor.check_once()
+    
+    # Get newly created notifications
+    notification_service = NotificationService(db)
+    notifications = await notification_service.get_pending_notifications(
+        tenant_id=tenant_id,
+        read=False,
+    )
+    
+    return {
+        "message": "Event check completed",
+        "notifications_created": len(notifications),
+        "notifications": notifications[:10],  # Return first 10
+    }
+
