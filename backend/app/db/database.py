@@ -9,6 +9,12 @@ engine = create_async_engine(
     settings.database_url,
     echo=False,
     future=True,
+    # Pool configuration per evitare esaurimento connessioni
+    pool_size=10,  # Numero di connessioni mantenute nel pool
+    max_overflow=20,  # Connessioni aggiuntive oltre pool_size
+    pool_timeout=30,  # Timeout per ottenere una connessione dal pool
+    pool_recycle=3600,  # Ricicla connessioni dopo 1 ora per evitare connessioni stale
+    pool_pre_ping=True,  # Verifica che le connessioni siano valide prima di usarle
 )
 
 AsyncSessionLocal = async_sessionmaker(
