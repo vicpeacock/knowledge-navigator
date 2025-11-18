@@ -593,51 +593,51 @@ async def clean_contradiction_notifications(
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
 ):
-    """Delete all contradiction notifications from the database"""
+    """Delete all pending notifications (all types) from the database for the current tenant"""
     logger = logging.getLogger(__name__)
-    logger.info("🧹 Cleaning contradiction notifications...")
+    logger.info("🧹 Cleaning all pending notifications...")
     
     from app.models.database import Notification as NotificationModel
     
-    # Count before deletion (filtered by tenant)
+    # Count before deletion (filtered by tenant, only unread notifications)
     result = await db.execute(
         select(NotificationModel).where(
-            NotificationModel.type == "contradiction",
-            NotificationModel.tenant_id == tenant_id
+            NotificationModel.tenant_id == tenant_id,
+            NotificationModel.read == False  # Only delete unread/pending notifications
         )
     )
     count_before = len(result.scalars().all())
-    logger.info(f"📊 Found {count_before} contradiction notifications to delete for tenant {tenant_id}")
+    logger.info(f"📊 Found {count_before} pending notifications to delete for tenant {tenant_id}")
     
     if count_before == 0:
-        logger.info("ℹ️  No contradiction notifications to delete")
+        logger.info("ℹ️  No pending notifications to delete")
         return {
-            "message": "No contradiction notifications to delete",
+            "message": "No pending notifications to delete",
             "deleted_count": 0
         }
     
-    # Delete all contradiction notifications (filtered by tenant)
+    # Delete all pending notifications (filtered by tenant)
     try:
         delete_stmt = delete(NotificationModel).where(
-            NotificationModel.type == "contradiction",
-            NotificationModel.tenant_id == tenant_id
+            NotificationModel.tenant_id == tenant_id,
+            NotificationModel.read == False  # Only delete unread/pending notifications
         )
         result = await db.execute(delete_stmt)
         rows_affected = result.rowcount if hasattr(result, 'rowcount') else count_before
         await db.commit()
         
-        logger.info(f"✅ Deleted {count_before} contradiction notifications (rows affected: {rows_affected})")
+        logger.info(f"✅ Deleted {count_before} pending notifications (rows affected: {rows_affected})")
         
         return {
-            "message": f"Deleted {count_before} contradiction notifications",
+            "message": f"Deleted {count_before} pending notifications",
             "deleted_count": count_before
         }
     except Exception as e:
-        logger.error(f"❌ Error deleting contradiction notifications: {e}", exc_info=True)
+        logger.error(f"❌ Error deleting pending notifications: {e}", exc_info=True)
         await db.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"Error deleting contradiction notifications: {str(e)}"
+            detail=f"Error deleting pending notifications: {str(e)}"
         )
 
 
