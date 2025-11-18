@@ -15,6 +15,7 @@ from app.services.task_queue import TaskQueue
 from app.services.agent_scheduler import AgentScheduler, ScheduledAgent
 from app.services.background_agent import fetch_pending_contradiction_tasks
 from app.services.task_dispatcher import TaskDispatcher
+from app.services.daily_session_manager import DailySessionManager
 from app.db.database import AsyncSessionLocal
 
 # Global instances
@@ -221,4 +222,13 @@ def get_task_queue() -> TaskQueue:
 
 def get_task_dispatcher() -> TaskDispatcher:
     return _task_dispatcher
+
+
+def get_daily_session_manager(db) -> DailySessionManager:
+    """Get DailySessionManager instance for managing day-based sessions"""
+    return DailySessionManager(
+        db=db,
+        memory_manager=get_memory_manager(),
+        ollama_client=get_ollama_client(),
+    )
 
