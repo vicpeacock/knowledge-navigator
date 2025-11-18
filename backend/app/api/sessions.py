@@ -917,6 +917,20 @@ async def get_pending_notifications(
             formatted_content["new_statement"] = content.get("new_statement") or content.get("new_knowledge", {}).get("content") or content.get("new_knowledge", {}).get("text")
             formatted_content["contradictions"] = content.get("contradictions", [])
         elif notif_type == "email_received":
+            # Include email-specific fields
+            formatted_content["subject"] = content.get("subject")
+            formatted_content["from"] = content.get("from")
+            formatted_content["snippet"] = content.get("snippet")
+            formatted_content["email_id"] = content.get("email_id")
+            # Include auto_session_id if present (session created automatically from email analysis)
+            auto_session_id = content.get("auto_session_id")
+            if auto_session_id:
+                formatted_content["auto_session_id"] = auto_session_id
+                formatted_content["has_session"] = True
+            # Also check session_id at notification level
+            if notif.get("session_id"):
+                formatted_content["session_id"] = notif.get("session_id")
+                formatted_content["has_session"] = True
             # Email notification content
             formatted_content["subject"] = content.get("subject")
             formatted_content["from"] = content.get("from")
