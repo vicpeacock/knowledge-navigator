@@ -2176,7 +2176,6 @@ async def create_session_from_notification(
             await db.refresh(existing_session)
         
         logger.info(f"Session {existing_session.id} already exists for email {email_id}, returning it")
-        logger.info(f"Session {existing_session.id} already exists for email {email_id}, returning it")
         return Session(
             id=existing_session.id,
             name=existing_session.name,
