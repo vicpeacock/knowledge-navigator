@@ -447,5 +447,226 @@ describe('NotificationBell', () => {
       }, { timeout: 3000 })
     })
   })
+
+  describe('Notification deletion', () => {
+    beforeEach(() => {
+      // Mock window.confirm to return true by default
+      window.confirm = jest.fn(() => true)
+      window.alert = jest.fn()
+    })
+
+    it('shows delete button [X] on each notification', async () => {
+      const mockNotifications = [
+        {
+          id: 'notif-1',
+          type: 'email_received',
+          priority: 'medium',
+          created_at: new Date().toISOString(),
+          content: {
+            message: 'Nuova email da test@example.com',
+            subject: 'Test Subject',
+          },
+        },
+      ]
+
+      mockedAxios.get.mockResolvedValue({ data: mockNotifications })
+      
+      render(<NotificationBell sessionId={mockSessionId} />)
+      
+      const bellButton = screen.getByTitle('Notifiche')
+      fireEvent.click(bellButton)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Nuova email da test@example.com')).toBeInTheDocument()
+      })
+      
+      // Find all delete buttons (×)
+      const deleteButtons = screen.getAllByTitle('Elimina notifica')
+      expect(deleteButtons.length).toBeGreaterThan(0)
+    })
+
+    it('deletes notification when [X] is clicked and confirmed', async () => {
+      const mockNotifications = [
+        {
+          id: 'notif-1',
+          type: 'email_received',
+          priority: 'medium',
+          created_at: new Date().toISOString(),
+          content: {
+            message: 'Nuova email da test@example.com',
+          },
+        },
+      ]
+
+      mockedAxios.get.mockResolvedValue({ data: mockNotifications })
+      mockedAxios.delete.mockResolvedValue({ data: { message: 'Notification deleted' } })
+      
+      render(<NotificationBell sessionId={mockSessionId} />)
+      
+      const bellButton = screen.getByTitle('Notifiche')
+      fireEvent.click(bellButton)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Nuova email da test@example.com')).toBeInTheDocument()
+      })
+      
+      const deleteButton = screen.getByTitle('Elimina notifica')
+      fireEvent.click(deleteButton)
+      
+      // Wait for confirmation dialog and deletion
+      await waitFor(() => {
+        expect(window.confirm).toHaveBeenCalledWith('Vuoi eliminare questa notifica?')
+      })
+      
+      await waitFor(() => {
+        expect(mockedAxios.delete).toHaveBeenCalledWith(
+          'http://localhost:8000/api/notifications/notif-1'
+        )
+      })
+      
+      // Notification should be removed from UI
+      await waitFor(() => {
+        expect(screen.queryByText('Nuova email da test@example.com')).not.toBeInTheDocument()
+      })
+    })
+
+    it('does not delete notification when user cancels confirmation', async () => {
+      window.confirm = jest.fn(() => false) // User cancels
+      
+      const mockNotifications = [
+        {
+          id: 'notif-1',
+          type: 'email_received',
+          priority: 'medium',
+          created_at: new Date().toISOString(),
+          content: {
+            message: 'Nuova email da test@example.com',
+          },
+        },
+      ]
+
+      mockedAxios.get.mockResolvedValue({ data: mockNotifications })
+      
+      render(<NotificationBell sessionId={mockSessionId} />)
+      
+      const bellButton = screen.getByTitle('Notifiche')
+      fireEvent.click(bellButton)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Nuova email da test@example.com')).toBeInTheDocument()
+      })
+      
+      const deleteButton = screen.getByTitle('Elimina notifica')
+      fireEvent.click(deleteButton)
+      
+      await waitFor(() => {
+        expect(window.confirm).toHaveBeenCalled()
+      })
+      
+      // Should not call delete API
+      expect(mockedAxios.delete).not.toHaveBeenCalled()
+      
+      // Notification should still be visible
+      expect(screen.getByText('Nuova email da test@example.com')).toBeInTheDocument()
+    })
+
+    it('handles delete error gracefully', async () => {
+      const mockNotifications = [
+        {
+          id: 'notif-1',
+          type: 'email_received',
+          priority: 'medium',
+          created_at: new Date().toISOString(),
+          content: {
+            message: 'Nuova email da test@example.com',
+          },
+        },
+      ]
+
+      mockedAxios.get.mockResolvedValue({ data: mockNotifications })
+      mockedAxios.delete.mockRejectedValue(new Error('Network error'))
+      
+      render(<NotificationBell sessionId={mockSessionId} />)
+      
+      const bellButton = screen.getByTitle('Notifiche')
+      fireEvent.click(bellButton)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Nuova email da test@example.com')).toBeInTheDocument()
+      })
+      
+      const deleteButton = screen.getByTitle('Elimina notifica')
+      fireEvent.click(deleteButton)
+      
+      await waitFor(() => {
+        expect(mockedAxios.delete).toHaveBeenCalled()
+      })
+      
+      // Should show error alert
+      await waitFor(() => {
+        expect(window.alert).toHaveBeenCalledWith('Errore durante l\'eliminazione della notifica')
+      })
+    })
+
+    it('shows delete button on contradiction notifications', async () => {
+      const mockNotifications = [
+        {
+          id: 'notif-1',
+          type: 'contradiction',
+          priority: 'high',
+          created_at: new Date().toISOString(),
+          content: {
+            message: 'Contraddizione rilevata',
+            title: 'Contraddizione',
+            new_statement: 'Nuova informazione',
+          },
+        },
+      ]
+
+      mockedAxios.get.mockResolvedValue({ data: mockNotifications })
+      
+      render(<NotificationBell sessionId={mockSessionId} />)
+      
+      const bellButton = screen.getByTitle('Notifiche')
+      fireEvent.click(bellButton)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Contraddizione rilevata')).toBeInTheDocument()
+      })
+      
+      const deleteButtons = screen.getAllByTitle('Elimina notifica')
+      expect(deleteButtons.length).toBeGreaterThan(0)
+    })
+
+    it('shows delete button on calendar notifications', async () => {
+      const mockNotifications = [
+        {
+          id: 'notif-1',
+          type: 'calendar_event_starting',
+          priority: 'high',
+          created_at: new Date().toISOString(),
+          content: {
+            message: 'Evento imminente: Meeting',
+            summary: 'Meeting',
+            start_time: new Date().toISOString(),
+          },
+        },
+      ]
+
+      mockedAxios.get.mockResolvedValue({ data: mockNotifications })
+      
+      render(<NotificationBell sessionId={mockSessionId} />)
+      
+      const bellButton = screen.getByTitle('Notifiche')
+      fireEvent.click(bellButton)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Evento imminente: Meeting')).toBeInTheDocument()
+      })
+      
+      const deleteButtons = screen.getAllByTitle('Elimina notifica')
+      expect(deleteButtons.length).toBeGreaterThan(0)
+    })
+  })
 })
 
