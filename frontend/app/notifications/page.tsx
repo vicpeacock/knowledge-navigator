@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { notificationsApi } from '@/lib/api'
-import { Bell, Filter, X, CheckCircle2, Trash2, AlertCircle, Mail, Calendar, MessageSquare } from 'lucide-react'
+import { Bell, Filter, X, CheckCircle2, Trash2, AlertCircle, Mail, Calendar, MessageSquare, ArrowLeft } from 'lucide-react'
 import { format } from 'date-fns'
 
 interface Notification {
@@ -30,6 +31,7 @@ interface Notification {
 }
 
 export default function NotificationsPage() {
+  const router = useRouter()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -168,6 +170,13 @@ export default function NotificationsPage() {
           <div className="p-6 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
+                <button
+                  onClick={() => router.back()}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                  title="Torna indietro"
+                >
+                  <ArrowLeft size={20} className="text-gray-600 dark:text-gray-400" />
+                </button>
                 <Bell size={24} className="text-blue-600 dark:text-blue-400" />
                 <h1 className="text-2xl font-bold">Notifiche</h1>
                 <span className="text-sm text-gray-500 dark:text-gray-400">
