@@ -709,6 +709,12 @@ async def get_pending_notifications(
             formatted_content["from"] = content.get("from")
             formatted_content["snippet"] = content.get("snippet")
             formatted_content["email_id"] = content.get("email_id")
+            # Add session link if auto-created session exists
+            auto_session_id = content.get("auto_session_id") or (str(notif.get("session_id")) if notif.get("session_id") else None)
+            if auto_session_id:
+                formatted_content["session_id"] = auto_session_id
+                formatted_content["session_link"] = f"/sessions/{auto_session_id}"
+                formatted_content["has_session"] = True
             # Create a user-friendly message if not present
             if not formatted_content["message"]:
                 subject = content.get("subject", "No Subject")

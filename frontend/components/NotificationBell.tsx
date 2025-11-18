@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Bell } from 'lucide-react'
 import axios from 'axios'
 
@@ -11,6 +12,7 @@ interface Notification {
   type: string
   priority: string
   created_at: string
+  session_id?: string | null
   content: {
     message: string
     title?: string
@@ -19,6 +21,19 @@ interface Notification {
       existing_memory?: string
       explanation?: string
     }>
+    // Email-specific
+    subject?: string
+    from?: string
+    snippet?: string
+    email_id?: string
+    session_id?: string
+    session_link?: string
+    has_session?: boolean
+    // Calendar-specific
+    summary?: string
+    start_time?: string
+    end_time?: string
+    event_id?: string
   }
 }
 
@@ -357,9 +372,63 @@ function NotificationItem({
     )
   }
 
+  // Email or calendar notification with optional session link
+  const hasSession = notification.content.has_session || notification.session_id
+  const sessionId = notification.content.session_id || notification.session_id
+  
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-      <p className="text-sm">{notification.content.message}</p>
+      <p className="text-sm mb-3">{notification.content.message}</p>
+      
+      {/* Email-specific content */}
+      {notification.type === 'email_received' && (
+        <div className="mb-3 space-y-1">
+          {notification.content.subject && (
+            <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              Oggetto: {notification.content.subject}
+            </p>
+          )}
+          {notification.content.snippet && (
+            <p className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2">
+              {notification.content.snippet}
+            </p>
+          )}
+        </div>
+      )}
+      
+      {/* Calendar-specific content */}
+      {notification.type === 'calendar_event_starting' && (
+        <div className="mb-3 space-y-1">
+          {notification.content.summary && (
+            <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              {notification.content.summary}
+            </p>
+          )}
+          {notification.content.start_time && (
+            <p className="text-xs text-gray-500 dark:text-gray-500">
+              Inizio: {new Date(notification.content.start_time).toLocaleString('it-IT')}
+            </p>
+          )}
+        </div>
+      )}
+      
+      {/* Session link button */}
+      {hasSession && sessionId && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            // Navigate to session using Next.js router
+            router.push(`/sessions/${sessionId}`)
+            // Close notification popup
+            setIsOpen(false)
+          }}
+          className="w-full mt-3 px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm font-medium transition-colors"
+        >
+          Apri Sessione →
+        </button>
+      )}
     </div>
   )
 }
