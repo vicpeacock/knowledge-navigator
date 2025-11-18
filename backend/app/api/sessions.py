@@ -2151,16 +2151,22 @@ async def create_session_from_notification(
     if not email_id:
         raise HTTPException(status_code=400, detail="Notification does not contain email_id")
     
-    # Check if session already exists for this email
+    # Check if session already exists for this email (only active sessions)
+    # IMPORTANT: Only return active sessions, not deleted or archived ones
     existing_session_result = await db.execute(
         select(SessionModel).where(
             SessionModel.tenant_id == tenant_id,
             SessionModel.user_id == current_user.id,
             SessionModel.session_metadata["email_id"].astext == str(email_id),
-            SessionModel.status == "active",
+            SessionModel.status == "active",  # Only active sessions
         )
     )
     existing_session = existing_session_result.scalar_one_or_none()
+    
+    # If session exists but is not active, we'll create a new one
+    if existing_session and existing_session.status != "active":
+        logger.info(f"Found session {existing_session.id} for email {email_id} but status is {existing_session.status}, creating new one")
+        existing_session = None
     
     if existing_session:
         logger.info(f"Session {existing_session.id} already exists for email {email_id}, returning it")
