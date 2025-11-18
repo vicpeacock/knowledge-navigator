@@ -26,6 +26,7 @@ class NotificationService:
         content_value: str,
         tenant_id: Optional[UUID] = None,
         read: Optional[bool] = None,
+        integration_id: Optional[str] = None,
     ) -> bool:
         """
         Check if a notification already exists based on type and content key-value.
@@ -37,6 +38,7 @@ class NotificationService:
             content_value: Value to match
             tenant_id: Optional tenant ID to filter by
             read: Optional read status to filter by (None = any status)
+            integration_id: Optional integration ID to filter by (for email/calendar notifications)
             
         Returns:
             True if notification exists, False otherwise
@@ -51,6 +53,13 @@ class NotificationService:
         
         if read is not None:
             query = query.where(NotificationModel.read == read)
+        
+        # For email/calendar notifications, also filter by integration_id if provided
+        # This allows multiple integrations to process the same email/event independently
+        if integration_id and type in ["email_received", "calendar_event_starting"]:
+            query = query.where(
+                NotificationModel.content["integration_id"].astext == str(integration_id)
+            )
         
         result = await self.db.execute(query)
         existing = result.scalar_one_or_none()
@@ -85,16 +94,20 @@ class NotificationService:
             key = check_duplicate.get("key")
             value = check_duplicate.get("value")
             if key and value:
+                # Extract integration_id from content if available (for email/calendar notifications)
+                integration_id = content.get("integration_id") if isinstance(content, dict) else None
+                
                 exists = await self.notification_exists(
                     type=type,
                     content_key=key,
                     content_value=value,
                     tenant_id=tenant_id,
                     read=False,  # Only check unread notifications
+                    integration_id=integration_id,  # Filter by integration_id for email/calendar
                 )
                 if exists:
                     logger.debug(
-                        f"Skipping duplicate notification: type={type}, {key}={value}"
+                        f"Skipping duplicate notification: type={type}, {key}={value}, integration_id={integration_id}"
                     )
                     return None
         
