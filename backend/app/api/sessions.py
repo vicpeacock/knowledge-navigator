@@ -929,19 +929,13 @@ async def get_pending_notifications(
                 formatted_content["has_session"] = True
             # Also check session_id at notification level
             if notif.get("session_id"):
-                formatted_content["session_id"] = notif.get("session_id")
-                formatted_content["has_session"] = True
-            # Email notification content
-            formatted_content["subject"] = content.get("subject")
-            formatted_content["from"] = content.get("from")
-            formatted_content["snippet"] = content.get("snippet")
-            formatted_content["email_id"] = content.get("email_id")
+                formatted_content["session_id"] = str(notif.get("session_id"))
+                if not formatted_content.get("has_session"):
+                    formatted_content["has_session"] = True
             # Add session link if auto-created session exists
-            auto_session_id = content.get("auto_session_id") or (str(notif.get("session_id")) if notif.get("session_id") else None)
-            if auto_session_id:
-                formatted_content["session_id"] = auto_session_id
-                formatted_content["session_link"] = f"/sessions/{auto_session_id}"
-                formatted_content["has_session"] = True
+            session_id_for_link = auto_session_id or (str(notif.get("session_id")) if notif.get("session_id") else None)
+            if session_id_for_link:
+                formatted_content["session_link"] = f"/sessions/{session_id_for_link}"
             # Create a user-friendly message if not present
             if not formatted_content["message"]:
                 subject = content.get("subject", "No Subject")
