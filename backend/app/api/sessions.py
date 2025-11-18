@@ -205,6 +205,23 @@ async def get_session(
     current_user: User = Depends(get_current_user),
 ):
     """Get a session by ID (for current user)"""
+    logger = logging.getLogger(__name__)
+    
+    # First check if session exists at all (for debugging)
+    result_all = await db.execute(
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id,
+        )
+    )
+    session_any_user = result_all.scalar_one_or_none()
+    
+    if session_any_user:
+        logger.debug(f"Session {session_id} exists: user_id={session_any_user.user_id}, current_user.id={current_user.id}")
+        if session_any_user.user_id != current_user.id:
+            logger.warning(f"Session {session_id} belongs to user {session_any_user.user_id} but current user is {current_user.id}")
+    
+    # Now check with user_id filter
     result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
@@ -215,6 +232,11 @@ async def get_session(
     session = result.scalar_one_or_none()
     
     if not session:
+        if session_any_user:
+            raise HTTPException(
+                status_code=403, 
+                detail=f"Session exists but belongs to a different user (session user_id: {session_any_user.user_id}, your user_id: {current_user.id})"
+            )
         raise HTTPException(status_code=404, detail="Session not found")
     
     # Map session_metadata to metadata for response
