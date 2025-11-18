@@ -267,13 +267,35 @@ async def get_session(
                             logger.info(f"✅ Allowing access to session {session_id}: email came from integration {notification_integration_id} owned by current user")
                             session = session_any_user
                         else:
-                            # Integration belongs to different user - this is a multi-tenant issue
-                            logger.error(f"❌ MULTI-TENANT ISSUE: Session {session_id} created from email {email_id} via integration {notification_integration_id} which belongs to user {integration.user_id}, but current user is {current_user.id}")
-                            logger.error(f"   This indicates the integration was created for a different user than the one accessing it")
-                            raise HTTPException(
-                                status_code=403, 
-                                detail=f"Session was created from an integration that belongs to a different user (integration user_id: {integration.user_id}, your user_id: {current_user.id}). Please ensure your email integration is correctly associated with your account."
+                            # Integration belongs to different user - check if current user has their own email integration
+                            # If they do, this is a configuration issue (wrong integration was used)
+                            # If they don't, they need to create their own integration
+                            user_integrations_check = await db.execute(
+                                select(Integration).where(
+                                    Integration.tenant_id == tenant_id,
+                                    Integration.provider == "google",
+                                    Integration.service_type == "email",
+                                    Integration.user_id == current_user.id,
+                                    Integration.enabled == True,
+                                )
                             )
+                            user_has_integration = user_integrations_check.scalar_one_or_none() is not None
+                            
+                            if user_has_integration:
+                                # User has their own integration - this is a bug: wrong integration was used
+                                logger.error(f"❌ CONFIGURATION ISSUE: Session {session_id} created from email {email_id} via integration {notification_integration_id} which belongs to user {integration.user_id}, but current user {current_user.id} has their own email integration")
+                                logger.error(f"   This indicates a bug: the email was processed by the wrong user's integration")
+                                raise HTTPException(
+                                    status_code=403, 
+                                    detail=f"Session was created from an integration that belongs to a different user. Your account has its own email integration, but this email was processed by another user's integration. This is a configuration issue."
+                                )
+                            else:
+                                # User doesn't have their own integration - they need to create one
+                                logger.warning(f"⚠️  USER HAS NO INTEGRATION: Session {session_id} created from email {email_id} via integration {notification_integration_id} which belongs to user {integration.user_id}, but current user {current_user.id} has no email integration")
+                                raise HTTPException(
+                                    status_code=403, 
+                                    detail=f"Session was created from an integration that belongs to a different user. You don't have an email integration configured. Please create your own Gmail integration in the Integrations page."
+                                )
                     else:
                         logger.warning(f"Integration {notification_integration_id} not found")
                         raise HTTPException(status_code=403, detail="Session exists but integration not found")
