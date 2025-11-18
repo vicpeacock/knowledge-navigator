@@ -127,18 +127,43 @@ class EmailPoller:
         # Query per nuove email (solo non lette per ora)
         try:
             # Get unread emails from last 24 hours
+            logger.info(f"🔍 Checking for new emails for integration {integration.id} (tenant: {integration.tenant_id})")
+            logger.info(f"📧 Query: 'is:unread newer_than:1d', max_results: 50")
+            
             messages = await self.email_service.get_gmail_messages(
-                max_results=20,
+                max_results=50,  # Increased to catch more emails
                 query="is:unread newer_than:1d",
                 integration_id=str(integration.id),
                 include_body=False  # Non serve il body per notifiche
             )
+            logger.info(f"📧 Gmail API returned {len(messages)} unread emails (last 24h)")
+            
+            # Log first few email IDs and subjects for debugging
+            if messages:
+                logger.info(f"📋 First 3 emails from Gmail:")
+                for i, msg in enumerate(messages[:3], 1):
+                    logger.info(f"   {i}. ID: {msg.get('id')}, Subject: {msg.get('subject', 'No subject')[:60]}, From: {msg.get('from', 'Unknown')[:40]}")
+            
+            # If no results, try without time filter (just unread)
+            if not messages:
+                logger.warning("⚠️  No emails with time filter, trying 'is:unread' without time limit...")
+                messages = await self.email_service.get_gmail_messages(
+                    max_results=50,
+                    query="is:unread",
+                    integration_id=str(integration.id),
+                    include_body=False
+                )
+                logger.info(f"📧 Gmail API query 'is:unread' returned {len(messages)} emails")
+                if messages:
+                    logger.info(f"📋 First 3 emails (no time filter):")
+                    for i, msg in enumerate(messages[:3], 1):
+                        logger.info(f"   {i}. ID: {msg.get('id')}, Subject: {msg.get('subject', 'No subject')[:60]}")
         except Exception as e:
-            logger.error(f"Error fetching emails for integration {integration.id}: {e}")
+            logger.error(f"❌ Error fetching emails for integration {integration.id}: {e}", exc_info=True)
             return events_created
         
         if not messages:
-            logger.debug(f"No new emails for integration {integration.id}")
+            logger.info(f"ℹ️  No unread emails found for integration {integration.id}")
             return events_created
         
         # Filtra solo email nuove (non già controllate)
