@@ -146,13 +146,12 @@ class EmailPoller:
             return events_created
         
         # Filtra solo email nuove (non già controllate)
-        # Usa le notifiche esistenti nel database per deduplicare invece di memoria volatile
-        # Questo include anche notifiche già lette/eliminate per evitare ricreazione
+        # Usa notifiche esistenti E sessioni create da email per deduplicare
+        # Questo evita di ricreare notifiche anche se eliminate
         new_messages = []
         
-        # Get all existing email notifications for this tenant to avoid duplicates
-        # Include both read and unread to prevent recreating notifications for emails already processed
-        from app.models.database import Notification as NotificationModel
+        # Get all existing email notifications for this tenant
+        from app.models.database import Notification as NotificationModel, Session as SessionModel
         existing_notifications_result = await self.db.execute(
             select(NotificationModel).where(
                 NotificationModel.tenant_id == integration.tenant_id,
@@ -162,12 +161,11 @@ class EmailPoller:
         existing_notifications = existing_notifications_result.scalars().all()
         existing_email_ids = set()
         for notif in existing_notifications:
-            # Extract email_id from notification content (handles both dict and JSONB)
+            # Extract email_id from notification content
             content = notif.content
             if isinstance(content, dict):
                 email_id = content.get("email_id")
             else:
-                # JSONB field, access as dict
                 try:
                     email_id = content.get("email_id") if hasattr(content, 'get') else None
                 except:
@@ -175,15 +173,28 @@ class EmailPoller:
             if email_id:
                 existing_email_ids.add(str(email_id))
         
-        logger.debug(f"Found {len(existing_email_ids)} existing email notifications for tenant {integration.tenant_id}")
+        # Also check sessions created from emails (even if notification was deleted)
+        existing_sessions_result = await self.db.execute(
+            select(SessionModel).where(
+                SessionModel.tenant_id == integration.tenant_id,
+                SessionModel.session_metadata["source"].astext == "email_analysis"
+            )
+        )
+        existing_sessions = existing_sessions_result.scalars().all()
+        for session in existing_sessions:
+            email_id = session.session_metadata.get("email_id") if isinstance(session.session_metadata, dict) else None
+            if email_id:
+                existing_email_ids.add(str(email_id))
         
-        # Filter out emails that already have notifications (even if deleted)
+        logger.debug(f"Found {len(existing_email_ids)} already processed emails (notifications + sessions) for tenant {integration.tenant_id}")
+        
+        # Filter out emails that already have notifications or sessions
         for msg in messages:
             email_id = msg.get("id")
             if email_id and str(email_id) not in existing_email_ids:
                 new_messages.append(msg)
             else:
-                logger.debug(f"Skipping email {email_id} - notification already exists")
+                logger.debug(f"Skipping email {email_id} - already processed (has notification or session)")
         
         if not new_messages:
             logger.debug(f"No new emails since last check for integration {integration.id} (all already have notifications)")
