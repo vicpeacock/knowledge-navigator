@@ -124,6 +124,9 @@ class EmailService:
                 
                 headers = {h["name"]: h["value"] for h in msg_detail["payload"].get("headers", [])}
                 
+                # Extract Gmail labels (categories)
+                label_ids = msg_detail.get("labelIds", [])
+                
                 email_data = {
                     "id": msg["id"],
                     "subject": headers.get("Subject", ""),
@@ -132,6 +135,8 @@ class EmailService:
                     "date": headers.get("Date", ""),
                     "snippet": msg_detail.get("snippet", ""),
                     "thread_id": msg_detail.get("threadId", ""),
+                    "labels": label_ids,
+                    "category": self._extract_category(label_ids),
                 }
                 
                 # Extract body if requested
@@ -148,8 +153,27 @@ class EmailService:
             raise ValueError(f"Error fetching Gmail messages: {str(exc)}") from exc
         except IntegrationAuthError:
             raise
-        except Exception as exc:
-            raise ValueError(f"Error fetching Gmail messages: {str(exc)}") from exc
+    
+    def _extract_category(self, label_ids: List[str]) -> str:
+        """
+        Extract Gmail category from labels.
+        Returns: "direct" | "mailing_list" | "promotional" | "update" | "social" | "unknown"
+        """
+        category_mapping = {
+            "CATEGORY_PERSONAL": "direct",
+            "CATEGORY_SOCIAL": "social",
+            "CATEGORY_PROMOTIONS": "promotional",
+            "CATEGORY_UPDATES": "update",
+            "CATEGORY_FORUMS": "mailing_list",
+        }
+        
+        for label in label_ids:
+            if label in category_mapping:
+                return category_mapping[label]
+        
+        # Fallback: check if it looks like a mailing list based on common patterns
+        # This is a simple heuristic - can be improved with LLM analysis
+        return "unknown"
     
     def _extract_email_body(self, payload: Dict[str, Any]) -> str:
         """Extract text body from email payload"""

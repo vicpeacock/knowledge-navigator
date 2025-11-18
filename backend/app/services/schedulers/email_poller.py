@@ -15,7 +15,10 @@ from app.models.database import Integration, User
 from app.services.email_service import EmailService
 from app.services.exceptions import IntegrationAuthError
 from app.services.notification_service import NotificationService
+from app.services.email_analyzer import EmailAnalyzer
+from app.services.email_action_processor import EmailActionProcessor
 from app.core.config import settings
+from app.core.dependencies import get_ollama_client, get_memory_manager
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,24 @@ class EmailPoller:
         self.notification_service = NotificationService(db)
         # Track last checked email ID per integration per evitare duplicati
         self._last_email_ids: Dict[str, str] = {}
+        
+        # Initialize email analysis services if enabled
+        self.email_analyzer = None
+        self.email_action_processor = None
+        if settings.email_analysis_enabled:
+            try:
+                ollama_client = get_ollama_client()
+                memory_manager = get_memory_manager()
+                self.email_analyzer = EmailAnalyzer(ollama_client=ollama_client)
+                self.email_action_processor = EmailActionProcessor(
+                    db=db,
+                    ollama_client=ollama_client,
+                    memory_manager=memory_manager,
+                )
+                logger.info("Email analysis services initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize email analysis services: {e}")
+                logger.warning("Email analysis will be disabled")
     
     async def check_new_emails(self) -> List[Dict[str, Any]]:
         """
@@ -151,11 +172,49 @@ class EmailPoller:
         # Crea notifiche per ogni nuova email
         for msg in new_messages:
             try:
-                # Determina priorità basata su mittente e contenuto
-                priority = self._determine_email_priority(msg)
+                email_id = msg.get("id")
+                
+                # Analyze email if analysis is enabled
+                analysis = None
+                if self.email_analyzer:
+                    try:
+                        # Analyze email using snippet (usually sufficient for action detection)
+                        # Full body can be fetched later if needed for more detailed analysis
+                        analysis = await self.email_analyzer.analyze_email(msg)
+                        logger.info(
+                            f"Email analysis for {email_id}: "
+                            f"category={analysis.get('category')}, "
+                            f"requires_action={analysis.get('requires_action')}, "
+                            f"action_type={analysis.get('action_type')}, "
+                            f"urgency={analysis.get('urgency')}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Error analyzing email {email_id}: {e}")
+                        analysis = None
+                
+                # Process action if analysis indicates action is required
+                session_id = None
+                if self.email_action_processor and analysis and analysis.get("requires_action"):
+                    try:
+                        if integration.user_id:
+                            session_id = await self.email_action_processor.process_email_action(
+                                email=msg,
+                                analysis=analysis,
+                                tenant_id=integration.tenant_id,
+                                user_id=integration.user_id,
+                            )
+                            if session_id:
+                                logger.info(f"Created automatic session {session_id} for email {email_id}")
+                    except Exception as e:
+                        logger.error(f"Error processing email action for {email_id}: {e}", exc_info=True)
+                
+                # Determina priorità basata su analisi o fallback a metodo tradizionale
+                if analysis:
+                    priority = analysis.get("urgency", "medium")
+                else:
+                    priority = self._determine_email_priority(msg)
                 
                 # Crea notifica (controlla duplicati basati su email_id)
-                email_id = msg.get("id")
                 notification = await self.notification_service.create_notification(
                     type="email_received",
                     urgency=priority,
@@ -166,8 +225,11 @@ class EmailPoller:
                         "snippet": msg.get("snippet", "")[:200],  # Primi 200 caratteri
                         "date": msg.get("date"),
                         "integration_id": str(integration.id),
+                        "category": analysis.get("category") if analysis else "unknown",
+                        "analysis": analysis,  # Store full analysis for reference
+                        "auto_session_id": str(session_id) if session_id else None,
                     },
-                    session_id=None,  # Notifica globale, non legata a sessione
+                    session_id=session_id,  # Link to auto-created session if exists
                     tenant_id=integration.tenant_id,
                     check_duplicate={"key": "email_id", "value": email_id} if email_id else None,
                 )
@@ -177,26 +239,22 @@ class EmailPoller:
                     logger.debug(f"Skipping duplicate notification for email {email_id}")
                     continue
                 
-                # Aggiungi user_id se l'integrazione è per utente specifico
-                if integration.user_id:
-                    # Aggiorna notification con user_id (se il modello lo supporta)
-                    # Per ora usiamo solo tenant_id
-                    pass
-                
                 events_created.append({
                     "type": "email_received",
                     "priority": priority,
                     "notification_id": str(notification.id),
                     "email": msg.get("from"),
                     "subject": msg.get("subject"),
+                    "analysis": analysis,
+                    "session_id": str(session_id) if session_id else None,
                 })
                 
                 logger.info(
                     f"Created notification for new email from {msg.get('from')} "
-                    f"(priority: {priority})"
+                    f"(priority: {priority}, action: {analysis.get('action_type') if analysis else 'none'})"
                 )
             except Exception as e:
-                logger.error(f"Error creating notification for email {msg.get('id')}: {e}")
+                logger.error(f"Error creating notification for email {msg.get('id')}: {e}", exc_info=True)
                 continue
         
         return events_created

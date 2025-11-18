@@ -131,6 +131,13 @@ class Settings(BaseSettings):
     event_monitor_poll_interval_seconds: int = 60  # Check for events every minute
     email_poller_enabled: bool = True  # Enable email polling
     calendar_watcher_enabled: bool = True  # Enable calendar watching
+    
+    # Email Intelligent Analysis
+    email_analysis_enabled: bool = True  # Enable intelligent email analysis
+    email_analysis_llm_model: Optional[str] = None  # Model for analysis (None = use default)
+    email_analysis_auto_session_enabled: bool = True  # Auto-create sessions for actionable emails
+    email_analysis_min_urgency_for_session: str = "medium"  # Only create sessions for medium+ urgency
+    email_analysis_learn_from_responses: bool = True  # Update memory from user responses
 
 
 settings = Settings()
