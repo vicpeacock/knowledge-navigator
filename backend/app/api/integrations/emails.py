@@ -188,7 +188,15 @@ async def oauth_callback(
 
                 encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
                 integration.credentials_encrypted = encrypted
+                
+                # IMPORTANTE: Aggiorna anche user_id se mancante o se fornito nello state
+                # Questo risolve il problema delle integrazioni create senza user_id
+                if user_id and (not integration.user_id or integration.user_id != user_id):
+                    logger.info(f"OAuth callback (Email) - Updating user_id for integration {integration_id}: {integration.user_id} -> {user_id}")
+                    integration.user_id = user_id
+                
                 await db.commit()
+                await db.refresh(integration)
             else:
                 raise HTTPException(status_code=404, detail="Integration not found")
         else:
