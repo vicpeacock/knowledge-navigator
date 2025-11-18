@@ -27,6 +27,11 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
   const [initialLoad, setInitialLoad] = useState(true)
   const { addStatusMessage } = useStatus()
   const { ingestBatch } = useAgentActivity()
+  const [dayTransitionDialog, setDayTransitionDialog] = useState<{
+    isOpen: boolean
+    newSessionId: string
+    pendingMessage?: string  // Store the message that triggered the transition
+  }>({ isOpen: false, newSessionId: '' })
 
   // Define loadMessages before using it in useEffect
   const loadMessages = useCallback(async () => {
