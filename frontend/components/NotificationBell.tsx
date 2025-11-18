@@ -61,9 +61,16 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
     
     setLoading(true)
     try {
+      // Use axios with authentication headers
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+      const headers = token ? { Authorization: `Bearer ${token}` } : {}
+      
       const response = await axios.get(
         `${API_URL}/api/sessions/${sessionId}/notifications/pending`,
-        { timeout: 5000 } // 5 secondi timeout
+        { 
+          headers,
+          timeout: 5000 // 5 secondi timeout
+        }
       )
       setNotifications(response.data || [])
       
