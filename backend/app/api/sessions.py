@@ -768,10 +768,11 @@ async def get_pending_notifications(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get pending notifications that require user input (for current tenant)"""
+    """Get pending notifications that require user input (for current tenant and current user)"""
     logger = logging.getLogger(__name__)
-    logger.info(f"Fetching pending notifications for tenant {tenant_id}")
+    logger.info(f"Fetching pending notifications for tenant {tenant_id}, user {current_user.id}")
     
     # Verify session belongs to tenant
     session_result = await db.execute(
@@ -786,20 +787,32 @@ async def get_pending_notifications(
     service = NotificationService(db)
     notifications = await service.get_pending_notifications(read=False, tenant_id=tenant_id)
     
-    logger.info(f"Found {len(notifications)} total pending notifications")
+    logger.info(f"Found {len(notifications)} total pending notifications for tenant")
     
-    # Filter by type that requires user input (global, not session-specific)
+    # Filter by type that requires user input AND by user_id (multi-tenant multi-user)
     global_notifications = []
     for n in notifications:
         notif_type = n.get("type")
-        # Return all global notifications regardless of session:
-        # - contradiction: memory contradictions
-        # - email_received: new emails from proactivity system
-        # - calendar_event_starting: upcoming calendar events from proactivity system
+        content = n.get("content", {})
+        
+        # For email_received and calendar_event_starting, filter by user_id
+        # (each user should only see notifications from their own integrations)
+        if notif_type in ["email_received", "calendar_event_starting"]:
+            notification_user_id = content.get("user_id")
+            if notification_user_id:
+                # Only show if notification belongs to current user
+                if str(notification_user_id) != str(current_user.id):
+                    logger.debug(f"Skipping notification {n.get('id')}: belongs to user {notification_user_id}, current user is {current_user.id}")
+                    continue
+        
+        # Return global notifications:
+        # - contradiction: memory contradictions (visible to all users in tenant)
+        # - email_received: new emails from proactivity system (filtered by user_id above)
+        # - calendar_event_starting: upcoming calendar events (filtered by user_id above)
         if notif_type in ["contradiction", "email_received", "calendar_event_starting"]:
             global_notifications.append(n)
     
-    logger.info(f"Found {len(global_notifications)} global notifications requiring user input")
+    logger.info(f"Found {len(global_notifications)} global notifications requiring user input (filtered for user {current_user.id})")
     
     # Format for frontend
     result = []
