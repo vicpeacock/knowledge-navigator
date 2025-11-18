@@ -799,11 +799,43 @@ async def get_pending_notifications(
         # (each user should only see notifications from their own integrations)
         if notif_type in ["email_received", "calendar_event_starting"]:
             notification_user_id = content.get("user_id")
+            integration_id = content.get("integration_id")
+            
             if notification_user_id:
                 # Only show if notification belongs to current user
                 if str(notification_user_id) != str(current_user.id):
                     logger.debug(f"Skipping notification {n.get('id')}: belongs to user {notification_user_id}, current user is {current_user.id}")
                     continue
+            elif integration_id:
+                # Fallback: if notification doesn't have user_id (old notifications),
+                # check if the integration belongs to current user
+                try:
+                    from app.models.database import Integration
+                    integration_result = await db.execute(
+                        select(Integration).where(
+                            Integration.id == UUID(integration_id),
+                            Integration.tenant_id == tenant_id,
+                        )
+                    )
+                    integration = integration_result.scalar_one_or_none()
+                    
+                    if integration:
+                        if integration.user_id != current_user.id:
+                            logger.debug(f"Skipping notification {n.get('id')}: integration {integration_id} belongs to user {integration.user_id}, current user is {current_user.id}")
+                            continue
+                        # Integration belongs to current user - allow notification
+                    else:
+                        # Integration not found - skip notification
+                        logger.debug(f"Skipping notification {n.get('id')}: integration {integration_id} not found")
+                        continue
+                except Exception as e:
+                    logger.warning(f"Error checking integration for notification {n.get('id')}: {e}")
+                    # On error, skip notification to be safe
+                    continue
+            else:
+                # No user_id and no integration_id - skip notification (can't verify ownership)
+                logger.debug(f"Skipping notification {n.get('id')}: no user_id or integration_id")
+                continue
         
         # Return global notifications:
         # - contradiction: memory contradictions (visible to all users in tenant)
