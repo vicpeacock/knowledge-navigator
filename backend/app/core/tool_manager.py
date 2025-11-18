@@ -1122,6 +1122,7 @@ Riassunto:"""
         logger = logging.getLogger(__name__)
         from app.models.database import Integration
         from app.api.integrations.emails import _decrypt_credentials
+        from app.services.exceptions import IntegrationAuthError
         from sqlalchemy import select, or_
         
         try:
@@ -1179,9 +1180,26 @@ Riassunto:"""
                 return {"success": True, "message": f"Email {email_id} archiviata con successo"}
             else:
                 return {"error": "Errore durante l'archiviazione dell'email"}
+        except IntegrationAuthError as auth_error:
+            logger.error(f"Authorization error in archive_email: {auth_error}")
+            # Return a user-friendly error message
+            error_msg = str(auth_error)
+            if "insufficient" in error_msg.lower() or "scope" in error_msg.lower() or "permission" in error_msg.lower():
+                return {"error": "Permessi Gmail insufficienti. Per favore riconnetti l'integrazione Gmail per ottenere i permessi necessari per archiviare email."}
+            return {"error": f"Errore di autorizzazione Gmail: {auth_error.error_type}"}
         except Exception as e:
             logger.error(f"Error in archive_email: {e}", exc_info=True)
-            return {"error": str(e)}
+            # Extract a clean error message without stack traces
+            error_msg = str(e)
+            # Remove Python traceback info if present
+            if "Traceback" in error_msg or "File \"" in error_msg:
+                # Try to extract just the error message
+                lines = error_msg.split('\n')
+                for line in reversed(lines):
+                    if line.strip() and not line.strip().startswith('File') and not line.strip().startswith('Traceback'):
+                        error_msg = line.strip()
+                        break
+            return {"error": f"Errore durante l'archiviazione dell'email: {error_msg}"}
     
     async def _execute_send_email(
         self,
@@ -1194,6 +1212,7 @@ Riassunto:"""
         logger = logging.getLogger(__name__)
         from app.models.database import Integration
         from app.api.integrations.emails import _decrypt_credentials
+        from app.services.exceptions import IntegrationAuthError
         from sqlalchemy import select, or_
         
         try:
@@ -1263,9 +1282,26 @@ Riassunto:"""
                 }
             else:
                 return {"error": "Errore durante l'invio dell'email"}
+        except IntegrationAuthError as auth_error:
+            logger.error(f"Authorization error in send_email: {auth_error}")
+            # Return a user-friendly error message
+            error_msg = str(auth_error)
+            if "insufficient" in error_msg.lower() or "scope" in error_msg.lower() or "permission" in error_msg.lower():
+                return {"error": "Permessi Gmail insufficienti. Per favore riconnetti l'integrazione Gmail per ottenere i permessi necessari per inviare email."}
+            return {"error": f"Errore di autorizzazione Gmail: {auth_error.error_type}"}
         except Exception as e:
             logger.error(f"Error in send_email: {e}", exc_info=True)
-            return {"error": str(e)}
+            # Extract a clean error message without stack traces
+            error_msg = str(e)
+            # Remove Python traceback info if present
+            if "Traceback" in error_msg or "File \"" in error_msg:
+                # Try to extract just the error message
+                lines = error_msg.split('\n')
+                for line in reversed(lines):
+                    if line.strip() and not line.strip().startswith('File') and not line.strip().startswith('Traceback'):
+                        error_msg = line.strip()
+                        break
+            return {"error": f"Errore durante l'invio dell'email: {error_msg}"}
     
     async def _execute_reply_to_email(
         self,
@@ -1345,9 +1381,26 @@ Riassunto:"""
                 }
             else:
                 return {"error": "Errore durante l'invio della risposta"}
+        except IntegrationAuthError as auth_error:
+            logger.error(f"Authorization error in reply_to_email: {auth_error}")
+            # Return a user-friendly error message
+            error_msg = str(auth_error)
+            if "insufficient" in error_msg.lower() or "scope" in error_msg.lower() or "permission" in error_msg.lower():
+                return {"error": "Permessi Gmail insufficienti. Per favore riconnetti l'integrazione Gmail per ottenere i permessi necessari per inviare email."}
+            return {"error": f"Errore di autorizzazione Gmail: {auth_error.error_type}"}
         except Exception as e:
             logger.error(f"Error in reply_to_email: {e}", exc_info=True)
-            return {"error": str(e)}
+            # Extract a clean error message without stack traces
+            error_msg = str(e)
+            # Remove Python traceback info if present
+            if "Traceback" in error_msg or "File \"" in error_msg:
+                # Try to extract just the error message
+                lines = error_msg.split('\n')
+                for line in reversed(lines):
+                    if line.strip() and not line.strip().startswith('File') and not line.strip().startswith('Traceback'):
+                        error_msg = line.strip()
+                        break
+            return {"error": f"Errore durante l'invio della risposta: {error_msg}"}
     
     def parse_tool_calls(self, text: str) -> List[Dict[str, Any]]:
         """
