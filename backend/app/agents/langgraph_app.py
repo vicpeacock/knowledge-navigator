@@ -1104,29 +1104,35 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             parsed_tc = response_data.get("_parsed_tool_calls")
             if parsed_tc:
                 tool_calls = parsed_tc
+                logger.error(f"🔧🔧🔧 Using _parsed_tool_calls: {len(tool_calls)} call(s)")
             else:
                 # Check multiple possible locations for tool_calls
                 tool_calls_found = False
+                tool_calls_raw = None
                 
-                # 1. Check for tool_calls directly in response_data (OpenAI-style format)
-                if "tool_calls" in response_data:
+                # 1. Check for _raw_tool_calls (from generate_with_context)
+                if "_raw_tool_calls" in response_data and response_data["_raw_tool_calls"]:
+                    tool_calls_raw = response_data["_raw_tool_calls"]
+                    tool_calls_found = True
+                    logger.error(f"🔧🔧🔧 Found _raw_tool_calls: {len(tool_calls_raw)} call(s)")
+                # 2. Check for tool_calls directly in response_data (OpenAI-style format)
+                elif "tool_calls" in response_data:
                     tool_calls_raw = response_data["tool_calls"]
                     tool_calls_found = True
-                # 2. Check in message.tool_calls (Ollama format when return_raw=True)
+                    logger.error(f"🔧🔧🔧 Found tool_calls in response_data: {len(tool_calls_raw)} call(s)")
+                # 3. Check in message.tool_calls (Ollama format when return_raw=True)
                 elif "message" in response_data and isinstance(response_data["message"], dict) and "tool_calls" in response_data["message"]:
                     tool_calls_raw = response_data["message"]["tool_calls"]
                     tool_calls_found = True
-                # 3. Check in raw_result.message.tool_calls (Ollama format)
+                    logger.error(f"🔧🔧🔧 Found tool_calls in response_data.message: {len(tool_calls_raw)} call(s)")
+                # 4. Check in raw_result.message.tool_calls (Ollama format)
                 elif "raw_result" in response_data:
                     raw_result = response_data.get("raw_result", {})
                     message = raw_result.get("message")
                     if isinstance(message, dict) and "tool_calls" in message:
                         tool_calls_raw = message["tool_calls"]
                         tool_calls_found = True
-                    else:
-                        tool_calls_raw = None
-                else:
-                    tool_calls_raw = None
+                        logger.error(f"🔧🔧🔧 Found tool_calls in raw_result.message: {len(tool_calls_raw)} call(s)")
                 
                 if tool_calls_found and tool_calls_raw:
                     logger.error(f"🔧🔧🔧 Found tool_calls in response_data: {len(tool_calls_raw)} call(s)")
