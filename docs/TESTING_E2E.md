@@ -18,24 +18,27 @@
 
 ## Setup per E2E Test
 
-### Opzione 1: PostgreSQL (Consigliato)
+### Opzione 1: PostgreSQL via Docker (Consigliato)
 
-I modelli usano tipi PostgreSQL-specifici (JSONB), quindi PostgreSQL è necessario.
+PostgreSQL è già configurato in `docker-compose.yml`. I modelli usano tipi PostgreSQL-specifici (JSONB), quindi PostgreSQL è necessario.
 
 ```bash
-# 1. Assicurati che PostgreSQL sia in esecuzione
+# 1. Avvia PostgreSQL (se non è già in esecuzione)
 docker-compose up -d postgres
 
-# 2. Crea database di test
-createdb knowledge_navigator_test
+# 2. Crea database di test (usa lo stesso PostgreSQL del progetto)
+docker-compose exec postgres psql -U knavigator -c "CREATE DATABASE knowledge_navigator_test;"
 
-# 3. Configura variabile ambiente
-export TEST_DATABASE_URL="postgresql+asyncpg://knavigator:knavigator_pass@localhost:5432/knowledge_navigator_test"
+# Oppure da host (se hai psql installato):
+# PGPASSWORD=knavigator_pass createdb -h localhost -U knavigator knowledge_navigator_test
 
-# 4. Esegui test
+# 3. Esegui test (usa già la configurazione di default)
 cd backend
 source venv/bin/activate
 pytest tests/test_proactivity_e2e.py -v
+
+# I test usano automaticamente:
+# postgresql+asyncpg://knavigator:knavigator_pass@localhost:5432/knowledge_navigator_test
 ```
 
 ### Opzione 2: SQLite (Limitato)
@@ -120,18 +123,34 @@ assert len(notifications) > 0
 
 ## Eseguire i Test
 
-### Solo Unit Test (veloce)
+### Setup Iniziale (solo la prima volta)
+
 ```bash
+# Crea il database di test usando lo script helper
+./backend/scripts/setup_test_db.sh
+
+# Oppure manualmente:
+docker-compose exec postgres psql -U knavigator -c "CREATE DATABASE knowledge_navigator_test;"
+```
+
+### Solo Unit Test (veloce, senza database)
+```bash
+cd backend
+source venv/bin/activate
 pytest tests/test_proactivity.py -v
 ```
 
-### Solo E2E Test
+### Solo E2E Test (richiede PostgreSQL)
 ```bash
+cd backend
+source venv/bin/activate
 pytest tests/test_proactivity_e2e.py -v
 ```
 
 ### Tutti i Test
 ```bash
+cd backend
+source venv/bin/activate
 pytest tests/test_proactivity*.py -v
 ```
 
