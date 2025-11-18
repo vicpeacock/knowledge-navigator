@@ -141,28 +141,35 @@ class CalendarWatcher:
                         # Verifica se abbiamo già creato questa notifica
                         # (controlla se esiste già una notifica per questo evento con questo reminder)
                         event_id = event.get("id")
+                        
+                        # Crea notifica (controlla duplicati basati su event_id + reminder_minutes)
+                        # Usa una chiave composita per evitare duplicati per lo stesso reminder
                         reminder_key = f"{event_id}_{reminder_minutes}"
-                        
-                        # TODO: Implementare tracking notifiche già inviate (usare database o cache)
-                        # Per ora creiamo sempre la notifica
-                        
                         priority = "high" if reminder_minutes <= 5 else "medium"
-                        
                         notification = await self.notification_service.create_notification(
                             type="calendar_event_starting",
                             urgency=priority,
                             content={
                                 "event_id": event_id,
-                                "title": event.get("summary", "Untitled Event"),
+                                "summary": event.get("summary", "Untitled Event"),
+                                "title": event.get("summary", "Untitled Event"),  # Alias per compatibilità
                                 "start_time": start_time.isoformat(),
+                                "end_time": event.get("end_time"),
                                 "location": event.get("location"),
                                 "reminder_minutes": reminder_minutes,
+                                "reminder_key": reminder_key,  # Chiave per deduplicazione
                                 "time_until_start_minutes": int(time_until_start.total_seconds() / 60),
                                 "integration_id": str(integration.id),
                             },
                             session_id=None,
                             tenant_id=integration.tenant_id,
+                            check_duplicate={"key": "reminder_key", "value": reminder_key} if reminder_key else None,
                         )
+                        
+                        # Skip se notifica duplicata
+                        if not notification:
+                            logger.debug(f"Skipping duplicate notification for event {event_id} reminder {reminder_minutes}min")
+                            continue
                         
                         events_created.append({
                             "type": "calendar_event_starting",
