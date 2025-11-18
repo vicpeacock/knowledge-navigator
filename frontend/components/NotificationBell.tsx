@@ -95,14 +95,62 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
     }
   }, [sessionId])
 
+  // SSE connection for real-time updates (when popup is open)
+  useEffect(() => {
+    if (!sessionId || !isOpen) return
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+    if (!token) return
+
+    // Use EventSource for SSE (fallback to polling if SSE fails)
+    let eventSource: EventSource | null = null
+    let fallbackInterval: NodeJS.Timeout | null = null
+
+    try {
+      // Try SSE first
+      const sseUrl = `${API_URL}/api/notifications/stream?token=${encodeURIComponent(token)}`
+      eventSource = new EventSource(sseUrl)
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'notification_update') {
+            setNotifications(data.notifications || [])
+          }
+        } catch (e) {
+          console.error('Error parsing SSE message:', e)
+        }
+      }
+
+      eventSource.onerror = (error) => {
+        console.warn('SSE connection error, falling back to polling:', error)
+        eventSource?.close()
+        eventSource = null
+        
+        // Fallback to polling
+        fetchNotifications()
+        fallbackInterval = setInterval(fetchNotifications, 5000)
+      }
+    } catch (error) {
+      console.warn('SSE not supported, using polling:', error)
+      fetchNotifications()
+      fallbackInterval = setInterval(fetchNotifications, 5000)
+    }
+
+    return () => {
+      eventSource?.close()
+      if (fallbackInterval) clearInterval(fallbackInterval)
+    }
+  }, [sessionId, isOpen, fetchNotifications])
+
+  // Initial fetch and polling when popup is closed
   useEffect(() => {
     if (sessionId && !isOpen) {
-      // Only poll when popup is closed
       fetchNotifications()
-      const interval = setInterval(fetchNotifications, 10000)
+      const interval = setInterval(fetchNotifications, 10000) // Poll every 10s when closed
       return () => clearInterval(interval)
     } else if (sessionId && isOpen) {
-      // Fetch once when popup opens
+      // Fetch once when popup opens (SSE will take over)
       fetchNotifications()
     }
   }, [sessionId, isOpen, fetchNotifications])
@@ -273,24 +321,46 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {notifications.map((notification) => (
-                    <NotificationItem
-                      key={notification.id}
-                      notification={notification}
-                      onResolve={(resolution) =>
-                        handleResolve(notification.id, resolution)
-                      }
-                      onDelete={handleDelete}
-                      onClose={() => setIsOpen(false)}
-                      onNotificationUpdate={(notificationId, updates) => {
-                        // Update notification in local state
-                        setNotifications((prev) =>
-                          prev.map((n) =>
-                            n.id === notificationId ? { ...n, ...updates } : n
-                          )
-                        )
-                      }}
-                    />
+                  {/* Group notifications by type */}
+                  {Object.entries(
+                    notifications.reduce((acc, notification) => {
+                      const type = notification.type || 'other'
+                      if (!acc[type]) acc[type] = []
+                      acc[type].push(notification)
+                      return acc
+                    }, {} as Record<string, typeof notifications>)
+                  ).map(([type, typeNotifications]) => (
+                    <div key={type} className="space-y-2">
+                      {typeNotifications.length > 1 && (
+                        <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide px-2">
+                          {type === 'email_received' && 'Email'}
+                          {type === 'calendar_event_starting' && 'Calendario'}
+                          {type === 'contradiction' && 'Contraddizioni'}
+                          {type === 'todo' && 'Todo'}
+                          {!['email_received', 'calendar_event_starting', 'contradiction', 'todo'].includes(type) && type}
+                          {' '}({typeNotifications.length})
+                        </div>
+                      )}
+                      {typeNotifications.map((notification) => (
+                        <NotificationItem
+                          key={notification.id}
+                          notification={notification}
+                          onResolve={(resolution) =>
+                            handleResolve(notification.id, resolution)
+                          }
+                          onDelete={handleDelete}
+                          onClose={() => setIsOpen(false)}
+                          onNotificationUpdate={(notificationId, updates) => {
+                            // Update notification in local state
+                            setNotifications((prev) =>
+                              prev.map((n) =>
+                                n.id === notificationId ? { ...n, ...updates } : n
+                              )
+                            )
+                          }}
+                        />
+                      ))}
+                    </div>
                   ))}
                 </div>
               )}
