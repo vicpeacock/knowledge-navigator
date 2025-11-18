@@ -147,9 +147,11 @@ class EmailPoller:
         
         # Filtra solo email nuove (non già controllate)
         # Usa le notifiche esistenti nel database per deduplicare invece di memoria volatile
+        # Questo include anche notifiche già lette/eliminate per evitare ricreazione
         new_messages = []
         
         # Get all existing email notifications for this tenant to avoid duplicates
+        # Include both read and unread to prevent recreating notifications for emails already processed
         from app.models.database import Notification as NotificationModel
         existing_notifications_result = await self.db.execute(
             select(NotificationModel).where(
@@ -160,15 +162,28 @@ class EmailPoller:
         existing_notifications = existing_notifications_result.scalars().all()
         existing_email_ids = set()
         for notif in existing_notifications:
-            email_id = notif.content.get("email_id") if isinstance(notif.content, dict) else None
+            # Extract email_id from notification content (handles both dict and JSONB)
+            content = notif.content
+            if isinstance(content, dict):
+                email_id = content.get("email_id")
+            else:
+                # JSONB field, access as dict
+                try:
+                    email_id = content.get("email_id") if hasattr(content, 'get') else None
+                except:
+                    email_id = None
             if email_id:
                 existing_email_ids.add(str(email_id))
         
-        # Filter out emails that already have notifications
+        logger.debug(f"Found {len(existing_email_ids)} existing email notifications for tenant {integration.tenant_id}")
+        
+        # Filter out emails that already have notifications (even if deleted)
         for msg in messages:
             email_id = msg.get("id")
             if email_id and str(email_id) not in existing_email_ids:
                 new_messages.append(msg)
+            else:
+                logger.debug(f"Skipping email {email_id} - notification already exists")
         
         if not new_messages:
             logger.debug(f"No new emails since last check for integration {integration.id} (all already have notifications)")
