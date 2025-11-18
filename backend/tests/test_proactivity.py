@@ -16,6 +16,14 @@ from app.models.database import Integration, Notification
 def mock_db():
     """Mock database session"""
     db = AsyncMock()
+    
+    # Mock execute() to return an async result
+    mock_result = MagicMock()
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = []
+    mock_result.scalars.return_value = mock_scalars
+    db.execute = AsyncMock(return_value=mock_result)
+    
     return db
 
 
@@ -77,9 +85,7 @@ class TestEmailPoller:
     @pytest.mark.asyncio
     async def test_check_new_emails_no_integrations(self, mock_db):
         """Test that no emails are checked if no integrations exist"""
-        # Setup: no integrations
-        mock_db.execute.return_value.scalars.return_value.all.return_value = []
-        
+        # Setup: no integrations (already set in fixture)
         poller = EmailPoller(mock_db)
         events = await poller.check_new_emails()
         
@@ -90,7 +96,11 @@ class TestEmailPoller:
     async def test_check_new_emails_with_integration(self, mock_db, mock_integration, mock_email_service, mock_notification_service):
         """Test checking emails with a valid integration"""
         # Setup: one integration
-        mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_integration]
+        mock_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [mock_integration]
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
         
         # Mock email messages
         mock_messages = [
@@ -224,8 +234,7 @@ class TestCalendarWatcher:
     @pytest.mark.asyncio
     async def test_check_upcoming_events_no_integrations(self, mock_db):
         """Test that no events are checked if no integrations exist"""
-        mock_db.execute.return_value.scalars.return_value.all.return_value = []
-        
+        # Setup: no integrations (already set in fixture)
         watcher = CalendarWatcher(mock_db)
         events = await watcher.check_upcoming_events()
         
@@ -236,7 +245,11 @@ class TestCalendarWatcher:
     async def test_check_upcoming_events_with_integration(self, mock_db, mock_calendar_integration):
         """Test checking calendar events with a valid integration"""
         # Setup: one integration
-        mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_calendar_integration]
+        mock_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [mock_calendar_integration]
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
         
         # Mock calendar events
         now = datetime.now(timezone.utc)
@@ -398,7 +411,12 @@ class TestEmailPollerErrorHandling:
     @pytest.mark.asyncio
     async def test_auth_error_handling(self, mock_db, mock_integration):
         """Test that auth errors are handled gracefully"""
-        mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_integration]
+        # Setup: one integration
+        mock_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [mock_integration]
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
         
         with patch('app.services.schedulers.email_poller._decrypt_credentials') as mock_decrypt, \
              patch('app.services.schedulers.email_poller.EmailService') as mock_email_service_class, \
@@ -416,7 +434,12 @@ class TestEmailPollerErrorHandling:
     @pytest.mark.asyncio
     async def test_email_fetch_error_handling(self, mock_db, mock_integration):
         """Test that email fetch errors are handled gracefully"""
-        mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_integration]
+        # Setup: one integration
+        mock_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [mock_integration]
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
         
         with patch('app.services.schedulers.email_poller._decrypt_credentials') as mock_decrypt, \
              patch('app.services.schedulers.email_poller.EmailService') as mock_email_service_class:
@@ -495,7 +518,12 @@ class TestCalendarWatcherErrorHandling:
     @pytest.mark.asyncio
     async def test_auth_error_handling(self, mock_db, mock_calendar_integration):
         """Test that auth errors are handled gracefully"""
-        mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_calendar_integration]
+        # Setup: one integration
+        mock_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [mock_calendar_integration]
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
         
         with patch('app.services.schedulers.calendar_watcher._decrypt_credentials') as mock_decrypt, \
              patch('app.services.schedulers.calendar_watcher.IntegrationAuthError') as mock_auth_error:
@@ -512,7 +540,12 @@ class TestCalendarWatcherErrorHandling:
     @pytest.mark.asyncio
     async def test_calendar_fetch_error_handling(self, mock_db, mock_calendar_integration):
         """Test that calendar fetch errors are handled gracefully"""
-        mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_calendar_integration]
+        # Setup: one integration
+        mock_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [mock_calendar_integration]
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
         
         with patch('app.services.schedulers.calendar_watcher._decrypt_credentials') as mock_decrypt, \
              patch('app.services.schedulers.calendar_watcher.CalendarService') as mock_calendar_service_class:
