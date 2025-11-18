@@ -517,16 +517,46 @@ function NotificationItem({
                 }
               } else {
                 console.error('Session not found:', sessionId)
-                alert(`Sessione non trovata: ${sessionId}`)
+                // Try to create session from notification
+                await createSessionFromNotification()
               }
             } catch (error: any) {
               console.error('Error verifying session:', error)
               if (error.response?.status === 404) {
-                alert(`La sessione ${sessionId} non esiste più o non è stata creata correttamente.`)
+                // Session was deleted, try to create a new one from notification
+                console.log('Session not found, attempting to create from notification...')
+                await createSessionFromNotification()
               } else if (error.response?.status === 401) {
                 alert(`Errore di autenticazione. Per favore, effettua il login.`)
               } else {
                 alert(`Errore nel verificare la sessione: ${error.message}`)
+              }
+            }
+            
+            async function createSessionFromNotification() {
+              try {
+                const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+                const headers = token ? { Authorization: `Bearer ${token}` } : {}
+                
+                const createResponse = await axios.post(
+                  `${API_URL}/api/sessions/notifications/${notification.id}/create-session`,
+                  {},
+                  { headers }
+                )
+                
+                if (createResponse.data && createResponse.data.id) {
+                  // Navigate to newly created session
+                  router.push(`/sessions/${createResponse.data.id}`)
+                  // Close notification popup
+                  if (onClose) {
+                    onClose()
+                  }
+                } else {
+                  alert('Errore nella creazione della sessione dalla notifica.')
+                }
+              } catch (createError: any) {
+                console.error('Error creating session from notification:', createError)
+                alert(`Errore nella creazione della sessione: ${createError.response?.data?.detail || createError.message}`)
               }
             }
           }}
