@@ -229,7 +229,7 @@ Riassunto:"""
                     db=self.db,
                     content=summary_text,
                     tenant_id=session.tenant_id,
-                    session_ids=[str(session.id)],
+                    learned_from_sessions=[session.id],  # Use UUID, not string
                     importance_score=0.7,  # Daily summaries are moderately important
                 )
                 logger.info(f"Generated and stored daily summary for session {session.id}")
