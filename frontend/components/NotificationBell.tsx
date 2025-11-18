@@ -113,9 +113,13 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
     const scrollTop = scrollContainer?.scrollTop || 0
     
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+      const headers = token ? { Authorization: `Bearer ${token}` } : {}
+      
       await axios.post(
         `${API_URL}/api/sessions/${sessionId}/notifications/${notificationId}/resolve`,
-        { resolution }
+        { resolution },
+        { headers }
       )
       // Remove notification from local list instead of full refresh
       setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
@@ -139,7 +143,10 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
     const scrollTop = scrollContainer?.scrollTop || 0
     
     try {
-      await axios.delete(`${API_URL}/api/notifications/${notificationId}`)
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+      const headers = token ? { Authorization: `Bearer ${token}` } : {}
+      
+      await axios.delete(`${API_URL}/api/notifications/${notificationId}`, { headers })
       // Remove notification from local list instead of full refresh
       setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
       
