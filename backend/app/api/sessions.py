@@ -666,8 +666,11 @@ async def get_pending_notifications(
     global_notifications = []
     for n in notifications:
         notif_type = n.get("type")
-        # Return all contradiction notifications regardless of session
-        if notif_type in ["contradiction"]:
+        # Return all global notifications regardless of session:
+        # - contradiction: memory contradictions
+        # - email_received: new emails from proactivity system
+        # - calendar_event_starting: upcoming calendar events from proactivity system
+        if notif_type in ["contradiction", "email_received", "calendar_event_starting"]:
             global_notifications.append(n)
     
     logger.info(f"Found {len(global_notifications)} global notifications requiring user input")
@@ -686,18 +689,46 @@ async def get_pending_notifications(
         else:
             created_at_str = None
             
+        # Format content based on notification type
+        formatted_content: Dict[str, Any] = {
+            "message": content.get("message", ""),
+            "title": content.get("title"),
+        }
+        
+        # Add type-specific content
+        if notif_type == "contradiction":
+            formatted_content["new_statement"] = content.get("new_statement") or content.get("new_knowledge", {}).get("content") or content.get("new_knowledge", {}).get("text")
+            formatted_content["contradictions"] = content.get("contradictions", [])
+        elif notif_type == "email_received":
+            # Email notification content
+            formatted_content["subject"] = content.get("subject")
+            formatted_content["from"] = content.get("from")
+            formatted_content["snippet"] = content.get("snippet")
+            formatted_content["email_id"] = content.get("email_id")
+            # Create a user-friendly message if not present
+            if not formatted_content["message"]:
+                subject = content.get("subject", "No Subject")
+                sender = content.get("from", "Unknown Sender")
+                formatted_content["message"] = f"Nuova email da {sender}: {subject}"
+        elif notif_type == "calendar_event_starting":
+            # Calendar notification content
+            formatted_content["summary"] = content.get("summary")
+            formatted_content["start_time"] = content.get("start_time")
+            formatted_content["end_time"] = content.get("end_time")
+            formatted_content["event_id"] = content.get("event_id")
+            # Create a user-friendly message if not present
+            if not formatted_content["message"]:
+                summary = content.get("summary", "Evento senza titolo")
+                start_time = content.get("start_time", "")
+                formatted_content["message"] = f"Evento imminente: {summary}" + (f" alle {start_time}" if start_time else "")
+        
         result.append({
             "id": str(notif.get("id")),
-            "type": notif.get("type"),
+            "type": notif_type,
             "priority": notif.get("urgency", "medium"),
             "created_at": created_at_str,
             "session_id": str(notif.get("session_id")) if notif.get("session_id") else None,
-            "content": {
-                "message": content.get("message", ""),
-                "title": content.get("title"),
-                "new_statement": content.get("new_statement") or content.get("new_knowledge", {}).get("content") or content.get("new_knowledge", {}).get("text"),
-                "contradictions": content.get("contradictions", []),
-            },
+            "content": formatted_content,
         })
     
     logger.info(f"Returning {len(result)} formatted notifications")
