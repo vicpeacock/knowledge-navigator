@@ -117,7 +117,8 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
     const streamUrl = token 
       ? `${API_BASE_URL}/api/sessions/${sessionId}/agent-activity/stream?token=${encodeURIComponent(token)}`
       : `${API_BASE_URL}/api/sessions/${sessionId}/agent-activity/stream`
-    console.log('[AgentActivity] Connecting to SSE stream:', streamUrl)
+    console.log('[AgentActivity] Connecting to SSE stream:', streamUrl.replace(token || '', '[TOKEN]'))
+    console.log('[AgentActivity] Token present:', !!token, 'Token length:', token?.length || 0)
     const source = new EventSource(streamUrl)
 
     source.onopen = () => {

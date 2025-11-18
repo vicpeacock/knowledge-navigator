@@ -1597,17 +1597,24 @@ async def stream_agent_activity(
     logger = logging.getLogger(__name__)
     
     logger.info(f"🔌 SSE connection request for session {session_id}")
+    logger.info(f"   Token provided: {bool(token)}")
+    logger.info(f"   Token length: {len(token) if token else 0}")
+    logger.info(f"   Tenant ID: {tenant_id}")
 
     # Get user from token (query param for SSE, or header for regular requests)
     current_user = None
     if token:
         # Decode token from query parameter
+        logger.info(f"   Attempting to decode token...")
         payload = decode_token(token)
         if payload:
+            logger.info(f"   Token decoded successfully, payload keys: {list(payload.keys())}")
             user_id = payload.get("sub")
+            logger.info(f"   User ID from token: {user_id}")
             if user_id:
                 try:
                     user_uuid = UUID(str(user_id))
+                    logger.info(f"   Looking up user {user_uuid} in tenant {tenant_id}")
                     result = await db.execute(
                         sql_select(User).where(
                             User.id == user_uuid,
@@ -1616,20 +1623,34 @@ async def stream_agent_activity(
                         )
                     )
                     current_user = result.scalar_one_or_none()
-                except ValueError:
-                    pass
+                    if current_user:
+                        logger.info(f"   ✅ User found: {current_user.email}")
+                    else:
+                        logger.warning(f"   ❌ User not found or inactive")
+                except ValueError as e:
+                    logger.warning(f"   ❌ Invalid UUID format: {e}")
+        else:
+            logger.warning(f"   ❌ Token decode failed")
     
     # Fallback to header if query param not provided
     if not current_user:
+        logger.info(f"   Trying Authorization header fallback...")
         try:
             authorization = request.headers.get("Authorization")
+            logger.info(f"   Authorization header present: {bool(authorization)}")
             if authorization:
                 current_user = await get_current_user(authorization=authorization, db=db, tenant_id=tenant_id)
-        except HTTPException:
-            pass
+                if current_user:
+                    logger.info(f"   ✅ User found via header: {current_user.email}")
+        except HTTPException as e:
+            logger.warning(f"   ❌ Header auth failed: {e.detail}")
+        except Exception as e:
+            logger.warning(f"   ❌ Header auth error: {e}")
     
     if not current_user:
         logger.warning(f"❌ Unauthorized SSE connection attempt for session {session_id}")
+        logger.warning(f"   Token was provided: {bool(token)}")
+        logger.warning(f"   Authorization header present: {bool(request.headers.get('Authorization'))}")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # Ensure session exists and belongs to user before establishing stream
