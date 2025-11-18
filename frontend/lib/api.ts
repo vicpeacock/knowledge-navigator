@@ -222,6 +222,28 @@ export const sessionsApi = {
   cleanContradictionNotifications: () => api.delete('/api/sessions/notifications/contradictions'),
 }
 
+// Notifications API
+export const notificationsApi = {
+  list: (params?: {
+    session_id?: string
+    urgency?: string
+    read?: boolean
+    limit?: number
+    offset?: number
+  }) => api.get('/api/notifications/', { params }),
+  count: (params?: {
+    session_id?: string
+    urgency?: string
+    read?: boolean
+  }) => api.get('/api/notifications/count', { params }),
+  markRead: (notificationId: string) => api.post(`/api/notifications/${notificationId}/read`),
+  markAllRead: (params?: { session_id?: string; urgency?: string }) =>
+    api.post('/api/notifications/read-all', null, { params }),
+  delete: (notificationId: string) => api.delete(`/api/notifications/${notificationId}`),
+  deleteBatch: (notificationIds: string[]) =>
+    api.post('/api/notifications/batch/delete', notificationIds),
+}
+
 // Files API
 export const filesApi = {
   upload: (sessionId: string, file: File) => {
