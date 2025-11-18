@@ -504,16 +504,23 @@ function NotificationItem({
             e.preventDefault()
             e.stopPropagation()
             
-            // Verify session exists before navigating
+            // Verify session exists and is active before navigating
             try {
               // Use sessionsApi which includes authentication headers
               const response = await sessionsApi.get(sessionId)
               if (response.data && response.data.id) {
-                // Session exists, navigate to it
-                router.push(`/sessions/${sessionId}`)
-                // Close notification popup
-                if (onClose) {
-                  onClose()
+                // Check if session is active (not deleted or archived)
+                if (response.data.status === 'active') {
+                  // Session exists and is active, navigate to it
+                  router.push(`/sessions/${sessionId}`)
+                  // Close notification popup
+                  if (onClose) {
+                    onClose()
+                  }
+                } else {
+                  // Session exists but is not active (deleted/archived), create new one
+                  console.log(`Session ${sessionId} exists but status is ${response.data.status}, creating new one from notification...`)
+                  await createSessionFromNotification()
                 }
               } else {
                 console.error('Session not found:', sessionId)
@@ -522,9 +529,9 @@ function NotificationItem({
               }
             } catch (error: any) {
               console.error('Error verifying session:', error)
-              if (error.response?.status === 404) {
-                // Session was deleted, try to create a new one from notification
-                console.log('Session not found, attempting to create from notification...')
+              if (error.response?.status === 404 || error.response?.status === 403) {
+                // Session was deleted or not accessible, try to create a new one from notification
+                console.log('Session not found or not accessible, attempting to create from notification...')
                 await createSessionFromNotification()
               } else if (error.response?.status === 401) {
                 alert(`Errore di autenticazione. Per favore, effettua il login.`)
