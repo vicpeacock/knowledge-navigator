@@ -276,6 +276,7 @@ class EmailPoller:
                 if self.email_action_processor and analysis and analysis.get("requires_action"):
                     try:
                         if integration.user_id:
+                            logger.info(f"🔄 Processing email action for {email_id}: requires_action=True, urgency={analysis.get('urgency')}, action_type={analysis.get('action_type')}")
                             session_id = await self.email_action_processor.process_email_action(
                                 email=msg,
                                 analysis=analysis,
@@ -283,9 +284,13 @@ class EmailPoller:
                                 user_id=integration.user_id,
                             )
                             if session_id:
-                                logger.info(f"Created automatic session {session_id} for email {email_id}")
+                                logger.info(f"✅ Created automatic session {session_id} for email {email_id}")
+                            else:
+                                logger.warning(f"⚠️  No session created for email {email_id} (process_email_action returned None)")
+                        else:
+                            logger.warning(f"⚠️  Cannot create session for email {email_id}: integration has no user_id")
                     except Exception as e:
-                        logger.error(f"Error processing email action for {email_id}: {e}", exc_info=True)
+                        logger.error(f"❌ Error processing email action for {email_id}: {e}", exc_info=True)
                 
                 # Determina priorità basata su analisi o fallback a metodo tradizionale
                 if analysis:
