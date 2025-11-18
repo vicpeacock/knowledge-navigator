@@ -18,8 +18,11 @@
 
 **Core Features:**
 - ✅ Sistema multi-sessione con chat indipendenti
+- ✅ **Sistema sessioni giornaliere** - Una sessione per giorno con archiviazione automatica
+- ✅ **Transizione di giorno** - Dialog per confermare passaggio a nuovo giorno
 - ✅ Upload e gestione file (PDF, DOCX, XLSX, TXT)
 - ✅ Sistema memoria multi-livello (short/medium/long-term)
+- ✅ **Gestione memoria a lungo termine** - Pagina dedicata con cancellazione batch
 - ✅ RAG con ChromaDB per ricerca semantica
 - ✅ Tool calling dinamico (LLM decide quando usare tool)
 - ✅ Archiviazione chat con indicizzazione semantica
@@ -31,6 +34,7 @@
 - ✅ Gestione utenti con autenticazione JWT
 - ✅ Admin panel per gestione utenti
 - ✅ Preferenze tools MCP per utente
+- ✅ **Timezone utente** - Configurazione timezone per sessioni giornaliere
 
 ### 🚧 In Progress / Da Completare
 
@@ -57,21 +61,25 @@
 - ✅ Preferenze tools MCP per utente (selezione tools personalizzata)
 - ❌ Navigazione autonoma web avanzata (Fase 3)
 
-**Proattività (Fase 2 - 🚧 In Corso):**
+**Proattività (Fase 2 - ✅ Completata):**
 - ✅ Sistema eventi per monitorare email/calendario (implementato)
 - ✅ Email Poller - rileva automaticamente nuove email
 - ✅ Calendar Watcher - rileva eventi imminenti (15min, 5min prima)
 - ✅ Event Monitor Service - orchestratore principale
 - ✅ Integrazione con sistema notifiche esistente
-- ❌ WebSocket per notifiche real-time
+- ✅ **SSE per notifiche real-time** - Server-Sent Events per aggiornamenti immediati
+- ✅ **Pagina dedicata notifiche** - `/notifications` con filtri, paginazione, cancellazione batch
+- ✅ **Ottimizzazioni notifiche** - Indici database, query O(1), pre-caricamento integrazioni
+- ✅ **UI migliorata NotificationBell** - Raggruppamento per tipo, pulsanti "Segna Lette" e "Vedi Tutte"
+- ❌ WebSocket per notifiche bidirezionali (opzionale, SSE sufficiente)
 - ❌ Motore decisionale avanzato per priorità eventi
-- ❌ Notifiche push frontend
+- ❌ Notifiche push browser
 
 **WhatsApp Integration (Fase 1 - ⏸️ Temporaneamente Disabilitata):**
 - ⏹️ Integrazione WhatsApp (Selenium + pywhatkit) **rimossa** dalla codebase
 - 📝 **Nota**: ripartiremo da zero con l'implementazione basata su WhatsApp Business API; nessun supporto WhatsApp è disponibile fino a quel refactoring.
 
-**Miglioramenti Memoria (Fase 2):**
+**Miglioramenti Memoria (Fase 2 - ✅ Completata):**
 - ✅ Indicizzazione email in memoria (completata in Fase 1)
 - ✅ Indicizzazione contenuti web in memoria (completata in Fase 1)
 - ✅ Test suite completa per indicizzazione email (10/10 test passati)
@@ -80,6 +88,8 @@
 - ✅ Ricerca semantica avanzata (hybrid search, query suggestions)
 - ✅ Consolidamento memoria (duplicati, riassunti)
 - ✅ Riassunto automatico conversazioni lunghe in memoria medium-term
+- ✅ **Gestione memoria a lungo termine** - Pagina dedicata con lista, filtri, cancellazione batch
+- ✅ **Riassunto sessioni giornaliere** - Archiviazione automatica con riassunto in memoria long-term
 - ❌ **Controllo integrità semantica**: Identificare contraddizioni nella memoria long-term (es: "nato il 12 luglio" vs "compleanno 15 agosto")
 
 ---
@@ -125,10 +135,12 @@
 - [ ] WhatsApp Monitor (messaggi in arrivo) - In attesa Business API
 
 **WebSocket & Notifiche:**
-- [ ] WebSocket server (FastAPI)
-- [ ] Client WebSocket frontend
-- [ ] Sistema notifiche real-time
-- [ ] Priorità eventi (LOW, MEDIUM, HIGH, URGENT)
+- [x] **SSE per notifiche real-time** ✅ (Server-Sent Events implementato)
+- [x] **Pagina dedicata notifiche** ✅ (`/notifications` con filtri e paginazione)
+- [x] **Ottimizzazioni database** ✅ (indici compositi, query O(1))
+- [x] **UI migliorata NotificationBell** ✅ (raggruppamento, nuovi pulsanti)
+- [ ] WebSocket server (opzionale, SSE sufficiente per notifiche unidirezionali)
+- [ ] Priorità eventi avanzata (LOW, MEDIUM, HIGH, URGENT) - base implementata
 
 **Motore Decisionale:**
 - [ ] Valutazione importanza eventi
@@ -172,6 +184,9 @@
 - [ ] Outlook Mail (Graph API)
 
 **UI/UX:**
+- [x] **Pagina dedicata notifiche** ✅ (`/notifications` con filtri avanzati)
+- [x] **Gestione memoria a lungo termine** ✅ (pagina dedicata con cancellazione batch)
+- [x] **Dialog transizione giorno** ✅ (conferma utente per nuovo giorno)
 - [ ] Notifiche push browser
 - [ ] Dashboard avanzato con statistiche
 - [ ] Export/Import sessioni
@@ -193,9 +208,11 @@
 - [ ] Backup automatico
 
 **Performance:**
-- [ ] Ottimizzazione query database
-- [ ] Caching intelligente
-- [ ] Background jobs per indicizzazione
+- [x] **Ottimizzazione query database** ✅ (indici compositi per notifiche, query O(1) invece di O(n))
+- [x] **Ottimizzazione filtraggio notifiche** ✅ (pre-caricamento integrazioni, batch loading)
+- [x] **Paginazione** ✅ (notifiche e memoria a lungo termine)
+- [ ] Caching intelligente (opzionale)
+- [ ] Background jobs per indicizzazione (parzialmente implementato)
 - [ ] Rate limiting API
 
 **Deployment:**
@@ -271,8 +288,16 @@
 - **Test Coverage**: 19/19 test passati (100%)
   - Web Indexer: 9/9 ✅
   - Email Indexer: 10/10 ✅
+  - Daily Session Integration: 4/4 ✅
+  - Day Transition API: 2/2 ✅
+  - DayTransitionDialog Frontend: 6/6 ✅
 - **Fase 1 Completamento**: ~95% (manca solo WhatsApp con Business API)
+- **Fase 2 Completamento**: ~90% (completati sistema eventi, notifiche real-time, UI)
 - **Code Quality**: Nessun warning, Pydantic V2 compatibile
+
+## 📚 Documentazione Recente
+
+- **`docs/DAILY_SESSIONS_AND_NOTIFICATIONS.md`** - Documentazione completa sistema sessioni giornaliere e miglioramenti notifiche
 
 Quale fase vuoi affrontare per prima?
 

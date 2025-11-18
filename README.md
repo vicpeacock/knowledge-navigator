@@ -26,10 +26,11 @@ Personal AI Assistant - Sistema multi-agente per gestione conoscenza e automazio
 ## Documentazione
 
 Tutta la documentazione è in `docs/`:
+- **`docs/ROADMAP.md`** - Roadmap generale del progetto
+- **`docs/DAILY_SESSIONS_AND_NOTIFICATIONS.md`** - Sistema sessioni giornaliere e miglioramenti notifiche
 - **`docs/SCRIPTS.md`** - Documentazione degli script
-- **`docs/TROUBLESHOOTING_AUTH.md`** - Troubleshooting autenticazione
-- **`docs/QUICK_FIX_AUTH.md`** - Quick fix problemi autenticazione
 - **`docs/KAGGLE_SUBMISSION_ROADMAP.md`** - Roadmap challenge Kaggle
+- **`docs/PROACTIVITY_ARCHITECTURE.md`** - Architettura sistema proattività
 - E altri...
 
 ## Script Disponibili
