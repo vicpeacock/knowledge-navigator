@@ -125,7 +125,7 @@ class Settings(BaseSettings):
     service_health_check_interval_seconds: int = 60
     agent_scheduler_tick_seconds: int = 30
     integrity_scheduler_interval_seconds: int = 30  # Temporaneamente ridotto per test
-    
+
     # Proactivity / Event Monitoring
     event_monitor_enabled: bool = True  # Enable proactive event monitoring
     event_monitor_poll_interval_seconds: int = 60  # Check for events every minute
