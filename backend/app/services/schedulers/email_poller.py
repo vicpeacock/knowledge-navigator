@@ -299,6 +299,7 @@ class EmailPoller:
                     priority = self._determine_email_priority(msg)
                 
                 # Crea notifica (controlla duplicati basati su email_id)
+                # IMPORTANTE: Aggiungi user_id al content per filtrare le notifiche per utente
                 notification = await self.notification_service.create_notification(
                     type="email_received",
                     urgency=priority,
@@ -309,6 +310,7 @@ class EmailPoller:
                         "snippet": msg.get("snippet", "")[:200],  # Primi 200 caratteri
                         "date": msg.get("date"),
                         "integration_id": str(integration.id),
+                        "user_id": str(integration.user_id) if integration.user_id else None,  # Aggiungi user_id per filtrare
                         "category": analysis.get("category") if analysis else "unknown",
                         "analysis": analysis,  # Store full analysis for reference
                         "auto_session_id": str(session_id) if session_id else None,
