@@ -124,10 +124,6 @@ class EmailPoller:
             logger.error(f"Error setting up Gmail for integration {integration.id}: {e}")
             return events_created
         
-        # Get last checked email ID per questa integrazione
-        integration_key = str(integration.id)
-        last_email_id = self._last_email_ids.get(integration_key)
-        
         # Query per nuove email (solo non lette per ora)
         try:
             # Get unread emails from last 24 hours
@@ -174,33 +170,58 @@ class EmailPoller:
                 existing_email_ids.add(str(email_id))
         
         # Also check sessions created from emails (even if notification was deleted)
-        existing_sessions_result = await self.db.execute(
-            select(SessionModel).where(
-                SessionModel.tenant_id == integration.tenant_id,
-                SessionModel.session_metadata["source"].astext == "email_analysis"
+        try:
+            # Try JSONB query - if it fails, fall back to checking all sessions
+            existing_sessions_result = await self.db.execute(
+                select(SessionModel).where(
+                    SessionModel.tenant_id == integration.tenant_id,
+                    SessionModel.session_metadata["source"].astext == "email_analysis"
+                )
             )
-        )
-        existing_sessions = existing_sessions_result.scalars().all()
-        for session in existing_sessions:
-            email_id = session.session_metadata.get("email_id") if isinstance(session.session_metadata, dict) else None
-            if email_id:
-                existing_email_ids.add(str(email_id))
+            existing_sessions = existing_sessions_result.scalars().all()
+            logger.debug(f"Found {len(existing_sessions)} sessions created from emails")
+            for session in existing_sessions:
+                # Extract email_id from session metadata
+                metadata = session.session_metadata
+                if isinstance(metadata, dict):
+                    email_id = metadata.get("email_id")
+                else:
+                    # JSONB field might need different access
+                    try:
+                        email_id = metadata.get("email_id") if hasattr(metadata, 'get') else None
+                    except:
+                        email_id = None
+                if email_id:
+                    existing_email_ids.add(str(email_id))
+                    logger.debug(f"  - Session {session.id} has email_id: {email_id}")
+        except Exception as e:
+            logger.warning(f"⚠️  Error checking sessions for email deduplication: {e}")
+            # Continue without session check - notifications check should be enough
         
-        logger.debug(f"Found {len(existing_email_ids)} already processed emails (notifications + sessions) for tenant {integration.tenant_id}")
+        logger.info(f"📊 Deduplication: Found {len(existing_email_ids)} already processed emails (notifications: {len([n for n in existing_notifications])}, sessions: {len(existing_sessions) if 'existing_sessions' in locals() else 0})")
+        
+        # Log all email IDs from Gmail for debugging
+        gmail_email_ids = [msg.get("id") for msg in messages if msg.get("id")]
+        logger.debug(f"📧 Email IDs from Gmail: {gmail_email_ids[:5]}... (showing first 5)")
         
         # Filter out emails that already have notifications or sessions
         for msg in messages:
             email_id = msg.get("id")
-            if email_id and str(email_id) not in existing_email_ids:
+            if not email_id:
+                logger.warning(f"⚠️  Email message missing ID: {msg}")
+                continue
+                
+            if str(email_id) not in existing_email_ids:
                 new_messages.append(msg)
+                logger.debug(f"✅ New email found: {email_id} - {msg.get('subject', 'No subject')[:50]}")
             else:
-                logger.debug(f"Skipping email {email_id} - already processed (has notification or session)")
+                logger.debug(f"⏭️  Skipping email {email_id} - already processed (has notification or session)")
         
         if not new_messages:
-            logger.debug(f"No new emails since last check for integration {integration.id} (all already have notifications)")
+            logger.info(f"ℹ️  No new emails to process for integration {integration.id} (all {len(messages)} emails already have notifications/sessions)")
             return events_created
         
-        logger.info(f"Found {len(new_messages)} new emails (filtered from {len(messages)} total) for integration {integration.id}")
+        logger.info(f"🎯 Processing {len(new_messages)} new emails (filtered from {len(messages)} total) for integration {integration.id}")
         
         # Crea notifiche per ogni nuova email
         for msg in new_messages:
