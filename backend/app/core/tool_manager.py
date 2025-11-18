@@ -1274,11 +1274,36 @@ Riassunto:"""
             )
             
             if result.get("success"):
+                # Track sent email thread_id in session metadata for reply detection
+                thread_id = result.get("thread_id")
+                message_id = result.get("message_id")
+                if session_id and thread_id:
+                    try:
+                        from app.models.database import Session as SessionModel
+                        session_result = await db.execute(
+                            select(SessionModel).where(SessionModel.id == session_id)
+                        )
+                        session = session_result.scalar_one_or_none()
+                        if session:
+                            # Initialize sent_email_threads if not exists
+                            if not session.session_metadata:
+                                session.session_metadata = {}
+                            if "sent_email_threads" not in session.session_metadata:
+                                session.session_metadata["sent_email_threads"] = []
+                            
+                            # Add thread_id if not already present
+                            if thread_id not in session.session_metadata["sent_email_threads"]:
+                                session.session_metadata["sent_email_threads"].append(thread_id)
+                                await db.commit()
+                                logger.info(f"📧 Tracked sent email thread_id {thread_id} in session {session_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to track sent email thread_id: {e}")
+                
                 return {
                     "success": True,
                     "message": f"Email inviata con successo a {to}",
-                    "message_id": result.get("message_id"),
-                    "thread_id": result.get("thread_id"),
+                    "message_id": message_id,
+                    "thread_id": thread_id,
                 }
             else:
                 return {"error": "Errore durante l'invio dell'email"}
@@ -1373,11 +1398,36 @@ Riassunto:"""
             )
             
             if result.get("success"):
+                # Track replied email thread_id in session metadata for reply detection
+                thread_id = result.get("thread_id")
+                message_id = result.get("message_id")
+                if session_id and thread_id:
+                    try:
+                        from app.models.database import Session as SessionModel
+                        session_result = await db.execute(
+                            select(SessionModel).where(SessionModel.id == session_id)
+                        )
+                        session = session_result.scalar_one_or_none()
+                        if session:
+                            # Initialize sent_email_threads if not exists
+                            if not session.session_metadata:
+                                session.session_metadata = {}
+                            if "sent_email_threads" not in session.session_metadata:
+                                session.session_metadata["sent_email_threads"] = []
+                            
+                            # Add thread_id if not already present
+                            if thread_id not in session.session_metadata["sent_email_threads"]:
+                                session.session_metadata["sent_email_threads"].append(thread_id)
+                                await db.commit()
+                                logger.info(f"📧 Tracked replied email thread_id {thread_id} in session {session_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to track replied email thread_id: {e}")
+                
                 return {
                     "success": True,
                     "message": f"Risposta inviata con successo",
-                    "message_id": result.get("message_id"),
-                    "thread_id": result.get("thread_id"),
+                    "message_id": message_id,
+                    "thread_id": thread_id,
                 }
             else:
                 return {"error": "Errore durante l'invio della risposta"}

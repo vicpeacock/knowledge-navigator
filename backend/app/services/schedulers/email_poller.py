@@ -256,10 +256,40 @@ class EmailPoller:
         
         logger.info(f"🎯 Processing {len(new_messages)} new emails (filtered from {len(messages)} total) for integration {integration.id}")
         
+        # Check if this email is a reply to an email sent by the assistant
+        # Get all thread_ids from sessions where assistant sent emails
+        sent_thread_ids = set()
+        try:
+            if integration.user_id:
+                sent_sessions_result = await self.db.execute(
+                    select(SessionModel).where(
+                        SessionModel.tenant_id == integration.tenant_id,
+                        SessionModel.user_id == integration.user_id,
+                        SessionModel.session_metadata["sent_email_threads"].isnot(None)
+                    )
+                )
+                sent_sessions = sent_sessions_result.scalars().all()
+                for session in sent_sessions:
+                    metadata = session.session_metadata
+                    if isinstance(metadata, dict):
+                        threads = metadata.get("sent_email_threads", [])
+                        if isinstance(threads, list):
+                            sent_thread_ids.update(str(t) for t in threads)
+                logger.info(f"📧 Found {len(sent_thread_ids)} tracked thread_ids from assistant-sent emails")
+        except Exception as e:
+            logger.warning(f"⚠️  Error checking sent email threads: {e}")
+        
         # Crea notifiche per ogni nuova email
         for msg in new_messages:
             try:
                 email_id = msg.get("id")
+                thread_id = msg.get("thread_id", "")
+                
+                # Check if this email is a reply to an assistant-sent email
+                is_reply_to_assistant = False
+                if thread_id and str(thread_id) in sent_thread_ids:
+                    is_reply_to_assistant = True
+                    logger.info(f"📧 Email {email_id} is a reply to assistant-sent email (thread_id: {thread_id})")
                 
                 # Analyze email if analysis is enabled
                 analysis = None
@@ -268,16 +298,36 @@ class EmailPoller:
                         # Analyze email using snippet (usually sufficient for action detection)
                         # Full body can be fetched later if needed for more detailed analysis
                         analysis = await self.email_analyzer.analyze_email(msg)
+                        
+                        # If this is a reply to assistant-sent email, always mark as requiring action
+                        if is_reply_to_assistant:
+                            analysis["requires_action"] = True
+                            if analysis.get("urgency") == "low":
+                                analysis["urgency"] = "medium"  # Upgrade urgency
+                            analysis["is_reply_to_assistant"] = True
+                            logger.info(f"📧 Marked reply email {email_id} as requiring action")
+                        
                         logger.info(
                             f"Email analysis for {email_id}: "
                             f"category={analysis.get('category')}, "
                             f"requires_action={analysis.get('requires_action')}, "
                             f"action_type={analysis.get('action_type')}, "
-                            f"urgency={analysis.get('urgency')}"
+                            f"urgency={analysis.get('urgency')}, "
+                            f"is_reply_to_assistant={is_reply_to_assistant}"
                         )
                     except Exception as e:
                         logger.warning(f"Error analyzing email {email_id}: {e}")
                         analysis = None
+                        # If analysis fails but it's a reply, still mark as requiring action
+                        if is_reply_to_assistant:
+                            analysis = {
+                                "category": "direct",
+                                "requires_action": True,
+                                "action_type": "reply",
+                                "action_summary": "Risposta a email inviata dall'assistente",
+                                "urgency": "medium",
+                                "is_reply_to_assistant": True,
+                            }
                 
                 # Process action if analysis indicates action is required
                 session_id = None
