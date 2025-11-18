@@ -204,7 +204,7 @@ async def get_session(
     tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
 ):
-    """Get a session by ID (for current user)"""
+    """Get a session by ID (for current user or sessions created from integrations owned by current user)"""
     logger = logging.getLogger(__name__)
     
     # First check if session exists at all (for debugging)
@@ -216,28 +216,49 @@ async def get_session(
     )
     session_any_user = result_all.scalar_one_or_none()
     
-    if session_any_user:
-        logger.debug(f"Session {session_id} exists: user_id={session_any_user.user_id}, current_user.id={current_user.id}")
-        if session_any_user.user_id != current_user.id:
+    if not session_any_user:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Check if session belongs to current user
+    if session_any_user.user_id == current_user.id:
+        session = session_any_user
+    else:
+        # Session belongs to different user - check if it was created from an integration owned by current user
+        # This allows access to sessions created from email/calendar integrations
+        session_metadata = session_any_user.session_metadata or {}
+        email_id = session_metadata.get("email_id")
+        
+        if email_id:
+            # Check if there's an integration for this email that belongs to current user
+            from app.models.database import Integration
+            integration_result = await db.execute(
+                select(Integration).where(
+                    Integration.tenant_id == tenant_id,
+                    Integration.provider == "google",
+                    Integration.service_type == "email",
+                    Integration.user_id == current_user.id,
+                    Integration.enabled == True,
+                )
+            )
+            user_integrations = integration_result.scalars().all()
+            
+            if user_integrations:
+                # User has email integrations - allow access to email-created sessions
+                logger.info(f"Allowing access to session {session_id} created from email (user has email integrations)")
+                session = session_any_user
+            else:
+                logger.warning(f"Session {session_id} belongs to user {session_any_user.user_id} but current user {current_user.id} has no matching integrations")
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Session exists but belongs to a different user (session user_id: {session_any_user.user_id}, your user_id: {current_user.id})"
+                )
+        else:
+            # Not an email-created session, require exact user match
             logger.warning(f"Session {session_id} belongs to user {session_any_user.user_id} but current user is {current_user.id}")
-    
-    # Now check with user_id filter
-    result = await db.execute(
-        select(SessionModel).where(
-            SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id,
-            SessionModel.user_id == current_user.id
-        )
-    )
-    session = result.scalar_one_or_none()
-    
-    if not session:
-        if session_any_user:
             raise HTTPException(
                 status_code=403, 
                 detail=f"Session exists but belongs to a different user (session user_id: {session_any_user.user_id}, your user_id: {current_user.id})"
             )
-        raise HTTPException(status_code=404, detail="Session not found")
     
     # Map session_metadata to metadata for response
     return Session(
