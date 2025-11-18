@@ -115,7 +115,7 @@ async def oauth_callback(
     from app.core.config import settings
     
     try:
-        flow = email_service.create_gmail_oauth_flow(state=state)
+        flow = email_service.create_gmail_oauth_flow()
         flow.fetch_token(code=code)
         
         credentials = {
