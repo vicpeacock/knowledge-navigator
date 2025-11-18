@@ -148,7 +148,7 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                     onClick={async (e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      if (confirm(`Vuoi eliminare tutte le ${pendingCount} notifiche di contraddizione?`)) {
+                      if (confirm(`Vuoi eliminare tutte le ${pendingCount} notifiche pendenti?`)) {
                         try {
                           console.log('[NotificationBell] Cleaning contradiction notifications...')
                           console.log('[NotificationBell] API URL:', `${API_URL}/api/sessions/notifications/contradictions`)
@@ -190,7 +190,7 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                       }
                     }}
                     className="text-xs px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
-                    title="Elimina tutte le notifiche di contraddizione"
+                    title="Elimina tutte le notifiche pendenti"
                   >
                     Pulisci
                   </button>
