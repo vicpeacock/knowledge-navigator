@@ -243,61 +243,69 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Notifiche</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-semibold">Notifiche</h3>
+                {pendingCount > 0 && (
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    {pendingCount} {pendingCount === 1 ? 'notifica' : 'notifiche'}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 {pendingCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={async (e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      if (confirm(`Vuoi eliminare tutte le ${pendingCount} notifiche pendenti?`)) {
+                  <>
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
                         try {
-                          console.log('[NotificationBell] Cleaning all pending notifications...')
-                          console.log('[NotificationBell] API URL:', `${API_URL}/api/sessions/notifications/contradictions`)
-                          const response = await axios.delete(`${API_URL}/api/sessions/notifications/contradictions`, {
-                            timeout: 5000
-                          })
-                          console.log('[NotificationBell] Clean response status:', response.status)
-                          console.log('[NotificationBell] Clean response data:', response.data)
-                          
-                          if (response.data && response.data.deleted_count !== undefined) {
-                            // Clear notifications immediately
+                          const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+                          const headers = token ? { Authorization: `Bearer ${token}` } : {}
+                          await axios.post(`${API_URL}/api/notifications/read-all`, null, { headers })
+                          await fetchNotifications()
+                        } catch (error) {
+                          console.error('Error marking all as read:', error)
+                        }
+                      }}
+                      className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                      title="Segna tutte come lette"
+                    >
+                      Segna Lette
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (confirm(`Vuoi eliminare tutte le ${pendingCount} notifiche pendenti?`)) {
+                          try {
+                            const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+                            const headers = token ? { Authorization: `Bearer ${token}` } : {}
+                            const ids = notifications.map(n => n.id)
+                            await axios.post(`${API_URL}/api/notifications/batch/delete`, ids, { headers })
                             setNotifications([])
-                            console.log(`[NotificationBell] ✅ Deleted ${response.data.deleted_count} notifications`)
-                            
-                            // Force refresh after a short delay to ensure backend has processed
-                            setTimeout(() => {
-                              console.log('[NotificationBell] Refreshing notifications...')
-                              fetchNotifications()
-                            }, 1000)
-                          } else {
-                            console.warn('[NotificationBell] Unexpected response format:', response.data)
-                            setNotifications([])
-                            setTimeout(() => fetchNotifications(), 1000)
-                          }
-                        } catch (error: any) {
-                          console.error('[NotificationBell] Error cleaning notifications:', error)
-                          if (error.response) {
-                            console.error('[NotificationBell] Error status:', error.response.status)
-                            console.error('[NotificationBell] Error data:', error.response.data)
-                            alert(`Errore ${error.response.status}: ${error.response.data?.detail || error.response.data?.message || 'Errore sconosciuto'}`)
-                          } else if (error.request) {
-                            console.error('[NotificationBell] No response received:', error.request)
-                            alert('Errore: il backend non ha risposto. Verifica che sia in esecuzione.')
-                          } else {
-                            console.error('[NotificationBell] Error setting up request:', error.message)
-                            alert(`Errore: ${error.message}`)
+                            setTimeout(() => fetchNotifications(), 500)
+                          } catch (error: any) {
+                            console.error('[NotificationBell] Error cleaning notifications:', error)
+                            alert(`Errore: ${error.response?.data?.detail || error.message || 'Errore sconosciuto'}`)
                           }
                         }
-                      }
-                    }}
-                    className="text-xs px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
-                    title="Elimina tutte le notifiche pendenti"
-                  >
-                    Pulisci
-                  </button>
+                      }}
+                      className="text-xs px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                      title="Elimina tutte le notifiche pendenti"
+                    >
+                      Pulisci
+                    </button>
+                  </>
                 )}
+                <a
+                  href="/notifications"
+                  className="text-xs px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+                  title="Vedi tutte le notifiche"
+                >
+                  Vedi Tutte
+                </a>
                 <button
                   type="button"
                   onClick={(e) => {
