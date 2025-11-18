@@ -71,5 +71,7 @@ export interface ChatResponse {
     id: string
   }>
   agent_activity?: AgentActivityEvent[]
+  day_transition_pending?: boolean  // True when day transition detected
+  new_session_id?: string  // ID of new day's session when day_transition_pending is true
 }
 
