@@ -1105,39 +1105,58 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             if parsed_tc:
                 tool_calls = parsed_tc
             else:
-                # Check for tool_calls directly in response_data (OpenAI-style format)
+                # Check multiple possible locations for tool_calls
+                tool_calls_found = False
+                
+                # 1. Check for tool_calls directly in response_data (OpenAI-style format)
                 if "tool_calls" in response_data:
-                    tool_calls = []
-                    for tc in response_data["tool_calls"]:
-                        if isinstance(tc, dict) and "function" in tc:
-                            func = tc.get("function", {})
-                            tool_name = func.get("name")
-                            arguments = func.get("arguments", {})
-                            
-                            # Parse arguments if it's a JSON string (OpenAI format)
-                            if isinstance(arguments, str):
-                                try:
-                                    arguments = json.loads(arguments)
-                                except (json.JSONDecodeError, TypeError):
-                                    logger.warning(f"Failed to parse arguments as JSON for tool {tool_name}: {arguments}")
-                                    arguments = {}
-                            
-                            tool_calls.append({
-                                "name": tool_name,
-                                "parameters": arguments if isinstance(arguments, dict) else {},
-                            })
-                else:
-                    # Fallback: check in raw_result.message (Ollama format)
-                    message = response_data.get("raw_result", {}).get("message")
+                    tool_calls_raw = response_data["tool_calls"]
+                    tool_calls_found = True
+                # 2. Check in message.tool_calls (Ollama format when return_raw=True)
+                elif "message" in response_data and isinstance(response_data["message"], dict) and "tool_calls" in response_data["message"]:
+                    tool_calls_raw = response_data["message"]["tool_calls"]
+                    tool_calls_found = True
+                # 3. Check in raw_result.message.tool_calls (Ollama format)
+                elif "raw_result" in response_data:
+                    raw_result = response_data.get("raw_result", {})
+                    message = raw_result.get("message")
                     if isinstance(message, dict) and "tool_calls" in message:
-                        tool_calls = [
-                            {
-                                "name": tc.get("function", {}).get("name"),
-                                "parameters": tc.get("function", {}).get("arguments", {}),
-                            }
-                            for tc in message["tool_calls"]
-                            if isinstance(tc, dict)
-                        ]
+                        tool_calls_raw = message["tool_calls"]
+                        tool_calls_found = True
+                    else:
+                        tool_calls_raw = None
+                else:
+                    tool_calls_raw = None
+                
+                if tool_calls_found and tool_calls_raw:
+                    logger.error(f"🔧🔧🔧 Found tool_calls in response_data: {len(tool_calls_raw)} call(s)")
+                    tool_calls = []
+                    for tc in tool_calls_raw:
+                        if isinstance(tc, dict):
+                            # Handle OpenAI-style format: {"function": {"name": "...", "arguments": {...}}}
+                            if "function" in tc:
+                                func = tc.get("function", {})
+                                tool_name = func.get("name")
+                                arguments = func.get("arguments", {})
+                                
+                                # Parse arguments if it's a JSON string (OpenAI format)
+                                if isinstance(arguments, str):
+                                    try:
+                                        arguments = json.loads(arguments)
+                                    except (json.JSONDecodeError, TypeError):
+                                        logger.warning(f"Failed to parse arguments as JSON for tool {tool_name}: {arguments}")
+                                        arguments = {}
+                                
+                                tool_calls.append({
+                                    "name": tool_name,
+                                    "parameters": arguments if isinstance(arguments, dict) else {},
+                                })
+                            # Handle direct format: {"name": "...", "parameters": {...}}
+                            elif "name" in tc:
+                                tool_calls.append({
+                                    "name": tc.get("name"),
+                                    "parameters": tc.get("parameters", {}),
+                                })
         else:
             response_text = response_data or ""
         
