@@ -283,6 +283,8 @@ class EmailPoller:
                 session_id = None
                 if self.email_action_processor and analysis and analysis.get("requires_action"):
                     try:
+                        # Use integration.user_id if available, otherwise skip session creation
+                        # (notifications can still be created without user_id)
                         if integration.user_id:
                             logger.info(f"🔄 Processing email action for {email_id}: requires_action=True, urgency={analysis.get('urgency')}, action_type={analysis.get('action_type')}")
                             session_id = await self.email_action_processor.process_email_action(
@@ -296,7 +298,8 @@ class EmailPoller:
                             else:
                                 logger.warning(f"⚠️  No session created for email {email_id} (process_email_action returned None)")
                         else:
-                            logger.warning(f"⚠️  Cannot create session for email {email_id}: integration has no user_id")
+                            logger.warning(f"⚠️  Cannot create session for email {email_id}: integration {integration.id} has no user_id. Notification will still be created.")
+                            logger.warning(f"   This integration should be recreated with proper user_id. Check OAuth callback logs.")
                     except Exception as e:
                         logger.error(f"❌ Error processing email action for {email_id}: {e}", exc_info=True)
                 
