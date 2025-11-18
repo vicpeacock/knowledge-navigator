@@ -225,7 +225,7 @@ Riassunto:"""
             
             # Update long-term memory with summary
             if summary_text:
-                await self.memory_manager.add_to_long_term_memory(
+                await self.memory_manager.add_long_term_memory(
                     content=summary_text,
                     tenant_id=session.tenant_id,
                     session_ids=[str(session.id)],
