@@ -42,6 +42,7 @@ interface NotificationBellProps {
 }
 
 export default function NotificationBell({ sessionId }: NotificationBellProps) {
+  const router = useRouter()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
