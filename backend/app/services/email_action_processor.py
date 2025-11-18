@@ -11,12 +11,13 @@ from datetime import datetime, timezone
 from app.models.database import Session as SessionModel, Message as MessageModel
 from app.core.ollama_client import OllamaClient
 from app.core.memory_manager import MemoryManager
+from app.services.daily_session_manager import DailySessionManager
 
 logger = logging.getLogger(__name__)
 
 
 class EmailActionProcessor:
-    """Processes email actions and creates automatic sessions if needed"""
+    """Processes email actions and adds them to daily sessions"""
     
     def __init__(
         self,
@@ -27,6 +28,11 @@ class EmailActionProcessor:
         self.db = db
         self.ollama_client = ollama_client or OllamaClient()
         self.memory_manager = memory_manager
+        self.daily_session_manager = DailySessionManager(
+            db=db,
+            memory_manager=memory_manager,
+            ollama_client=ollama_client,
+        )
     
     async def process_email_action(
         self,
@@ -36,8 +42,8 @@ class EmailActionProcessor:
         user_id: UUID,
     ) -> Optional[UUID]:
         """
-        Create automatic session if action is required.
-        Returns session_id if session was created, None otherwise.
+        Add email to today's daily session if action is required.
+        Returns session_id if email was added to session, None otherwise.
         """
         if not analysis.get("requires_action"):
             return None
@@ -45,82 +51,80 @@ class EmailActionProcessor:
         action_type = analysis.get("action_type")
         urgency = analysis.get("urgency", "medium")
         
-        # Check if we should create a session based on urgency
-        # Use configuration setting for minimum urgency
+        # Check if we should process this email based on urgency
         from app.core.config import settings
         urgency_levels = {"high": 3, "medium": 2, "low": 1}
         min_urgency_str = settings.email_analysis_min_urgency_for_session
         min_urgency_level = urgency_levels.get(min_urgency_str, 2)  # Default to medium if invalid
         if urgency_levels.get(urgency, 0) < min_urgency_level:
-            logger.debug(f"Skipping session creation for low urgency email: {email.get('subject')} (urgency: {urgency}, min required: {min_urgency_str})")
+            logger.debug(f"Skipping email processing for low urgency: {email.get('subject')} (urgency: {urgency}, min required: {min_urgency_str})")
             return None
         
-        # Check if session already exists for this email (including deleted/archived sessions)
-        # IMPORTANTE: Include anche sessioni cancellate/archiviate per evitare di ricrearle
+        # Check if this email was already processed (deduplication)
         email_id = email.get("id")
         if email_id:
             from sqlalchemy import select
-            existing_session = await self.db.execute(
-                select(SessionModel).where(
-                    SessionModel.tenant_id == tenant_id,
-                    SessionModel.user_id == user_id,
-                    SessionModel.session_metadata["email_id"].astext == str(email_id),
-                    # NON filtrare per status - include anche "deleted" e "archived" per deduplicazione
-                )
+            # Check if there's already a message about this email in any session
+            existing_message = await self.db.execute(
+                select(MessageModel).where(
+                    MessageModel.tenant_id == tenant_id,
+                    MessageModel.session_metadata["email_id"].astext == str(email_id),
+                ).limit(1)
             )
-            existing = existing_session.scalar_one_or_none()
-            if existing:
-                logger.debug(f"Session already exists for email {email_id} (status: {existing.status}), skipping creation")
+            if existing_message.scalar_one_or_none():
+                logger.debug(f"Email {email_id} already processed, skipping")
                 return None
         
         try:
-            # Create session with email context
-            session_name = f"Email: {email.get('subject', 'No Subject')[:50]}"
-            session = SessionModel(
-                tenant_id=tenant_id,
+            # Get or create today's daily session
+            session, is_new = await self.daily_session_manager.get_or_create_today_session(
                 user_id=user_id,
-                name=session_name,
-                title=email.get('subject', 'Nuova Email'),
-                description=f"Email da {email.get('from', 'Unknown')}",
-                status="active",
-                session_metadata={
-                    "source": "email_analysis",
-                    "email_id": email.get('id'),
-                    "email_from": email.get('from'),
-                    "email_date": email.get('date'),
-                    "action_type": action_type,
-                    "urgency": urgency,
-                    "analysis": analysis,
-                }
+                tenant_id=tenant_id,
             )
-            self.db.add(session)
-            await self.db.commit()
-            await self.db.refresh(session)
             
-            logger.info(f"Created automatic session {session.id} for email {email.get('id')}")
+            # Track processed emails in session metadata
+            if not session.session_metadata:
+                session.session_metadata = {}
+            if "processed_emails" not in session.session_metadata:
+                session.session_metadata["processed_emails"] = []
+            
+            # Add email info to processed emails list
+            email_info = {
+                "email_id": email_id,
+                "subject": email.get("subject"),
+                "from": email.get("from"),
+                "date": email.get("date"),
+                "action_type": action_type,
+                "urgency": urgency,
+            }
+            if email_info not in session.session_metadata["processed_emails"]:
+                session.session_metadata["processed_emails"].append(email_info)
             
             # Create initial message with email summary and action request
             # IMPORTANT: This message should be from the ASSISTANT, not the user
-            # because it's the assistant summarizing the email and suggesting actions
             initial_message = self._create_initial_message(email, analysis)
             
-            # Save initial message as ASSISTANT message (not user)
-            # The assistant is informing the user about the email
+            # Save initial message as ASSISTANT message
             message = MessageModel(
                 session_id=session.id,
                 tenant_id=tenant_id,
-                role="assistant",  # Changed from "user" to "assistant"
+                role="assistant",
                 content=initial_message,
+                session_metadata={
+                    "email_id": email_id,
+                    "source": "email_analysis",
+                    "action_type": action_type,
+                    "urgency": urgency,
+                },
             )
             self.db.add(message)
             await self.db.commit()
             
-            # Note: We don't trigger a chat response here because the assistant
-            # has already provided the initial message. The user will respond when ready.
+            logger.info(f"Added email {email_id} to daily session {session.id}")
             
             return session.id
         except Exception as e:
-            logger.error(f"Error creating automatic session for email: {e}", exc_info=True)
+            logger.error(f"Error processing email action: {e}", exc_info=True)
             await self.db.rollback()
             return None
     
