@@ -31,7 +31,7 @@ class EmailService:
         return f"{provider}_{integration_id or 'default'}"
     
     # Gmail
-    def create_gmail_oauth_flow(self, state: Optional[str] = None) -> Flow:
+    def create_gmail_oauth_flow(self) -> Flow:
         """Create OAuth2 flow for Gmail"""
         if not settings.google_client_id or not settings.google_client_secret:
             raise ValueError("Google OAuth credentials not configured")
@@ -51,9 +51,6 @@ class EmailService:
                 ],
             redirect_uri=settings.google_redirect_uri_email,
         )
-        
-        if state:
-            flow.state = state
         
         return flow
     
