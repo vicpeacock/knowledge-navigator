@@ -980,18 +980,56 @@ async def chat(
     current_user: User = Depends(get_current_user),
 ):
     """Send a message and get AI response (for current user)"""
-    # Verify session exists and belongs to user
-    result = await db.execute(
-        select(SessionModel).where(
-            SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id,
-            SessionModel.user_id == current_user.id
-        )
-    )
-    session = result.scalar_one_or_none()
+    from app.core.dependencies import get_daily_session_manager
     
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    # Check for day transition
+    daily_session_manager = get_daily_session_manager(db)
+    day_transition, new_session = await daily_session_manager.check_day_transition(
+        user_id=current_user.id,
+        tenant_id=tenant_id,
+        current_session_id=session_id,
+    )
+    
+    # If day transition occurred, check if user wants to continue with new day
+    if day_transition and new_session:
+        # Check if request contains a flag to proceed with new day
+        # If not, return a response asking for confirmation
+        proceed_with_new_day = request.model_dump().get("proceed_with_new_day", False)
+        
+        if not proceed_with_new_day:
+            # Return a response asking user to confirm day transition
+            return ChatResponse(
+                response="È iniziato un nuovo giorno! Vuoi continuare con la sessione di oggi o rimanere su quella di ieri?\n\nRispondi 'nuovo giorno' o 'continua' per passare alla nuova sessione, oppure 'rimani' per restare su quella precedente.",
+                session_id=session_id,
+                memory_used={},
+                tools_used=[],
+                notifications_count=0,
+                high_urgency_notifications=[],
+                agent_activity=[],
+            )
+        else:
+            # User confirmed, use new session
+            session_id = new_session.id
+            session = new_session
+    else:
+        # Verify session exists and belongs to user
+        result = await db.execute(
+            select(SessionModel).where(
+                SessionModel.id == session_id,
+                SessionModel.tenant_id == tenant_id,
+                SessionModel.user_id == current_user.id
+            )
+        )
+        session = result.scalar_one_or_none()
+        
+        if not session:
+            # Session not found - try to get or create today's session
+            logger.info(f"Session {session_id} not found, using today's daily session")
+            session, _ = await daily_session_manager.get_or_create_today_session(
+                user_id=current_user.id,
+                tenant_id=tenant_id,
+            )
+            session_id = session.id
     
     # NOTE: Integrity contradiction check is now handled automatically by ConversationLearner
     # when new knowledge is indexed to long-term memory. We don't need to call it here for every message.
