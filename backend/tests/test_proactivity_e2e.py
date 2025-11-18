@@ -86,9 +86,9 @@ async def test_user(test_db, test_tenant):
     user = User(
         id=uuid4(),
         email="test@example.com",
-        username="testuser",
+        name="Test User",
         tenant_id=test_tenant.id,
-        is_active=True,
+        active=True,
     )
     test_db.add(user)
     await test_db.commit()
