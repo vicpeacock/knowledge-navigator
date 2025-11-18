@@ -314,6 +314,7 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
         }
         
         // For "completed" status, only show it if it's within the completed window
+        // After COMPLETED_WINDOW_MS, transition to idle
         if (fallback.status === 'completed') {
           if (fallbackAge > COMPLETED_WINDOW_MS) {
             return {
@@ -322,6 +323,8 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
               status: 'idle',
             }
           }
+          // Still within window, show as completed
+          return fallback
         }
         // For other statuses (waiting, error), only show if recent
         // If the event is too old, show as idle
