@@ -150,7 +150,7 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                       e.stopPropagation()
                       if (confirm(`Vuoi eliminare tutte le ${pendingCount} notifiche pendenti?`)) {
                         try {
-                          console.log('[NotificationBell] Cleaning contradiction notifications...')
+                          console.log('[NotificationBell] Cleaning all pending notifications...')
                           console.log('[NotificationBell] API URL:', `${API_URL}/api/sessions/notifications/contradictions`)
                           const response = await axios.delete(`${API_URL}/api/sessions/notifications/contradictions`, {
                             timeout: 5000
