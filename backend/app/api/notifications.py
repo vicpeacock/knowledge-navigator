@@ -19,6 +19,8 @@ async def get_notifications(
     session_id: Optional[UUID] = Query(None, description="Filter by session ID"),
     urgency: Optional[str] = Query(None, description="Filter by urgency (high, medium, low)"),
     read: bool = Query(False, description="Include read notifications"),
+    limit: Optional[int] = Query(None, ge=1, le=1000, description="Limit number of results"),
+    offset: Optional[int] = Query(None, ge=0, description="Offset for pagination"),
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
 ):
@@ -29,6 +31,8 @@ async def get_notifications(
         urgency=urgency,
         read=read,
         tenant_id=tenant_id,
+        limit=limit,
+        offset=offset,
     )
     return notifications
 
