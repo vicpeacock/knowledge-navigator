@@ -1105,16 +1105,28 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             if parsed_tc:
                 tool_calls = parsed_tc
             else:
-                message = response_data.get("raw_result", {}).get("message")
-                if isinstance(message, dict) and "tool_calls" in message:
+                # Check for tool_calls directly in response_data (OpenAI-style format)
+                if "tool_calls" in response_data:
                     tool_calls = [
                         {
                             "name": tc.get("function", {}).get("name"),
                             "parameters": tc.get("function", {}).get("arguments", {}),
                         }
-                        for tc in message["tool_calls"]
-                        if isinstance(tc, dict)
+                        for tc in response_data["tool_calls"]
+                        if isinstance(tc, dict) and "function" in tc
                     ]
+                else:
+                    # Fallback: check in raw_result.message (Ollama format)
+                    message = response_data.get("raw_result", {}).get("message")
+                    if isinstance(message, dict) and "tool_calls" in message:
+                        tool_calls = [
+                            {
+                                "name": tc.get("function", {}).get("name"),
+                                "parameters": tc.get("function", {}).get("arguments", {}),
+                            }
+                            for tc in message["tool_calls"]
+                            if isinstance(tc, dict)
+                        ]
         else:
             response_text = response_data or ""
         
