@@ -132,6 +132,8 @@ class NotificationService:
         urgency: Optional[str] = None,
         read: bool = False,
         tenant_id: Optional[UUID] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get pending notifications.
@@ -141,6 +143,8 @@ class NotificationService:
             urgency: Optional urgency level to filter by
             read: Whether to include read notifications (default: False, only unread)
             tenant_id: Optional tenant ID to filter by (required for multi-tenant)
+            limit: Optional limit for pagination
+            offset: Optional offset for pagination
             
         Returns:
             List of notification dicts
@@ -156,7 +160,14 @@ class NotificationService:
         if urgency:
             query = query.where(NotificationModel.urgency == urgency)
         
+        # Use composite index: order by created_at DESC (matches index)
         query = query.order_by(NotificationModel.created_at.desc())
+        
+        # Add pagination if provided
+        if limit is not None:
+            query = query.limit(limit)
+        if offset is not None:
+            query = query.offset(offset)
         
         result = await self.db.execute(query)
         notifications = result.scalars().all()
