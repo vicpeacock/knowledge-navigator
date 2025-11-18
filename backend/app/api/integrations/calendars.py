@@ -124,7 +124,7 @@ async def oauth_callback(
     from app.core.config import settings
     
     try:
-        flow = calendar_service.create_google_oauth_flow(state=state)
+        flow = calendar_service.create_google_oauth_flow()
         try:
             flow.fetch_token(code=code)
         except (Warning, ValueError) as exc:
