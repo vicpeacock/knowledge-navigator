@@ -1279,7 +1279,7 @@ Riassunto:"""
                 message_id = result.get("message_id")
                 if session_id and thread_id:
                     try:
-                        from app.models.database import Session as SessionModel
+                        # SessionModel is already imported globally, no need to import again
                         session_result = await db.execute(
                             select(SessionModel).where(SessionModel.id == session_id)
                         )
@@ -1403,7 +1403,7 @@ Riassunto:"""
                 message_id = result.get("message_id")
                 if session_id and thread_id:
                     try:
-                        from app.models.database import Session as SessionModel
+                        # SessionModel is already imported globally, no need to import again
                         session_result = await db.execute(
                             select(SessionModel).where(SessionModel.id == session_id)
                         )
@@ -1639,8 +1639,7 @@ Riassunto:"""
                     try:
                         from app.services.web_indexer import WebIndexer
                         from app.core.dependencies import get_memory_manager, init_clients
-                        from app.models.database import Session as SessionModel
-                        from sqlalchemy import select
+                        # SessionModel is already imported globally, no need to import again
                         
                         # Get tenant_id from session
                         session_result = await db.execute(
@@ -1764,8 +1763,7 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
                         from app.core.dependencies import get_memory_manager, init_clients
                         
                         # Get tenant_id from session
-                        from app.models.database import Session as SessionModel
-                        from sqlalchemy import select
+                        # SessionModel is already imported globally, no need to import again
                         session_result = await db.execute(
                             select(SessionModel.tenant_id).where(SessionModel.id == session_id)
                         )
