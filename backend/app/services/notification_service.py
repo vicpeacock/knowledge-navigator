@@ -280,11 +280,15 @@ class NotificationService:
             return False
         
         # Delete the notification
-        await self.db.delete(notification)
-        await self.db.commit()
-        
-        logger.info(f"✅ Successfully deleted notification {notification_id} (tenant: {tenant_id})")
-        return True
+        try:
+            await self.db.delete(notification)
+            await self.db.commit()
+            logger.info(f"✅ Successfully deleted notification {notification_id} (tenant: {tenant_id})")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error deleting notification {notification_id}: {e}", exc_info=True)
+            await self.db.rollback()
+            raise
     
     async def get_notification_count(
         self,
