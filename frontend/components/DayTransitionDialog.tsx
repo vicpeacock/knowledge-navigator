@@ -24,12 +24,15 @@ export default function DayTransitionDialog({
   const handleProceed = async () => {
     setIsProcessing(true)
     try {
-      // Navigate to new session
-      router.push(`/sessions/${newSessionId}`)
+      // Call onConfirm which will handle resending the message with proceed_with_new_day flag
+      // The parent component will handle navigation after the message is sent
       onConfirm()
+      // Small delay to allow message to be sent, then navigate
+      setTimeout(() => {
+        router.push(`/sessions/${newSessionId}`)
+      }, 500)
     } catch (error) {
       console.error('Error transitioning to new session:', error)
-    } finally {
       setIsProcessing(false)
     }
   }
