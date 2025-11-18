@@ -1118,6 +1118,8 @@ Riassunto:"""
         session_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """Execute archive_email tool"""
+        import logging
+        logger = logging.getLogger(__name__)
         from app.models.database import Integration
         from app.api.integrations.emails import _decrypt_credentials
         from sqlalchemy import select, or_
@@ -1188,6 +1190,8 @@ Riassunto:"""
         session_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """Execute send_email tool"""
+        import logging
+        logger = logging.getLogger(__name__)
         from app.models.database import Integration
         from app.api.integrations.emails import _decrypt_credentials
         from sqlalchemy import select, or_
@@ -1270,6 +1274,8 @@ Riassunto:"""
         session_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """Execute reply_to_email tool"""
+        import logging
+        logger = logging.getLogger(__name__)
         from app.models.database import Integration
         from app.api.integrations.emails import _decrypt_credentials
         from sqlalchemy import select, or_
