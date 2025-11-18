@@ -171,12 +171,14 @@ class EmailPoller:
         # Questo evita di ricreare notifiche anche se eliminate
         new_messages = []
         
-        # Get all existing email notifications for this tenant
+        # Get all existing email notifications for this tenant AND this integration
+        # IMPORTANTE: Ogni integrazione deve controllare solo le proprie notifiche per la deduplicazione
         from app.models.database import Notification as NotificationModel, Session as SessionModel
         existing_notifications_result = await self.db.execute(
             select(NotificationModel).where(
                 NotificationModel.tenant_id == integration.tenant_id,
-                NotificationModel.type == "email_received"
+                NotificationModel.type == "email_received",
+                NotificationModel.content["integration_id"].astext == str(integration.id)  # Filtra per integration_id
             )
         )
         existing_notifications = existing_notifications_result.scalars().all()
@@ -194,40 +196,40 @@ class EmailPoller:
             if email_id:
                 existing_email_ids.add(str(email_id))
         
-               # Also check sessions created from emails by THIS integration's user (even if notification was deleted)
-               # IMPORTANTE: Controlla solo le sessioni create dall'utente di questa integrazione
-               try:
-                   if integration.user_id:
-                       existing_sessions_result = await self.db.execute(
-                           select(SessionModel).where(
-                               SessionModel.tenant_id == integration.tenant_id,
-                               SessionModel.user_id == integration.user_id,  # Filtra per user_id dell'integrazione
-                               SessionModel.session_metadata["source"].astext == "email_analysis"
-                           )
-                       )
-                       existing_sessions = existing_sessions_result.scalars().all()
-                       logger.debug(f"Found {len(existing_sessions)} sessions created from emails by user {integration.user_id}")
-                       for session in existing_sessions:
-                           # Extract email_id from session metadata
-                           metadata = session.session_metadata
-                           if isinstance(metadata, dict):
-                               email_id = metadata.get("email_id")
-                           else:
-                               # JSONB field might need different access
-                               try:
-                                   email_id = metadata.get("email_id") if hasattr(metadata, 'get') else None
-                               except:
-                                   email_id = None
-                           if email_id:
-                               existing_email_ids.add(str(email_id))
-                               logger.debug(f"  - Session {session.id} has email_id: {email_id}")
-                   else:
-                       logger.debug("Integration has no user_id, skipping session deduplication check")
-                       existing_sessions = []
-               except Exception as e:
-                   logger.warning(f"⚠️  Error checking sessions for email deduplication: {e}")
-                   # Continue without session check - notifications check should be enough
-                   existing_sessions = []
+        # Also check sessions created from emails by THIS integration's user (even if notification was deleted)
+        # IMPORTANTE: Controlla solo le sessioni create dall'utente di questa integrazione
+        try:
+            if integration.user_id:
+                existing_sessions_result = await self.db.execute(
+                    select(SessionModel).where(
+                        SessionModel.tenant_id == integration.tenant_id,
+                        SessionModel.user_id == integration.user_id,  # Filtra per user_id dell'integrazione
+                        SessionModel.session_metadata["source"].astext == "email_analysis"
+                    )
+                )
+                existing_sessions = existing_sessions_result.scalars().all()
+                logger.debug(f"Found {len(existing_sessions)} sessions created from emails by user {integration.user_id}")
+                for session in existing_sessions:
+                    # Extract email_id from session metadata
+                    metadata = session.session_metadata
+                    if isinstance(metadata, dict):
+                        email_id = metadata.get("email_id")
+                    else:
+                        # JSONB field might need different access
+                        try:
+                            email_id = metadata.get("email_id") if hasattr(metadata, 'get') else None
+                        except:
+                            email_id = None
+                    if email_id:
+                        existing_email_ids.add(str(email_id))
+                        logger.debug(f"  - Session {session.id} has email_id: {email_id}")
+            else:
+                logger.debug("Integration has no user_id, skipping session deduplication check")
+                existing_sessions = []
+        except Exception as e:
+            logger.warning(f"⚠️  Error checking sessions for email deduplication: {e}")
+            # Continue without session check - notifications check should be enough
+            existing_sessions = []
         
         logger.info(f"📊 Deduplication: Found {len(existing_email_ids)} already processed emails (notifications: {len([n for n in existing_notifications])}, sessions: {len(existing_sessions) if 'existing_sessions' in locals() else 0})")
         
