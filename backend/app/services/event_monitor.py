@@ -36,7 +36,18 @@ class EventMonitor:
         logger.info("🚀 Starting EventMonitor service")
         
         # Avvia loop in background
-        asyncio.create_task(self._monitor_loop())
+        task = asyncio.create_task(self._monitor_loop())
+        logger.info(f"✅ EventMonitor loop task created: {task}")
+        
+        # Log dopo un breve delay per verificare che il task sia in esecuzione
+        async def check_task():
+            await asyncio.sleep(2)
+            if task.done():
+                logger.error(f"❌ EventMonitor loop task completed unexpectedly: {task.exception()}")
+            else:
+                logger.info(f"✅ EventMonitor loop task is running")
+        
+        asyncio.create_task(check_task())
     
     async def stop(self):
         """Stop the event monitor"""
@@ -45,18 +56,26 @@ class EventMonitor:
     
     async def _monitor_loop(self):
         """Main monitoring loop"""
+        logger.info(f"🔄 EventMonitor loop started (poll_interval={self._poll_interval_seconds}s)")
+        iteration = 0
         while self._running:
+            iteration += 1
             try:
+                logger.info(f"🔄 EventMonitor loop iteration {iteration} - checking events...")
                 await self._check_all_events()
+                logger.info(f"✅ EventMonitor loop iteration {iteration} completed")
             except Exception as e:
-                logger.error(f"Error in EventMonitor loop: {e}", exc_info=True)
+                logger.error(f"❌ Error in EventMonitor loop iteration {iteration}: {e}", exc_info=True)
             
             # Attendi prima del prossimo check
+            logger.debug(f"⏳ EventMonitor waiting {self._poll_interval_seconds}s before next check...")
             await asyncio.sleep(self._poll_interval_seconds)
+        
+        logger.info("🛑 EventMonitor loop stopped")
     
     async def _check_all_events(self):
         """Check all event sources"""
-        logger.debug("Checking all event sources...")
+        logger.info("🔍 Checking all event sources...")
         
         # Pubblica evento telemetria "started"
         self._publish_activity("started", "Checking for new events")
