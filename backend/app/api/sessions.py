@@ -250,39 +250,33 @@ async def get_session(
                 
                 if notification_integration_id:
                     # Check if this integration belongs to current user
+                    # First get the integration to see its user_id
                     integration_result = await db.execute(
                         select(Integration).where(
                             Integration.id == UUID(notification_integration_id),
                             Integration.tenant_id == tenant_id,
-                            Integration.user_id == current_user.id,
                         )
                     )
-                    user_integration = integration_result.scalar_one_or_none()
+                    integration = integration_result.scalar_one_or_none()
                     
-                    if user_integration:
-                        # Integration belongs to current user - allow access
-                        logger.info(f"Allowing access to session {session_id}: email came from integration {notification_integration_id} owned by current user")
-                        session = session_any_user
-                    else:
-                        # Check if current user has any email integrations (fallback)
-                        all_user_integrations = await db.execute(
-                            select(Integration).where(
-                                Integration.tenant_id == tenant_id,
-                                Integration.provider == "google",
-                                Integration.service_type == "email",
-                                Integration.user_id == current_user.id,
-                                Integration.enabled == True,
-                            )
-                        )
-                        if all_user_integrations.scalars().all():
-                            logger.info(f"Allowing access to session {session_id}: current user has email integrations")
+                    if integration:
+                        logger.info(f"Found integration {notification_integration_id}: user_id={integration.user_id}, current_user.id={current_user.id}")
+                        
+                        if integration.user_id == current_user.id:
+                            # Integration belongs to current user - allow access
+                            logger.info(f"✅ Allowing access to session {session_id}: email came from integration {notification_integration_id} owned by current user")
                             session = session_any_user
                         else:
-                            logger.warning(f"Session {session_id} created from email {email_id} but integration {notification_integration_id} doesn't belong to current user {current_user.id}")
+                            # Integration belongs to different user - this is a multi-tenant issue
+                            logger.error(f"❌ MULTI-TENANT ISSUE: Session {session_id} created from email {email_id} via integration {notification_integration_id} which belongs to user {integration.user_id}, but current user is {current_user.id}")
+                            logger.error(f"   This indicates the integration was created for a different user than the one accessing it")
                             raise HTTPException(
                                 status_code=403, 
-                                detail=f"Session exists but was created from an integration that doesn't belong to you"
+                                detail=f"Session was created from an integration that belongs to a different user (integration user_id: {integration.user_id}, your user_id: {current_user.id}). Please ensure your email integration is correctly associated with your account."
                             )
+                    else:
+                        logger.warning(f"Integration {notification_integration_id} not found")
+                        raise HTTPException(status_code=403, detail="Session exists but integration not found")
                 else:
                     # No integration_id in notification - check if user has any email integrations
                     user_integrations_result = await db.execute(
