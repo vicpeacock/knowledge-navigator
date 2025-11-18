@@ -957,6 +957,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
 
         # Esegui piano se presente
         if plan:
+            logger.error(f"🔍🔍🔍 Executing plan with {len(plan)} steps, acknowledgement={acknowledgement}, plan_index={state.get('plan_index', 0)}")
             execution = await execute_plan_steps(state, plan, state.get("plan_index", 0))
             state["plan"] = execution["plan"]
             state["plan_index"] = execution["next_index"]
@@ -971,6 +972,8 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 step.get("status") not in {"complete", "waiting"}
                 for step in execution["plan"]
             )
+            
+            logger.error(f"🔍🔍🔍 Plan execution: waiting={waiting}, remaining_steps={remaining_steps}, tool_results={len(execution['tool_results'])}, execution_summaries={len(execution.get('execution_summaries', []))}")
 
             if waiting:
                 waiting_step = execution["plan"][max(0, min(state["plan_index"], len(execution["plan"]) - 1))]
@@ -1006,15 +1009,34 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 return state
 
             # Piano eseguito (o nessun ulteriore step)
-            final_text = await summarize_plan_results(
-                state["ollama"],
-                request,
-                state.get("session_context", []),
-                state.get("retrieved_memory", []),
-                execution["plan"],
-                execution["execution_summaries"],
-            )
+            # IMPORTANTE: Anche se non ci sono tool_results, generiamo comunque una risposta
+            # se il piano è completato (specialmente dopo un acknowledgement)
+            execution_summaries = execution.get("execution_summaries", [])
+            if not execution_summaries and not execution["tool_results"]:
+                # Piano completato senza tool_results (tutti gli step erano già completati)
+                # Genera una risposta basata sul piano stesso
+                logger.error(f"🔍🔍🔍 Plan completed without tool_results, generating response from plan steps")
+                completed_steps = [s for s in execution["plan"] if s.get("status") == "complete"]
+                if completed_steps:
+                    # Usa la descrizione dell'ultimo step completato o genera una risposta generica
+                    last_step = completed_steps[-1]
+                    if last_step.get("action") == "respond":
+                        final_text = last_step.get("description", "Ho completato le azioni richieste.")
+                    else:
+                        final_text = f"Ho completato: {last_step.get('description', 'le azioni richieste')}."
+                else:
+                    final_text = "Ho completato le azioni richieste."
+            else:
+                final_text = await summarize_plan_results(
+                    state["ollama"],
+                    request,
+                    state.get("session_context", []),
+                    state.get("retrieved_memory", []),
+                    execution["plan"],
+                    execution_summaries,
+                )
 
+            logger.error(f"🔍🔍🔍 Final response generated: {len(final_text) if final_text else 0} characters")
             state["response"] = final_text
             log_planning_status(
                 state,
