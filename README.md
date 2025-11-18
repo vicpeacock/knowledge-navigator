@@ -2,7 +2,7 @@
 
 Personal AI Assistant - Sistema multi-agente per gestione conoscenza e automazione.
 
-## Quick Start
+## 🚀 Quick Start
 
 ```bash
 # Avvia tutti i servizi
@@ -15,7 +15,7 @@ Personal AI Assistant - Sistema multi-agente per gestione conoscenza e automazio
 ./scripts/restart_backend.sh
 ```
 
-## Struttura Progetto
+## 📁 Struttura Progetto
 
 - **`backend/`** - Backend FastAPI con agenti LangGraph
 - **`frontend/`** - Frontend Next.js/React
@@ -23,7 +23,45 @@ Personal AI Assistant - Sistema multi-agente per gestione conoscenza e automazio
 - **`docs/`** - Documentazione del progetto
 - **`tools/`** - Strumenti di sviluppo e infrastruttura
 
-## Documentazione
+## ✨ Funzionalità Principali
+
+### 🤖 Sistema Multi-Agente
+- Architettura LangGraph per orchestrazione agenti
+- Tool calling dinamico (LLM decide quando usare tool)
+- Memoria multi-livello (short/medium/long-term)
+- RAG con ChromaDB per ricerca semantica
+
+### 📅 Sessioni Giornaliere
+- Una sessione per giorno per utente
+- Archiviazione automatica con riassunto
+- Transizione di giorno con dialog di conferma
+- Supporto timezone personalizzato
+
+### 📧 Integrazioni
+- **Gmail**: Lettura email, invio, archiviazione, risposte automatiche
+- **Google Calendar**: Lettura eventi, query in linguaggio naturale
+- **Navigazione Web**: Browser Playwright, ricerca web Ollama
+
+### 🔔 Sistema Notifiche Avanzato
+- Notifiche real-time con Server-Sent Events (SSE)
+- Pagina dedicata `/notifications` con filtri e paginazione
+- Raggruppamento per tipo
+- Cancellazione batch
+- Ottimizzazioni database per performance
+
+### 💾 Gestione Memoria
+- Memoria a lungo termine con gestione dedicata
+- Cancellazione batch con checkboxes
+- Ricerca semantica avanzata
+- Consolidamento automatico duplicati
+
+### 👥 Multi-Tenancy & Multi-User
+- Isolamento dati completo per tenant
+- Isolamento dati per utente
+- Autenticazione JWT con refresh tokens
+- Ruoli utente (admin, user, viewer)
+
+## 📚 Documentazione
 
 Tutta la documentazione è in `docs/`:
 - **`docs/ROADMAP.md`** - Roadmap generale del progetto
@@ -33,16 +71,44 @@ Tutta la documentazione è in `docs/`:
 - **`docs/PROACTIVITY_ARCHITECTURE.md`** - Architettura sistema proattività
 - E altri...
 
-## Script Disponibili
+## 🛠️ Script Disponibili
 
 Tutti gli script sono in `scripts/`:
 - `start.sh` - Avvia tutti i servizi
 - `stop.sh` - Ferma tutti i servizi
 - `restart_backend.sh` - Riavvia solo il backend
+- `cleanup_sessions_and_memory.py` - Pulisce sessioni e memoria
+- `create_today_session.py` - Crea sessione giornaliera
 - Altri script di utilità...
 
 Vedi `docs/SCRIPTS.md` per la documentazione completa.
 
-## Script di Servizio
+## 🧪 Testing
 
-Tutti gli script di servizio sono nella directory `scripts/`. Usa `./scripts/start.sh` e `./scripts/stop.sh` per avviare e fermare i servizi.
+```bash
+# Backend tests
+cd backend && source venv/bin/activate && python -m pytest
+
+# Frontend tests
+cd frontend && npm test
+```
+
+## 📊 Statistiche
+
+- **Test Coverage**: 31/31 test passati (100%)
+- **Fase 1 Completamento**: ~95%
+- **Fase 2 Completamento**: ~90%
+- **Code Quality**: Nessun warning, Pydantic V2 compatibile
+
+## 🔧 Tecnologie
+
+- **Backend**: FastAPI, LangGraph, SQLAlchemy, ChromaDB, Ollama
+- **Frontend**: Next.js 14, React, TypeScript, TailwindCSS
+- **Database**: PostgreSQL, ChromaDB
+- **Observability**: OpenTelemetry, Prometheus
+
+## 📝 Note
+
+Per maggiori dettagli sulle funzionalità recenti, consulta:
+- `docs/DAILY_SESSIONS_AND_NOTIFICATIONS.md` - Sessioni giornaliere e notifiche
+- `docs/ROADMAP.md` - Roadmap completa del progetto
