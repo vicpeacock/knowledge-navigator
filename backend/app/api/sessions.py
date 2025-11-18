@@ -992,12 +992,34 @@ async def chat(
     
     # If day transition occurred, check if user wants to continue with new day
     if day_transition and new_session:
-        # Check if request contains a flag to proceed with new day
-        # If not, return a response asking for confirmation
-        proceed_with_new_day = request.model_dump().get("proceed_with_new_day", False)
+        # Check if request message indicates user wants to proceed with new day
+        # or if explicit flag is set
+        message_lower = request.message.lower().strip()
+        proceed_keywords = ["nuovo giorno", "continua", "procedi", "sì", "si", "yes", "ok", "va bene"]
+        stay_keywords = ["rimani", "resta", "no", "non", "stay"]
         
-        if not proceed_with_new_day:
+        proceed_with_new_day = (
+            request.proceed_with_new_day or
+            any(keyword in message_lower for keyword in proceed_keywords)
+        )
+        stay_with_old = any(keyword in message_lower for keyword in stay_keywords)
+        
+        if stay_with_old:
+            # User wants to stay with old session - continue with current session_id
+            logger.info(f"User chose to stay with old session {session_id}")
+            result = await db.execute(
+                select(SessionModel).where(
+                    SessionModel.id == session_id,
+                    SessionModel.tenant_id == tenant_id,
+                    SessionModel.user_id == current_user.id
+                )
+            )
+            session = result.scalar_one_or_none()
+            if not session:
+                raise HTTPException(status_code=404, detail="Previous session not found")
+        elif not proceed_with_new_day:
             # Return a response asking user to confirm day transition
+            logger.info(f"Day transition detected, asking user for confirmation")
             return ChatResponse(
                 response="È iniziato un nuovo giorno! Vuoi continuare con la sessione di oggi o rimanere su quella di ieri?\n\nRispondi 'nuovo giorno' o 'continua' per passare alla nuova sessione, oppure 'rimani' per restare su quella precedente.",
                 session_id=session_id,
@@ -1009,6 +1031,7 @@ async def chat(
             )
         else:
             # User confirmed, use new session
+            logger.info(f"User confirmed day transition, switching to new session {new_session.id}")
             session_id = new_session.id
             session = new_session
     else:
