@@ -787,10 +787,11 @@ async def get_pending_notifications(
     service = NotificationService(db)
     notifications = await service.get_pending_notifications(read=False, tenant_id=tenant_id)
     
-    logger.info(f"Found {len(notifications)} total pending notifications for tenant")
+    logger.info(f"Found {len(notifications)} total pending notifications for tenant {tenant_id}")
     
     # Filter by type that requires user input AND by user_id (multi-tenant multi-user)
     global_notifications = []
+    skipped_count = 0
     for n in notifications:
         notif_type = n.get("type")
         content = n.get("content", {})
@@ -804,7 +805,8 @@ async def get_pending_notifications(
             if notification_user_id:
                 # Only show if notification belongs to current user
                 if str(notification_user_id) != str(current_user.id):
-                    logger.debug(f"Skipping notification {n.get('id')}: belongs to user {notification_user_id}, current user is {current_user.id}")
+                    logger.info(f"⏭️  Skipping notification {n.get('id')}: belongs to user {notification_user_id}, current user is {current_user.id}")
+                    skipped_count += 1
                     continue
             elif integration_id:
                 # Fallback: if notification doesn't have user_id (old notifications),
@@ -821,20 +823,25 @@ async def get_pending_notifications(
                     
                     if integration:
                         if integration.user_id != current_user.id:
-                            logger.debug(f"Skipping notification {n.get('id')}: integration {integration_id} belongs to user {integration.user_id}, current user is {current_user.id}")
+                            logger.info(f"⏭️  Skipping notification {n.get('id')}: integration {integration_id} belongs to user {integration.user_id}, current user is {current_user.id}")
+                            skipped_count += 1
                             continue
                         # Integration belongs to current user - allow notification
+                        logger.debug(f"✅ Allowing notification {n.get('id')}: integration {integration_id} belongs to current user")
                     else:
                         # Integration not found - skip notification
-                        logger.debug(f"Skipping notification {n.get('id')}: integration {integration_id} not found")
+                        logger.info(f"⏭️  Skipping notification {n.get('id')}: integration {integration_id} not found")
+                        skipped_count += 1
                         continue
                 except Exception as e:
                     logger.warning(f"Error checking integration for notification {n.get('id')}: {e}")
                     # On error, skip notification to be safe
+                    skipped_count += 1
                     continue
             else:
                 # No user_id and no integration_id - skip notification (can't verify ownership)
-                logger.debug(f"Skipping notification {n.get('id')}: no user_id or integration_id")
+                logger.info(f"⏭️  Skipping notification {n.get('id')}: no user_id or integration_id")
+                skipped_count += 1
                 continue
         
         # Return global notifications:
@@ -844,7 +851,7 @@ async def get_pending_notifications(
         if notif_type in ["contradiction", "email_received", "calendar_event_starting"]:
             global_notifications.append(n)
     
-    logger.info(f"Found {len(global_notifications)} global notifications requiring user input (filtered for user {current_user.id})")
+    logger.info(f"Found {len(global_notifications)} global notifications requiring user input (filtered for user {current_user.id}, skipped {skipped_count} notifications)")
     
     # Format for frontend
     result = []
