@@ -2153,24 +2153,29 @@ async def create_session_from_notification(
     if not email_id:
         raise HTTPException(status_code=400, detail="Notification does not contain email_id")
     
-    # Check if session already exists for this email (only active sessions)
-    # IMPORTANT: Only return active sessions, not deleted or archived ones
+    # Check if session already exists for this email (including deleted/archived sessions)
+    # IMPORTANT: For deduplication, we check ALL sessions (including deleted/archived)
+    # But we only return active sessions to the user
     existing_session_result = await db.execute(
         select(SessionModel).where(
             SessionModel.tenant_id == tenant_id,
             SessionModel.user_id == current_user.id,
             SessionModel.session_metadata["email_id"].astext == str(email_id),
-            SessionModel.status == "active",  # Only active sessions
+            # NON filtrare per status - include anche "deleted" e "archived" per deduplicazione
         )
     )
     existing_session = existing_session_result.scalar_one_or_none()
     
-    # If session exists but is not active, we'll create a new one
-    if existing_session and existing_session.status != "active":
-        logger.info(f"Found session {existing_session.id} for email {email_id} but status is {existing_session.status}, creating new one")
-        existing_session = None
-    
     if existing_session:
+        # If session exists but is deleted/archived, restore it instead of creating a new one
+        if existing_session.status != "active":
+            logger.info(f"Found session {existing_session.id} for email {email_id} with status {existing_session.status}, restoring it")
+            existing_session.status = "active"
+            existing_session.archived_at = None
+            await db.commit()
+            await db.refresh(existing_session)
+        
+        logger.info(f"Session {existing_session.id} already exists for email {email_id}, returning it")
         logger.info(f"Session {existing_session.id} already exists for email {email_id}, returning it")
         return Session(
             id=existing_session.id,
