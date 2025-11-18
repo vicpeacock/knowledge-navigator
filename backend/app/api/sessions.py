@@ -591,6 +591,7 @@ async def get_session_messages(
 @router.delete("/notifications/contradictions", status_code=200)
 async def clean_contradiction_notifications(
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Delete all contradiction notifications from the database"""
     logger = logging.getLogger(__name__)
@@ -598,12 +599,15 @@ async def clean_contradiction_notifications(
     
     from app.models.database import Notification as NotificationModel
     
-    # Count before deletion
+    # Count before deletion (filtered by tenant)
     result = await db.execute(
-        select(NotificationModel).where(NotificationModel.type == "contradiction")
+        select(NotificationModel).where(
+            NotificationModel.type == "contradiction",
+            NotificationModel.tenant_id == tenant_id
+        )
     )
     count_before = len(result.scalars().all())
-    logger.info(f"📊 Found {count_before} contradiction notifications to delete")
+    logger.info(f"📊 Found {count_before} contradiction notifications to delete for tenant {tenant_id}")
     
     if count_before == 0:
         logger.info("ℹ️  No contradiction notifications to delete")

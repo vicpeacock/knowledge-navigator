@@ -19,6 +19,43 @@ class NotificationService:
     def __init__(self, db: AsyncSession):
         self.db = db
     
+    async def notification_exists(
+        self,
+        type: str,
+        content_key: str,
+        content_value: str,
+        tenant_id: Optional[UUID] = None,
+        read: Optional[bool] = None,
+    ) -> bool:
+        """
+        Check if a notification already exists based on type and content key-value.
+        Useful for preventing duplicate notifications (e.g., same email_id or event_id).
+        
+        Args:
+            type: Type of notification
+            content_key: Key in content dict to check (e.g., "email_id", "event_id")
+            content_value: Value to match
+            tenant_id: Optional tenant ID to filter by
+            read: Optional read status to filter by (None = any status)
+            
+        Returns:
+            True if notification exists, False otherwise
+        """
+        query = select(NotificationModel).where(
+            NotificationModel.type == type,
+            NotificationModel.content[content_key].astext == str(content_value)
+        )
+        
+        if tenant_id:
+            query = query.where(NotificationModel.tenant_id == tenant_id)
+        
+        if read is not None:
+            query = query.where(NotificationModel.read == read)
+        
+        result = await self.db.execute(query)
+        existing = result.scalar_one_or_none()
+        return existing is not None
+    
     async def create_notification(
         self,
         type: str,  # "contradiction", "event", "todo", ecc.
@@ -26,7 +63,8 @@ class NotificationService:
         content: Dict[str, Any],
         session_id: Optional[UUID] = None,
         tenant_id: Optional[UUID] = None,
-    ) -> NotificationModel:
+        check_duplicate: Optional[Dict[str, str]] = None,
+    ) -> Optional[NotificationModel]:
         """
         Create a notification and save it to the database.
         
@@ -35,10 +73,31 @@ class NotificationService:
             urgency: Urgency level (high, medium, low)
             content: Notification content (dict)
             session_id: Optional session ID if notification is related to a session
+            tenant_id: Optional tenant ID
+            check_duplicate: Optional dict with {"key": "content_key", "value": "content_value"}
+                           to check if notification already exists before creating
             
         Returns:
-            Created notification model
+            Created notification model, or None if duplicate check failed
         """
+        # Check for duplicates if requested
+        if check_duplicate:
+            key = check_duplicate.get("key")
+            value = check_duplicate.get("value")
+            if key and value:
+                exists = await self.notification_exists(
+                    type=type,
+                    content_key=key,
+                    content_value=value,
+                    tenant_id=tenant_id,
+                    read=False,  # Only check unread notifications
+                )
+                if exists:
+                    logger.debug(
+                        f"Skipping duplicate notification: type={type}, {key}={value}"
+                    )
+                    return None
+        
         notification = NotificationModel(
             type=type,
             urgency=urgency,

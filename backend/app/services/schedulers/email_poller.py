@@ -154,12 +154,13 @@ class EmailPoller:
                 # Determina priorità basata su mittente e contenuto
                 priority = self._determine_email_priority(msg)
                 
-                # Crea notifica
+                # Crea notifica (controlla duplicati basati su email_id)
+                email_id = msg.get("id")
                 notification = await self.notification_service.create_notification(
                     type="email_received",
                     urgency=priority,
                     content={
-                        "email_id": msg.get("id"),
+                        "email_id": email_id,
                         "from": msg.get("from"),
                         "subject": msg.get("subject"),
                         "snippet": msg.get("snippet", "")[:200],  # Primi 200 caratteri
@@ -168,7 +169,13 @@ class EmailPoller:
                     },
                     session_id=None,  # Notifica globale, non legata a sessione
                     tenant_id=integration.tenant_id,
+                    check_duplicate={"key": "email_id", "value": email_id} if email_id else None,
                 )
+                
+                # Skip se notifica duplicata
+                if not notification:
+                    logger.debug(f"Skipping duplicate notification for email {email_id}")
+                    continue
                 
                 # Aggiungi user_id se l'integrazione è per utente specifico
                 if integration.user_id:
