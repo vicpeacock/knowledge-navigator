@@ -209,7 +209,7 @@ class DeleteMemoryBatchRequest(BaseModel):
     memory_ids: List[UUID]
 
 
-@router.delete("/long/batch")
+@router.post("/long/batch/delete")
 async def delete_long_term_memory_batch(
     request: DeleteMemoryBatchRequest,
     db: AsyncSession = Depends(get_db),
