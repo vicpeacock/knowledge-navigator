@@ -132,6 +132,7 @@ class EventMonitor:
     def _publish_activity(self, status: str, message: str, extra: Optional[dict] = None):
         """Publish telemetry event for proactivity system"""
         if not self._agent_activity_stream:
+            logger.debug("⚠️  EventMonitor: No agent_activity_stream available, skipping telemetry")
             return
         
         event = {
@@ -145,10 +146,17 @@ class EventMonitor:
             event.update(extra)
         
         try:
+            # Check active sessions before publishing
+            active_sessions = self._agent_activity_stream.get_active_sessions()
+            logger.info(f"📡 EventMonitor publishing '{status}': {message} to {len(active_sessions)} active session(s): {active_sessions}")
+            
             # Pubblica a tutte le sessioni attive (sistema di proattività è globale)
             self._agent_activity_stream.publish_to_all_active_sessions(event)
+            
+            if not active_sessions:
+                logger.warning("⚠️  EventMonitor: No active sessions, event will not be delivered to frontend")
         except Exception as e:
-            logger.debug(f"Unable to publish event monitor telemetry: {e}", exc_info=True)
+            logger.error(f"❌ Unable to publish event monitor telemetry: {e}", exc_info=True)
     
     async def check_once(self):
         """Run a single check (useful for testing or manual triggers)"""
