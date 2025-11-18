@@ -97,8 +97,11 @@ class EmailActionProcessor:
                 "action_type": action_type,
                 "urgency": urgency,
             }
-            if email_info not in session.session_metadata["processed_emails"]:
+            # Check if email_id already exists (more reliable than checking entire dict)
+            existing_ids = [e.get("email_id") for e in session.session_metadata["processed_emails"]]
+            if email_id not in existing_ids:
                 session.session_metadata["processed_emails"].append(email_info)
+                await self.db.commit()  # Commit metadata update
             
             # Create initial message with email summary and action request
             # IMPORTANT: This message should be from the ASSISTANT, not the user
