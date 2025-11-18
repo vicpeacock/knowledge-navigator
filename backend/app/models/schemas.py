@@ -192,6 +192,8 @@ class ChatResponse(BaseModel):
     notifications_count: int = 0
     high_urgency_notifications: List[Dict[str, Any]] = []
     agent_activity: List[AgentActivityEvent] = []
+    day_transition_pending: bool = False  # True when day transition detected, frontend should show dialog
+    new_session_id: Optional[str] = None  # ID of new day's session when day_transition_pending is True
 
 
 # Memory Info Schema

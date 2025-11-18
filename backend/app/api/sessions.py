@@ -990,48 +990,25 @@ async def chat(
         current_session_id=session_id,
     )
     
-    # If day transition occurred, check if user wants to continue with new day
+    # If day transition occurred, require explicit confirmation via flag
     if day_transition and new_session:
-        # Check if request message indicates user wants to proceed with new day
-        # or if explicit flag is set
-        message_lower = request.message.lower().strip()
-        proceed_keywords = ["nuovo giorno", "continua", "procedi", "sì", "si", "yes", "ok", "va bene"]
-        stay_keywords = ["rimani", "resta", "no", "non", "stay"]
-        
-        proceed_with_new_day = (
-            request.proceed_with_new_day or
-            any(keyword in message_lower for keyword in proceed_keywords)
-        )
-        stay_with_old = any(keyword in message_lower for keyword in stay_keywords)
-        
-        if stay_with_old:
-            # User wants to stay with old session - continue with current session_id
-            logger.info(f"User chose to stay with old session {session_id}")
-            result = await db.execute(
-                select(SessionModel).where(
-                    SessionModel.id == session_id,
-                    SessionModel.tenant_id == tenant_id,
-                    SessionModel.user_id == current_user.id
-                )
-            )
-            session = result.scalar_one_or_none()
-            if not session:
-                raise HTTPException(status_code=404, detail="Previous session not found")
-        elif not proceed_with_new_day:
-            # Return a response asking user to confirm day transition
-            logger.info(f"Day transition detected, asking user for confirmation")
+        if not request.proceed_with_new_day:
+            # Return a response indicating day transition that frontend will handle with a dialog
+            logger.info(f"Day transition detected, returning special response for frontend dialog")
             return ChatResponse(
-                response="È iniziato un nuovo giorno! Vuoi continuare con la sessione di oggi o rimanere su quella di ieri?\n\nRispondi 'nuovo giorno' o 'continua' per passare alla nuova sessione, oppure 'rimani' per restare su quella precedente.",
+                response="",  # Empty response - frontend will show dialog
                 session_id=session_id,
                 memory_used={},
                 tools_used=[],
                 notifications_count=0,
                 high_urgency_notifications=[],
                 agent_activity=[],
+                day_transition_pending=True,  # Signal to frontend
+                new_session_id=str(new_session.id),
             )
         else:
-            # User confirmed, use new session
-            logger.info(f"User confirmed day transition, switching to new session {new_session.id}")
+            # User confirmed via dialog, use new session
+            logger.info(f"User confirmed day transition via dialog, switching to new session {new_session.id}")
             session_id = new_session.id
             session = new_session
     else:

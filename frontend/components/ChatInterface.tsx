@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStatus } from './StatusPanel'
 import { useAgentActivity } from './AgentActivityContext'
+import DayTransitionDialog from './DayTransitionDialog'
 
 interface ChatInterfaceProps {
   sessionId: string
@@ -349,6 +350,18 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         ingestBatch(response.data.agent_activity)
       }
       
+      // Check for day transition
+      if (response.data.day_transition_pending && response.data.new_session_id) {
+        console.log('Day transition detected, showing dialog')
+        setDayTransitionDialog({
+          isOpen: true,
+          newSessionId: response.data.new_session_id,
+          pendingMessage: input,  // Store the message that triggered the transition
+        })
+        setLoading(false)
+        return
+      }
+      
       // If response is empty, it might be a background task - reload messages
       if (!response.data.response || response.data.response.trim() === '') {
         console.log('Empty response received (likely background task), reloading messages')
@@ -502,8 +515,51 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
     }
   }
 
+  const handleDayTransitionConfirm = async () => {
+    // User confirmed day transition - resend the message with proceed_with_new_day flag
+    const messageToResend = dayTransitionDialog.pendingMessage
+    if (messageToResend && messageToResend.trim()) {
+      setInput('')
+      setDayTransitionDialog({ isOpen: false, newSessionId: '' })
+      
+      // Resend with proceed_with_new_day flag
+      setLoading(true)
+      try {
+        const response = await sessionsApi.chat(sessionId, messageToResend, true)
+        // Handle response normally
+        if (response.data?.response) {
+          const assistantMessage: Message = {
+            id: '',
+            session_id: response.data.session_id,
+            role: 'assistant',
+            content: response.data.response,
+            timestamp: new Date().toISOString(),
+            metadata: {},
+          }
+          setMessages((prev) => [...prev, assistantMessage])
+        }
+        if (response.data?.agent_activity) {
+          ingestBatch(response.data.agent_activity)
+        }
+      } catch (error: any) {
+        console.error('Error resending message after day transition:', error)
+        addStatusMessage('error', `Errore: ${error.response?.data?.detail || error.message}`)
+      } finally {
+        setLoading(false)
+      }
+    } else {
+      setDayTransitionDialog({ isOpen: false, newSessionId: '' })
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
+      <DayTransitionDialog
+        isOpen={dayTransitionDialog.isOpen}
+        onClose={() => setDayTransitionDialog({ isOpen: false, newSessionId: '' })}
+        onConfirm={handleDayTransitionConfirm}
+        newSessionId={dayTransitionDialog.newSessionId}
+      />
 
       <div 
         ref={messagesContainerRef}
