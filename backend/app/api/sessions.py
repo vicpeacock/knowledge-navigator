@@ -1159,6 +1159,8 @@ async def chat(
         chat_response = langgraph_result["chat_response"]
         logger.error(f"🔍 Chat response type: {type(chat_response)}")
         logger.error(f"🔍 Chat response content: {chat_response.response[:100] if chat_response and chat_response.response else 'NONE'}")
+        logger.error(f"🔍 Chat response full length: {len(chat_response.response) if chat_response and chat_response.response else 0}")
+        logger.error(f"🔍 Assistant message saved flag: {langgraph_result.get('assistant_message_saved', False)}")
         
         new_plan_metadata = langgraph_result.get("plan_metadata")
 
