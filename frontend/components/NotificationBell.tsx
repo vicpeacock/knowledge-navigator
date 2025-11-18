@@ -282,6 +282,14 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                       }
                       onDelete={handleDelete}
                       onClose={() => setIsOpen(false)}
+                      onNotificationUpdate={(notificationId, updates) => {
+                        // Update notification in local state
+                        setNotifications((prev) =>
+                          prev.map((n) =>
+                            n.id === notificationId ? { ...n, ...updates } : n
+                          )
+                        )
+                      }}
                     />
                   ))}
                 </div>
