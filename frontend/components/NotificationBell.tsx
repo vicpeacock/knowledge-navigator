@@ -446,8 +446,10 @@ function NotificationItem({
   }
 
   // Email or calendar notification with optional session link
-  const hasSession = notification.content.has_session || notification.session_id
-  const sessionId = notification.content.session_id || notification.session_id
+  // Check for auto_session_id first (session created automatically from email analysis)
+  // Then check for session_id in content or at notification level
+  const sessionId = notification.content.auto_session_id || notification.content.session_id || notification.session_id
+  const hasSession = !!sessionId || notification.content.has_session
 
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 relative">
