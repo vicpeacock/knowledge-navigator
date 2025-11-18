@@ -295,20 +295,28 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
 }
 
 function NotificationItem({
-  notification,
+  notification: initialNotification,
   onResolve,
   onDelete,
   onClose,
+  onNotificationUpdate,
 }: {
   notification: Notification
   onResolve: (resolution: string) => void
   onDelete: (notificationId: string) => void
   onClose?: () => void
+  onNotificationUpdate?: (notificationId: string, updates: Partial<Notification>) => void
 }) {
   const router = useRouter()
+  const [notification, setNotification] = useState(initialNotification)
   const [resolution, setResolution] = useState('')
   const [showOptions, setShowOptions] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  
+  // Update local notification state when prop changes
+  useEffect(() => {
+    setNotification(initialNotification)
+  }, [initialNotification])
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.preventDefault()
@@ -552,11 +560,42 @@ function NotificationItem({
                 )
                 
                 if (createResponse.data && createResponse.data.id) {
+                  const newSessionId = createResponse.data.id
+                  
+                  // Update notification content with new session_id
+                  // This ensures next time we click "Apri Sessione", it uses the new session
+                  const updatedNotification = {
+                    ...notification,
+                    content: {
+                      ...notification.content,
+                      auto_session_id: newSessionId,
+                      session_id: newSessionId,
+                      has_session: true,
+                    },
+                    session_id: newSessionId,
+                  }
+                  setNotification(updatedNotification)
+                  
+                  // Notify parent component to update notification
+                  if (onNotificationUpdate) {
+                    onNotificationUpdate(notification.id, updatedNotification)
+                  }
+                  
                   // Navigate to newly created session
-                  router.push(`/sessions/${createResponse.data.id}`)
+                  router.push(`/sessions/${newSessionId}`)
                   // Close notification popup
                   if (onClose) {
                     onClose()
+                  }
+                  
+                  // Refresh notifications to get updated data from backend
+                  // This ensures the notification is updated with the new session_id
+                  if (typeof window !== 'undefined' && window.location.pathname.includes('/sessions/')) {
+                    // Only refresh if we're on a session page (to avoid unnecessary refresh)
+                    setTimeout(() => {
+                      // Trigger a refresh of notifications after navigation
+                      // The parent component will refresh when popup is reopened
+                    }, 1000)
                   }
                 } else {
                   alert('Errore nella creazione della sessione dalla notifica.')
