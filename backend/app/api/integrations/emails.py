@@ -109,7 +109,6 @@ async def oauth_callback(
     email_service: EmailService = Depends(get_email_service),
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
-    current_user: User = Depends(get_current_user),
 ):
     """OAuth2 callback for Gmail"""
     from app.core.config import settings
@@ -168,10 +167,12 @@ async def oauth_callback(
                     logger.info(f"OAuth callback (Email) - Using current_user.id={user_id} as fallback (state decode failed)")
                 except (ValueError, TypeError):
                     integration_id = None
-                    # Use current_user.id as fallback for user_id when state can't be decoded
-                    user_id = current_user.id
-                    logger.info(f"OAuth callback (Email) - Using current_user.id={user_id} as fallback (state is not UUID)")
-                    logger.warning(f"OAuth callback (Email) - State is not a valid UUID either: {state}")
+                    # Cannot get user_id without state - this is an error
+                    logger.error(f"OAuth callback (Email) - State is not a valid UUID and cannot be decoded: {state}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid state parameter. Please try connecting again."
+                    )
         
         if integration_id:
             # Update existing integration (must belong to tenant)
