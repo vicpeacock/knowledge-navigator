@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
 from uuid import UUID
 from typing import List, Optional
 from datetime import datetime
@@ -12,6 +13,8 @@ from app.core.memory_manager import MemoryManager
 from app.services.advanced_search import AdvancedSearch
 from app.services.memory_consolidator import MemoryConsolidator
 from app.core.tenant_context import get_tenant_id
+from app.core.user_context import get_current_user, require_admin
+from app.models.database import User, MemoryLong as MemoryLongModel
 
 router = APIRouter()
 
@@ -155,4 +158,99 @@ async def summarize_old_memories(
     consolidator = MemoryConsolidator(memory_manager=memory)
     stats = await consolidator.summarize_old_memories(db, days_old, max_memories)
     return {"message": "Summarization completed", "stats": stats}
+
+
+@router.get("/long/list")
+async def list_long_term_memory(
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    min_importance: Optional[float] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """List all long-term memory items (for current tenant)"""
+    query = select(MemoryLongModel).where(
+        MemoryLongModel.tenant_id == tenant_id
+    )
+    
+    if min_importance is not None:
+        query = query.where(MemoryLongModel.importance_score >= min_importance)
+    
+    query = query.order_by(MemoryLongModel.created_at.desc()).limit(limit).offset(offset)
+    
+    result = await db.execute(query)
+    memories = result.scalars().all()
+    
+    total_result = await db.execute(
+        select(MemoryLongModel).where(MemoryLongModel.tenant_id == tenant_id)
+    )
+    total = len(total_result.scalars().all())
+    
+    return {
+        "items": [
+            {
+                "id": str(m.id),
+                "content": m.content,
+                "importance_score": m.importance_score,
+                "learned_from_sessions": m.learned_from_sessions or [],
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+                "embedding_id": m.embedding_id,
+            }
+            for m in memories
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.delete("/long/batch")
+async def delete_long_term_memory_batch(
+    memory_ids: List[UUID],
+    db: AsyncSession = Depends(get_db),
+    memory: MemoryManager = Depends(get_memory_manager),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(require_admin),
+):
+    """Delete multiple long-term memory items (admin only)"""
+    if not memory_ids:
+        raise HTTPException(status_code=400, detail="No memory IDs provided")
+    
+    # Get memories to delete (only for current tenant)
+    result = await db.execute(
+        select(MemoryLongModel).where(
+            MemoryLongModel.id.in_(memory_ids),
+            MemoryLongModel.tenant_id == tenant_id,
+        )
+    )
+    memories_to_delete = result.scalars().all()
+    
+    if not memories_to_delete:
+        raise HTTPException(status_code=404, detail="No memories found to delete")
+    
+    # Delete from ChromaDB first
+    deleted_from_chroma = 0
+    for mem in memories_to_delete:
+        if mem.embedding_id:
+            try:
+                collection = memory.long_term_memory_collection
+                collection.delete(ids=[mem.embedding_id])
+                deleted_from_chroma += 1
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to delete embedding {mem.embedding_id} from ChromaDB: {e}")
+    
+    # Delete from database
+    for mem in memories_to_delete:
+        await db.delete(mem)
+    
+    await db.commit()
+    
+    return {
+        "message": f"Deleted {len(memories_to_delete)} memory items",
+        "deleted_count": len(memories_to_delete),
+        "deleted_from_chroma": deleted_from_chroma,
+    }
 
