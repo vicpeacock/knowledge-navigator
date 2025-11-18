@@ -142,29 +142,30 @@ class CalendarWatcher:
                         # (controlla se esiste già una notifica per questo evento con questo reminder)
                         event_id = event.get("id")
                         
-                        # Crea notifica (controlla duplicati basati su event_id + reminder_minutes)
-                        # Usa una chiave composita per evitare duplicati per lo stesso reminder
-                        reminder_key = f"{event_id}_{reminder_minutes}"
-                        priority = "high" if reminder_minutes <= 5 else "medium"
-                        notification = await self.notification_service.create_notification(
-                            type="calendar_event_starting",
-                            urgency=priority,
-                            content={
-                                "event_id": event_id,
-                                "summary": event.get("summary", "Untitled Event"),
-                                "title": event.get("summary", "Untitled Event"),  # Alias per compatibilità
-                                "start_time": start_time.isoformat(),
-                                "end_time": event.get("end_time"),
-                                "location": event.get("location"),
-                                "reminder_minutes": reminder_minutes,
-                                "reminder_key": reminder_key,  # Chiave per deduplicazione
-                                "time_until_start_minutes": int(time_until_start.total_seconds() / 60),
-                                "integration_id": str(integration.id),
-                            },
-                            session_id=None,
-                            tenant_id=integration.tenant_id,
-                            check_duplicate={"key": "reminder_key", "value": reminder_key} if reminder_key else None,
-                        )
+                               # Crea notifica (controlla duplicati basati su event_id + reminder_minutes)
+                               # Usa una chiave composita per evitare duplicati per lo stesso reminder
+                               reminder_key = f"{event_id}_{reminder_minutes}"
+                               priority = "high" if reminder_minutes <= 5 else "medium"
+                               notification = await self.notification_service.create_notification(
+                                   type="calendar_event_starting",
+                                   urgency=priority,
+                                   content={
+                                       "event_id": event_id,
+                                       "summary": event.get("summary", "Untitled Event"),
+                                       "title": event.get("summary", "Untitled Event"),  # Alias per compatibilità
+                                       "start_time": start_time.isoformat(),
+                                       "end_time": event.get("end_time"),
+                                       "location": event.get("location"),
+                                       "reminder_minutes": reminder_minutes,
+                                       "reminder_key": reminder_key,  # Chiave per deduplicazione
+                                       "time_until_start_minutes": int(time_until_start.total_seconds() / 60),
+                                       "integration_id": str(integration.id),
+                                       "user_id": str(integration.user_id) if integration.user_id else None,  # Aggiungi user_id per filtrare
+                                   },
+                                   session_id=None,
+                                   tenant_id=integration.tenant_id,
+                                   check_duplicate={"key": "reminder_key", "value": reminder_key} if reminder_key else None,
+                               )
                         
                         # Skip se notifica duplicata
                         if not notification:
