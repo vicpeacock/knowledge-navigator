@@ -46,11 +46,13 @@ class EmailActionProcessor:
         urgency = analysis.get("urgency", "medium")
         
         # Check if we should create a session based on urgency
-        # Only create sessions for medium+ urgency by default
+        # Use configuration setting for minimum urgency
+        from app.core.config import settings
         urgency_levels = {"high": 3, "medium": 2, "low": 1}
-        min_urgency_level = urgency_levels.get("medium", 2)
+        min_urgency_str = settings.email_analysis_min_urgency_for_session
+        min_urgency_level = urgency_levels.get(min_urgency_str, 2)  # Default to medium if invalid
         if urgency_levels.get(urgency, 0) < min_urgency_level:
-            logger.debug(f"Skipping session creation for low urgency email: {email.get('subject')}")
+            logger.debug(f"Skipping session creation for low urgency email: {email.get('subject')} (urgency: {urgency}, min required: {min_urgency_str})")
             return None
         
         # Check if session already exists for this email
