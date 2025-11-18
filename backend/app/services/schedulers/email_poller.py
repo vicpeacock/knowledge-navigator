@@ -311,6 +311,7 @@ class EmailPoller:
                 
                 # Crea notifica (controlla duplicati basati su email_id)
                 # IMPORTANTE: Aggiungi user_id al content per filtrare le notifiche per utente
+                logger.info(f"📧 Creating notification for email {email_id} (integration: {integration.id}, user_id: {integration.user_id})")
                 notification = await self.notification_service.create_notification(
                     type="email_received",
                     urgency=priority,
@@ -333,7 +334,7 @@ class EmailPoller:
                 
                 # Skip se notifica duplicata
                 if not notification:
-                    logger.debug(f"Skipping duplicate notification for email {email_id}")
+                    logger.info(f"⏭️  Skipping duplicate notification for email {email_id} (integration: {integration.id})")
                     continue
                 
                 events_created.append({
