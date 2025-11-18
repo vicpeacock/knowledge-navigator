@@ -6,7 +6,6 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { BarChart3, RefreshCw, Download, Home, FileText, FileDown } from 'lucide-react'
-import html2pdf from 'html2pdf.js'
 import api from '@/lib/api'
 
 interface Metric {
@@ -324,10 +323,13 @@ function MetricsContent() {
     }
   }
 
-  const downloadPDF = () => {
+  const downloadPDF = async () => {
     if (!evaluationReport) return
     
     try {
+      // Dynamic import per evitare problemi SSR
+      const html2pdf = (await import('html2pdf.js')).default
+      
       // Crea un elemento temporaneo con il contenuto HTML
       // Estraiamo solo il body content dal report HTML completo
       const parser = new DOMParser()
