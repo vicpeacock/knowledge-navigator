@@ -2129,7 +2129,7 @@ async def create_session_from_notification(
     from app.services.email_action_processor import EmailActionProcessor
     from app.services.email_analyzer import EmailAnalyzer
     from app.services.email_service import EmailService
-    from app.core.dependencies import get_ollama_client, get_memory_manager
+    from app.core.dependencies import get_ollama_client, get_memory_manager, get_daily_session_manager
     
     # Get notification
     notification_result = await db.execute(
@@ -2153,40 +2153,35 @@ async def create_session_from_notification(
     if not email_id:
         raise HTTPException(status_code=400, detail="Notification does not contain email_id")
     
-    # Check if session already exists for this email (including deleted/archived sessions)
-    # IMPORTANT: For deduplication, we check ALL sessions (including deleted/archived)
-    # But we only return active sessions to the user
-    existing_session_result = await db.execute(
-        select(SessionModel).where(
-            SessionModel.tenant_id == tenant_id,
-            SessionModel.user_id == current_user.id,
-            SessionModel.session_metadata["email_id"].astext == str(email_id),
-            # NON filtrare per status - include anche "deleted" e "archived" per deduplicazione
-        )
+    # Check if this email was already processed (check messages, not sessions)
+    from app.models.database import Message as MessageModel
+    existing_message_result = await db.execute(
+        select(MessageModel).where(
+            MessageModel.tenant_id == tenant_id,
+            MessageModel.session_metadata["email_id"].astext == str(email_id),
+        ).limit(1)
     )
-    existing_session = existing_session_result.scalar_one_or_none()
+    existing_message = existing_message_result.scalar_one_or_none()
     
-    if existing_session:
-        # If session exists but is deleted/archived, restore it instead of creating a new one
-        if existing_session.status != "active":
-            logger.info(f"Found session {existing_session.id} for email {email_id} with status {existing_session.status}, restoring it")
-            existing_session.status = "active"
-            existing_session.archived_at = None
-            await db.commit()
-            await db.refresh(existing_session)
-        
-        logger.info(f"Session {existing_session.id} already exists for email {email_id}, returning it")
-        return Session(
-            id=existing_session.id,
-            name=existing_session.name,
-            title=existing_session.title,
-            description=existing_session.description,
-            status=existing_session.status,
-            created_at=existing_session.created_at,
-            updated_at=existing_session.updated_at,
-            archived_at=existing_session.archived_at,
-            metadata=existing_session.session_metadata or {},
+    if existing_message:
+        # Email already processed, return the session it's in
+        existing_session_result = await db.execute(
+            select(SessionModel).where(SessionModel.id == existing_message.session_id)
         )
+        existing_session = existing_session_result.scalar_one_or_none()
+        if existing_session:
+            logger.info(f"Email {email_id} already processed in session {existing_session.id}, returning it")
+            return Session(
+                id=existing_session.id,
+                name=existing_session.name,
+                title=existing_session.title,
+                description=existing_session.description,
+                status=existing_session.status,
+                created_at=existing_session.created_at,
+                updated_at=existing_session.updated_at,
+                archived_at=existing_session.archived_at,
+                metadata=existing_session.session_metadata or {},
+            )
     
     # Get email integration for current user
     from app.models.database import Integration
@@ -2291,7 +2286,7 @@ async def create_session_from_notification(
                 "urgency": "medium",
             }
     
-    # Create session using EmailActionProcessor
+    # Add email to today's daily session using EmailActionProcessor
     memory_manager = get_memory_manager()
     email_action_processor = EmailActionProcessor(
         db=db,
@@ -2307,9 +2302,9 @@ async def create_session_from_notification(
     )
     
     if not session_id:
-        raise HTTPException(status_code=500, detail="Failed to create session from notification")
+        raise HTTPException(status_code=500, detail="Failed to add email to daily session")
     
-    # Get created session
+    # Get the daily session
     session_result = await db.execute(
         select(SessionModel).where(SessionModel.id == session_id)
     )
@@ -2318,12 +2313,12 @@ async def create_session_from_notification(
     if not session:
         raise HTTPException(status_code=500, detail="Session was created but could not be retrieved")
     
-    # Update notification with new session_id
+    # Update notification with session_id (daily session)
     notification.content = {**content, "auto_session_id": str(session_id)}
     notification.session_id = session_id
     await db.commit()
     
-    logger.info(f"Created session {session_id} from notification {notification_id}")
+    logger.info(f"Added email to daily session {session_id} from notification {notification_id}")
     
     return Session(
         id=session.id,
