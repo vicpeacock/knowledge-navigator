@@ -15,7 +15,7 @@ fi
 
 # Crea database di test (ignora errore se esiste già)
 echo "📦 Creating test database..."
-docker-compose exec -T postgres psql -U knavigator -c "CREATE DATABASE knowledge_navigator_test;" 2>/dev/null || \
+docker-compose exec -T postgres psql -U knavigator -d knowledge_navigator -c "CREATE DATABASE knowledge_navigator_test;" 2>/dev/null || \
     echo "ℹ️  Database 'knowledge_navigator_test' esiste già (ok)"
 
 echo "✅ Test database setup completo!"
