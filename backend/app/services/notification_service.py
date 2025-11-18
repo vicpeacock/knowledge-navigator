@@ -253,6 +253,38 @@ class NotificationService:
         
         return count
     
+    async def delete_notification(
+        self,
+        notification_id: UUID,
+        tenant_id: Optional[UUID] = None,
+    ) -> bool:
+        """
+        Delete a notification permanently.
+        
+        Args:
+            notification_id: ID of the notification to delete
+            tenant_id: Optional tenant ID to filter by (required for multi-tenant)
+            
+        Returns:
+            True if notification was deleted, False otherwise
+        """
+        query = select(NotificationModel).where(NotificationModel.id == notification_id)
+        if tenant_id:
+            query = query.where(NotificationModel.tenant_id == tenant_id)
+        
+        result = await self.db.execute(query)
+        notification = result.scalar_one_or_none()
+        
+        if not notification:
+            logger.warning(f"Notification {notification_id} not found")
+            return False
+        
+        await self.db.delete(notification)
+        await self.db.commit()
+        
+        logger.info(f"Deleted notification {notification_id}")
+        return True
+    
     async def get_notification_count(
         self,
         session_id: Optional[UUID] = None,

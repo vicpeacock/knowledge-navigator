@@ -85,6 +85,22 @@ async def mark_all_notifications_read(
     return {"message": f"Marked {count} notifications as read", "count": count}
 
 
+@router.delete("/{notification_id}")
+async def delete_notification(
+    notification_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+):
+    """Delete a notification permanently (for current tenant)"""
+    notification_service = NotificationService(db)
+    success = await notification_service.delete_notification(notification_id, tenant_id=tenant_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    return {"message": "Notification deleted", "notification_id": str(notification_id)}
+
+
 @router.post("/check-events")
 async def check_events_manual(
     db: AsyncSession = Depends(get_db),

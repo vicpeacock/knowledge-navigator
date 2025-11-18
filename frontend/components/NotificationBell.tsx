@@ -125,6 +125,30 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
     }
   }
 
+  const handleDelete = async (notificationId: string) => {
+    // Save scroll position before update
+    const scrollContainer = scrollContainerRef.current
+    const scrollTop = scrollContainer?.scrollTop || 0
+    
+    try {
+      await axios.delete(`${API_URL}/api/notifications/${notificationId}`)
+      // Remove notification from local list instead of full refresh
+      setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
+      
+      // Restore scroll position after update
+      if (scrollContainer && scrollTop > 0) {
+        setTimeout(() => {
+          scrollContainer.scrollTop = scrollTop
+        }, 0)
+      }
+    } catch (error) {
+      console.error('Error deleting notification:', error)
+      // On error, refresh to get current state
+      await fetchNotifications()
+      throw error // Re-throw to show error in UI
+    }
+  }
+
   const pendingCount = notifications.length
 
   return (
@@ -241,6 +265,7 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                       onResolve={(resolution) =>
                         handleResolve(notification.id, resolution)
                       }
+                      onDelete={handleDelete}
                     />
                   ))}
                 </div>
@@ -256,17 +281,45 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
 function NotificationItem({
   notification,
   onResolve,
+  onDelete,
 }: {
   notification: Notification
   onResolve: (resolution: string) => void
+  onDelete: (notificationId: string) => void
 }) {
   const [resolution, setResolution] = useState('')
   const [showOptions, setShowOptions] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (confirm('Vuoi eliminare questa notifica?')) {
+      setIsDeleting(true)
+      try {
+        await onDelete(notification.id)
+      } catch (error) {
+        console.error('Error deleting notification:', error)
+        alert('Errore durante l\'eliminazione della notifica')
+      } finally {
+        setIsDeleting(false)
+      }
+    }
+  }
 
   if (notification.type === 'contradiction') {
     return (
-      <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-        <h4 className="font-semibold mb-2">
+      <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 relative">
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={isDeleting}
+          className="absolute top-2 right-2 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+          title="Elimina notifica"
+        >
+          <span className="text-lg font-bold">×</span>
+        </button>
+        <h4 className="font-semibold mb-2 pr-6">
           {notification.content.title || 'Contraddizione rilevata'}
         </h4>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
@@ -378,8 +431,17 @@ function NotificationItem({
   const sessionId = notification.content.session_id || notification.session_id
   
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-      <p className="text-sm mb-3">{notification.content.message}</p>
+    <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 relative">
+      <button
+        type="button"
+        onClick={handleDelete}
+        disabled={isDeleting}
+        className="absolute top-2 right-2 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+        title="Elimina notifica"
+      >
+        <span className="text-lg font-bold">×</span>
+      </button>
+      <p className="text-sm mb-3 pr-6">{notification.content.message}</p>
       
       {/* Email-specific content */}
       {notification.type === 'email_received' && (
