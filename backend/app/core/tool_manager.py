@@ -94,6 +94,68 @@ class ToolManager:
                 }
             },
             {
+                "name": "archive_email",
+                "description": "Archivia un'email rimuovendola dalla Posta in arrivo. Usa questo tool quando l'utente chiede di archiviare, rimuovere dalla posta in arrivo, o mettere via un'email. IMPORTANTE: Richiede l'email_id dell'email da archiviare.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "email_id": {
+                            "type": "string",
+                            "description": "ID dell'email Gmail da archiviare (es: '19a98336265a2d64'). DEVI recuperare questo ID usando get_emails prima di archiviare."
+                        }
+                    },
+                    "required": ["email_id"]
+                }
+            },
+            {
+                "name": "send_email",
+                "description": "Invia un'email tramite Gmail. Usa questo tool quando l'utente chiede di inviare, mandare, o scrivere un'email. IMPORTANTE: Se l'utente vuole rispondere a un'email esistente, usa reply_to_email invece di send_email.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "to": {
+                            "type": "string",
+                            "description": "Indirizzo email del destinatario (es: 'example@gmail.com')"
+                        },
+                        "subject": {
+                            "type": "string",
+                            "description": "Oggetto dell'email"
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": "Corpo dell'email in testo semplice"
+                        },
+                        "body_html": {
+                            "type": "string",
+                            "description": "Corpo dell'email in HTML (opzionale, se non fornito usa body)"
+                        }
+                    },
+                    "required": ["to", "subject", "body"]
+                }
+            },
+            {
+                "name": "reply_to_email",
+                "description": "Risponde a un'email esistente tramite Gmail. Usa questo tool quando l'utente chiede di rispondere, replicare, o rispondere a un'email specifica. IMPORTANTE: Richiede l'email_id dell'email a cui rispondere.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "email_id": {
+                            "type": "string",
+                            "description": "ID dell'email Gmail a cui rispondere (es: '19a98336265a2d64'). DEVI recuperare questo ID usando get_emails prima di rispondere."
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": "Corpo della risposta in testo semplice"
+                        },
+                        "body_html": {
+                            "type": "string",
+                            "description": "Corpo della risposta in HTML (opzionale, se non fornito usa body)"
+                        }
+                    },
+                    "required": ["email_id", "body"]
+                }
+            },
+            {
                 "name": "web_search",
                 "description": "Esegue una ricerca sul web usando l'API di ricerca web di Ollama. Usa questo tool quando l'utente chiede informazioni aggiornate dal web, notizie, o informazioni che potrebbero non essere nel tuo training data. Richiede OLLAMA_API_KEY configurata.",
                 "parameters": {
@@ -517,6 +579,27 @@ class ToolManager:
                 elif tool_name == "summarize_emails":
                     result = await self._execute_summarize_emails(parameters, db, session_id=session_id)
                     logger.info(f"Tool {tool_name} completed, summary length: {len(result.get('summary', '')) if isinstance(result, dict) else 'unknown'}")
+                    add_trace_event("tool.execution.completed", {"tool": tool_name, "type": "email"})
+                    duration = time.time() - start_time
+                    observe_histogram("tool_execution_duration_seconds", duration, labels={"tool": tool_name, "type": "email"})
+                    return result
+                elif tool_name == "archive_email":
+                    result = await self._execute_archive_email(parameters, db, session_id=session_id)
+                    logger.info(f"Tool {tool_name} completed, email_id: {parameters.get('email_id', 'unknown')}")
+                    add_trace_event("tool.execution.completed", {"tool": tool_name, "type": "email"})
+                    duration = time.time() - start_time
+                    observe_histogram("tool_execution_duration_seconds", duration, labels={"tool": tool_name, "type": "email"})
+                    return result
+                elif tool_name == "send_email":
+                    result = await self._execute_send_email(parameters, db, session_id=session_id)
+                    logger.info(f"Tool {tool_name} completed, to: {parameters.get('to', 'unknown')}")
+                    add_trace_event("tool.execution.completed", {"tool": tool_name, "type": "email"})
+                    duration = time.time() - start_time
+                    observe_histogram("tool_execution_duration_seconds", duration, labels={"tool": tool_name, "type": "email"})
+                    return result
+                elif tool_name == "reply_to_email":
+                    result = await self._execute_reply_to_email(parameters, db, session_id=session_id)
+                    logger.info(f"Tool {tool_name} completed, email_id: {parameters.get('email_id', 'unknown')}")
                     add_trace_event("tool.execution.completed", {"tool": tool_name, "type": "email"})
                     duration = time.time() - start_time
                     observe_histogram("tool_execution_duration_seconds", duration, labels={"tool": tool_name, "type": "email"})
@@ -1026,6 +1109,238 @@ Riassunto:"""
                 "emails_count": len(emails),
             }
         except Exception as e:
+            return {"error": str(e)}
+    
+    async def _execute_archive_email(
+        self,
+        parameters: Dict[str, Any],
+        db: AsyncSession,
+        session_id: Optional[UUID] = None,
+    ) -> Dict[str, Any]:
+        """Execute archive_email tool"""
+        from app.models.database import Integration
+        from app.api.integrations.emails import _decrypt_credentials
+        from sqlalchemy import select, or_
+        
+        try:
+            email_id = parameters.get("email_id")
+            if not email_id:
+                return {"error": "email_id is required"}
+            
+            # Get email integration for the session's user (or global)
+            if not session_id:
+                return {"error": "Session ID is required to resolve email integration"}
+
+            # Get session to know tenant and user
+            session_result = await db.execute(
+                select(SessionModel).where(SessionModel.id == session_id)
+            )
+            session = session_result.scalar_one_or_none()
+            if not session:
+                return {"error": "Session not found"}
+
+            tenant_id = session.tenant_id
+            user_id = session.user_id
+
+            query = (
+                select(Integration)
+                .where(Integration.provider == "google")
+                .where(Integration.service_type == "email")
+                .where(Integration.enabled == True)
+                .where(Integration.tenant_id == tenant_id)
+            )
+            if user_id is not None:
+                query = query.where(or_(Integration.user_id == user_id, Integration.user_id.is_(None)))
+
+            result = await db.execute(query.limit(1))
+            integration = result.scalar_one_or_none()
+            
+            if not integration:
+                return {"error": "Nessuna integrazione Gmail configurata"}
+            
+            # Decrypt credentials
+            credentials = _decrypt_credentials(
+                integration.credentials_encrypted,
+                settings.credentials_encryption_key
+            )
+            
+            # Setup service
+            await self.email_service.setup_gmail(credentials, str(integration.id))
+            
+            # Archive email
+            success = await self.email_service.archive_email(
+                email_id=email_id,
+                integration_id=str(integration.id),
+            )
+            
+            if success:
+                return {"success": True, "message": f"Email {email_id} archiviata con successo"}
+            else:
+                return {"error": "Errore durante l'archiviazione dell'email"}
+        except Exception as e:
+            logger.error(f"Error in archive_email: {e}", exc_info=True)
+            return {"error": str(e)}
+    
+    async def _execute_send_email(
+        self,
+        parameters: Dict[str, Any],
+        db: AsyncSession,
+        session_id: Optional[UUID] = None,
+    ) -> Dict[str, Any]:
+        """Execute send_email tool"""
+        from app.models.database import Integration
+        from app.api.integrations.emails import _decrypt_credentials
+        from sqlalchemy import select, or_
+        
+        try:
+            to = parameters.get("to")
+            subject = parameters.get("subject")
+            body = parameters.get("body")
+            body_html = parameters.get("body_html")
+            
+            if not to or not subject or not body:
+                return {"error": "to, subject, and body are required"}
+            
+            # Get email integration for the session's user (or global)
+            if not session_id:
+                return {"error": "Session ID is required to resolve email integration"}
+
+            # Get session to know tenant and user
+            session_result = await db.execute(
+                select(SessionModel).where(SessionModel.id == session_id)
+            )
+            session = session_result.scalar_one_or_none()
+            if not session:
+                return {"error": "Session not found"}
+
+            tenant_id = session.tenant_id
+            user_id = session.user_id
+
+            query = (
+                select(Integration)
+                .where(Integration.provider == "google")
+                .where(Integration.service_type == "email")
+                .where(Integration.enabled == True)
+                .where(Integration.tenant_id == tenant_id)
+            )
+            if user_id is not None:
+                query = query.where(or_(Integration.user_id == user_id, Integration.user_id.is_(None)))
+
+            result = await db.execute(query.limit(1))
+            integration = result.scalar_one_or_none()
+            
+            if not integration:
+                return {"error": "Nessuna integrazione Gmail configurata"}
+            
+            # Decrypt credentials
+            credentials = _decrypt_credentials(
+                integration.credentials_encrypted,
+                settings.credentials_encryption_key
+            )
+            
+            # Setup service
+            await self.email_service.setup_gmail(credentials, str(integration.id))
+            
+            # Send email
+            result = await self.email_service.send_email(
+                to=to,
+                subject=subject,
+                body=body,
+                body_html=body_html,
+                integration_id=str(integration.id),
+            )
+            
+            if result.get("success"):
+                return {
+                    "success": True,
+                    "message": f"Email inviata con successo a {to}",
+                    "message_id": result.get("message_id"),
+                    "thread_id": result.get("thread_id"),
+                }
+            else:
+                return {"error": "Errore durante l'invio dell'email"}
+        except Exception as e:
+            logger.error(f"Error in send_email: {e}", exc_info=True)
+            return {"error": str(e)}
+    
+    async def _execute_reply_to_email(
+        self,
+        parameters: Dict[str, Any],
+        db: AsyncSession,
+        session_id: Optional[UUID] = None,
+    ) -> Dict[str, Any]:
+        """Execute reply_to_email tool"""
+        from app.models.database import Integration
+        from app.api.integrations.emails import _decrypt_credentials
+        from sqlalchemy import select, or_
+        
+        try:
+            email_id = parameters.get("email_id")
+            body = parameters.get("body")
+            body_html = parameters.get("body_html")
+            
+            if not email_id or not body:
+                return {"error": "email_id and body are required"}
+            
+            # Get email integration for the session's user (or global)
+            if not session_id:
+                return {"error": "Session ID is required to resolve email integration"}
+
+            # Get session to know tenant and user
+            session_result = await db.execute(
+                select(SessionModel).where(SessionModel.id == session_id)
+            )
+            session = session_result.scalar_one_or_none()
+            if not session:
+                return {"error": "Session not found"}
+
+            tenant_id = session.tenant_id
+            user_id = session.user_id
+
+            query = (
+                select(Integration)
+                .where(Integration.provider == "google")
+                .where(Integration.service_type == "email")
+                .where(Integration.enabled == True)
+                .where(Integration.tenant_id == tenant_id)
+            )
+            if user_id is not None:
+                query = query.where(or_(Integration.user_id == user_id, Integration.user_id.is_(None)))
+
+            result = await db.execute(query.limit(1))
+            integration = result.scalar_one_or_none()
+            
+            if not integration:
+                return {"error": "Nessuna integrazione Gmail configurata"}
+            
+            # Decrypt credentials
+            credentials = _decrypt_credentials(
+                integration.credentials_encrypted,
+                settings.credentials_encryption_key
+            )
+            
+            # Setup service
+            await self.email_service.setup_gmail(credentials, str(integration.id))
+            
+            # Reply to email
+            result = await self.email_service.reply_to_email(
+                email_id=email_id,
+                body=body,
+                body_html=body_html,
+                integration_id=str(integration.id),
+            )
+            
+            if result.get("success"):
+                return {
+                    "success": True,
+                    "message": f"Risposta inviata con successo",
+                    "message_id": result.get("message_id"),
+                    "thread_id": result.get("thread_id"),
+                }
+            else:
+                return {"error": "Errore durante l'invio della risposta"}
+        except Exception as e:
+            logger.error(f"Error in reply_to_email: {e}", exc_info=True)
             return {"error": str(e)}
     
     def parse_tool_calls(self, text: str) -> List[Dict[str, Any]]:

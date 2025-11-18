@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 import imaplib
 import email
 from email.header import decode_header
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import base64
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -15,8 +17,11 @@ try:
 except ImportError:
     ConfidentialClientApplication = None
 import httpx
+import logging
 from app.core.config import settings
 from app.services.exceptions import IntegrationAuthError
+
+logger = logging.getLogger(__name__)
 
 
 class EmailService:
@@ -48,6 +53,8 @@ class EmailService:
             },
                 scopes=[
                     "https://www.googleapis.com/auth/gmail.readonly",
+                    "https://www.googleapis.com/auth/gmail.modify",  # Per archiviare/modificare email
+                    "https://www.googleapis.com/auth/gmail.send",  # Per inviare email
                 ],
             redirect_uri=settings.google_redirect_uri_email,
         )
@@ -197,6 +204,209 @@ class EmailService:
                     body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
         
         return body
+    
+    async def archive_email(
+        self,
+        email_id: str,
+        integration_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Archive an email by removing the INBOX label.
+        
+        Args:
+            email_id: Gmail message ID
+            integration_id: Optional integration ID
+            
+        Returns:
+            True if archived successfully, False otherwise
+        """
+        try:
+            service_key = self._get_service_key("gmail", integration_id)
+            service = self._services.get(service_key)
+            
+            if not service:
+                raise IntegrationAuthError("gmail", "service_not_initialized")
+            
+            # Remove INBOX label to archive the email
+            service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"removeLabelIds": ["INBOX"]}
+            ).execute()
+            
+            logger.info(f"Email {email_id} archived successfully")
+            return True
+        except HttpError as exc:
+            if exc.resp.status in (401, 403):
+                raise IntegrationAuthError("gmail", "unauthorized", str(exc)) from exc
+            logger.error(f"Error archiving email {email_id}: {exc}")
+            raise ValueError(f"Error archiving email: {str(exc)}") from exc
+        except IntegrationAuthError:
+            raise
+        except Exception as exc:
+            logger.error(f"Unexpected error archiving email {email_id}: {exc}", exc_info=True)
+            raise ValueError(f"Error archiving email: {str(exc)}") from exc
+    
+    async def send_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        body_html: Optional[str] = None,
+        integration_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Send an email via Gmail API.
+        
+        Args:
+            to: Recipient email address
+            subject: Email subject
+            body: Plain text email body
+            body_html: Optional HTML email body
+            integration_id: Optional integration ID
+            
+        Returns:
+            Dict with message_id and thread_id if successful
+        """
+        try:
+            service_key = self._get_service_key("gmail", integration_id)
+            service = self._services.get(service_key)
+            
+            if not service:
+                raise IntegrationAuthError("gmail", "service_not_initialized")
+            
+            # Create message
+            message = MIMEMultipart('alternative')
+            message['To'] = to
+            message['Subject'] = subject
+            
+            # Add text and HTML parts
+            if body:
+                text_part = MIMEText(body, 'plain', 'utf-8')
+                message.attach(text_part)
+            
+            if body_html:
+                html_part = MIMEText(body_html, 'html', 'utf-8')
+                message.attach(html_part)
+            elif not body:
+                # If no body provided, use empty text
+                text_part = MIMEText("", 'plain', 'utf-8')
+                message.attach(text_part)
+            
+            # Encode message
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+            
+            # Send message
+            result = service.users().messages().send(
+                userId="me",
+                body={"raw": raw_message}
+            ).execute()
+            
+            logger.info(f"Email sent successfully to {to}, message_id: {result.get('id')}")
+            return {
+                "message_id": result.get("id"),
+                "thread_id": result.get("threadId"),
+                "success": True
+            }
+        except HttpError as exc:
+            if exc.resp.status in (401, 403):
+                raise IntegrationAuthError("gmail", "unauthorized", str(exc)) from exc
+            logger.error(f"Error sending email to {to}: {exc}")
+            raise ValueError(f"Error sending email: {str(exc)}") from exc
+        except IntegrationAuthError:
+            raise
+        except Exception as exc:
+            logger.error(f"Unexpected error sending email to {to}: {exc}", exc_info=True)
+            raise ValueError(f"Error sending email: {str(exc)}") from exc
+    
+    async def reply_to_email(
+        self,
+        email_id: str,
+        body: str,
+        body_html: Optional[str] = None,
+        integration_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Reply to an email via Gmail API.
+        
+        Args:
+            email_id: Gmail message ID to reply to
+            body: Reply body (plain text)
+            body_html: Optional HTML reply body
+            integration_id: Optional integration ID
+            
+        Returns:
+            Dict with message_id and thread_id if successful
+        """
+        try:
+            service_key = self._get_service_key("gmail", integration_id)
+            service = self._services.get(service_key)
+            
+            if not service:
+                raise IntegrationAuthError("gmail", "service_not_initialized")
+            
+            # Get original message to extract headers
+            original_msg = service.users().messages().get(
+                userId="me",
+                id=email_id,
+                format="metadata",
+                metadataHeaders=["From", "To", "Subject", "References", "In-Reply-To"]
+            ).execute()
+            
+            headers = {h["name"]: h["value"] for h in original_msg["payload"].get("headers", [])}
+            thread_id = original_msg.get("threadId")
+            
+            # Create reply message
+            message = MIMEMultipart('alternative')
+            message['To'] = headers.get("From", "")
+            message['Subject'] = "Re: " + headers.get("Subject", "").replace("Re: ", "").replace("RE: ", "")
+            
+            # Set In-Reply-To and References for threading
+            if "Message-ID" in headers:
+                message['In-Reply-To'] = headers["Message-ID"]
+                message['References'] = headers.get("References", "") + " " + headers["Message-ID"]
+            
+            # Add text and HTML parts
+            if body:
+                text_part = MIMEText(body, 'plain', 'utf-8')
+                message.attach(text_part)
+            
+            if body_html:
+                html_part = MIMEText(body_html, 'html', 'utf-8')
+                message.attach(html_part)
+            elif not body:
+                # If no body provided, use empty text
+                text_part = MIMEText("", 'plain', 'utf-8')
+                message.attach(text_part)
+            
+            # Encode message
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+            
+            # Send reply
+            result = service.users().messages().send(
+                userId="me",
+                body={
+                    "raw": raw_message,
+                    "threadId": thread_id  # Maintain thread
+                }
+            ).execute()
+            
+            logger.info(f"Reply sent successfully, message_id: {result.get('id')}, thread_id: {thread_id}")
+            return {
+                "message_id": result.get("id"),
+                "thread_id": result.get("threadId"),
+                "success": True
+            }
+        except HttpError as exc:
+            if exc.resp.status in (401, 403):
+                raise IntegrationAuthError("gmail", "unauthorized", str(exc)) from exc
+            logger.error(f"Error replying to email {email_id}: {exc}")
+            raise ValueError(f"Error replying to email: {str(exc)}") from exc
+        except IntegrationAuthError:
+            raise
+        except Exception as exc:
+            logger.error(f"Unexpected error replying to email {email_id}: {exc}", exc_info=True)
+            raise ValueError(f"Error replying to email: {str(exc)}") from exc
     
     # iCloud Mail (IMAP)
     async def setup_icloud(
