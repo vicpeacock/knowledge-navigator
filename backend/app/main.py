@@ -98,7 +98,9 @@ async def lifespan(app: FastAPI):
     if settings.event_monitor_enabled:
         try:
             from app.services.event_monitor import EventMonitor
-            event_monitor = EventMonitor()
+            from app.core.dependencies import get_agent_activity_stream
+            agent_activity_stream = get_agent_activity_stream()
+            event_monitor = EventMonitor(agent_activity_stream=agent_activity_stream)
             await event_monitor.start()
             logging.info("✅ Event Monitor started (proactive email/calendar monitoring)")
         except Exception as e:
