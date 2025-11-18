@@ -809,7 +809,7 @@ async def get_pending_notifications(
                     skipped_count += 1
                     continue
             elif integration_id:
-                # Fallback: if notification doesn't have user_id (old notifications),
+                # Fallback: if notification doesn't have user_id (old notifications or integration without user_id),
                 # check if the integration belongs to current user
                 try:
                     from app.models.database import Integration
@@ -822,12 +822,51 @@ async def get_pending_notifications(
                     integration = integration_result.scalar_one_or_none()
                     
                     if integration:
-                        if integration.user_id != current_user.id:
-                            logger.info(f"⏭️  Skipping notification {n.get('id')}: integration {integration_id} belongs to user {integration.user_id}, current user is {current_user.id}")
-                            skipped_count += 1
-                            continue
-                        # Integration belongs to current user - allow notification
-                        logger.debug(f"✅ Allowing notification {n.get('id')}: integration {integration_id} belongs to current user")
+                        if integration.user_id:
+                            # Integration has user_id - check if it matches current user
+                            if integration.user_id != current_user.id:
+                                logger.info(f"⏭️  Skipping notification {n.get('id')}: integration {integration_id} belongs to user {integration.user_id}, current user is {current_user.id}")
+                                skipped_count += 1
+                                continue
+                            # Integration belongs to current user - allow notification
+                            logger.debug(f"✅ Allowing notification {n.get('id')}: integration {integration_id} belongs to current user")
+                        else:
+                            # Integration has no user_id - check if current user has only this integration
+                            # (heuristic: if user has only one email integration, it's probably theirs)
+                            user_integrations_result = await db.execute(
+                                select(Integration).where(
+                                    Integration.tenant_id == tenant_id,
+                                    Integration.provider == "google",
+                                    Integration.service_type == "email",
+                                    Integration.user_id == current_user.id,
+                                    Integration.enabled == True,
+                                )
+                            )
+                            user_integrations = user_integrations_result.scalars().all()
+                            
+                            # Also check integrations without user_id for this tenant
+                            all_email_integrations_result = await db.execute(
+                                select(Integration).where(
+                                    Integration.tenant_id == tenant_id,
+                                    Integration.provider == "google",
+                                    Integration.service_type == "email",
+                                    Integration.user_id.is_(None),  # Integrations without user_id
+                                    Integration.enabled == True,
+                                )
+                            )
+                            integrations_without_user_id = all_email_integrations_result.scalars().all()
+                            
+                            # If current user has no integrations with user_id, and there's only one integration without user_id (this one), allow it
+                            if len(user_integrations) == 0 and len(integrations_without_user_id) == 1 and integrations_without_user_id[0].id == UUID(integration_id):
+                                logger.info(f"✅ Allowing notification {n.get('id')}: integration {integration_id} has no user_id but is the only email integration without user_id for tenant")
+                            elif len(user_integrations) == 1 and user_integrations[0].id == UUID(integration_id):
+                                # User has only one integration and it's this one - allow notification
+                                logger.info(f"✅ Allowing notification {n.get('id')}: integration {integration_id} is the only email integration for current user")
+                            else:
+                                # User has multiple integrations or this is not their only one - skip
+                                logger.info(f"⏭️  Skipping notification {n.get('id')}: integration {integration_id} has no user_id and user has {len(user_integrations)} integrations with user_id, {len(integrations_without_user_id)} without")
+                                skipped_count += 1
+                                continue
                     else:
                         # Integration not found - skip notification
                         logger.info(f"⏭️  Skipping notification {n.get('id')}: integration {integration_id} not found")
@@ -843,65 +882,6 @@ async def get_pending_notifications(
                 logger.info(f"⏭️  Skipping notification {n.get('id')}: no user_id or integration_id")
                 skipped_count += 1
                 continue
-        
-        # If notification has user_id=None but integration_id exists, check if integration belongs to current user
-        # This handles the case where integration was created without user_id but belongs to current user
-        if notif_type in ["email_received", "calendar_event_starting"]:
-            notification_user_id = content.get("user_id")
-            integration_id = content.get("integration_id")
-            
-            if notification_user_id is None and integration_id:
-                # Notification has no user_id but has integration_id - check if integration belongs to current user
-                try:
-                    from app.models.database import Integration
-                    integration_result = await db.execute(
-                        select(Integration).where(
-                            Integration.id == UUID(integration_id),
-                            Integration.tenant_id == tenant_id,
-                        )
-                    )
-                    integration = integration_result.scalar_one_or_none()
-                    
-                    if integration:
-                        # If integration has user_id, use it; otherwise, check if it's the only integration for current user
-                        if integration.user_id:
-                            if integration.user_id == current_user.id:
-                                logger.info(f"✅ Allowing notification {n.get('id')}: integration {integration_id} belongs to current user (user_id was None in notification)")
-                            else:
-                                logger.info(f"⏭️  Skipping notification {n.get('id')}: integration {integration_id} belongs to user {integration.user_id}, current user is {current_user.id}")
-                                skipped_count += 1
-                                continue
-                        else:
-                            # Integration has no user_id - check if current user has only this integration
-                            # (heuristic: if user has only one email integration, it's probably theirs)
-                            user_integrations_result = await db.execute(
-                                select(Integration).where(
-                                    Integration.tenant_id == tenant_id,
-                                    Integration.provider == "google",
-                                    Integration.service_type == "email",
-                                    Integration.user_id == current_user.id,
-                                    Integration.enabled == True,
-                                )
-                            )
-                            user_integrations = user_integrations_result.scalars().all()
-                            
-                            if len(user_integrations) == 1 and user_integrations[0].id == UUID(integration_id):
-                                # User has only one integration and it's this one - allow notification
-                                logger.info(f"✅ Allowing notification {n.get('id')}: integration {integration_id} is the only email integration for current user")
-                            else:
-                                # User has multiple integrations or this is not their only one - skip
-                                logger.info(f"⏭️  Skipping notification {n.get('id')}: integration {integration_id} has no user_id and user has {len(user_integrations)} integrations")
-                                skipped_count += 1
-                                continue
-                    else:
-                        # Integration not found - skip
-                        logger.info(f"⏭️  Skipping notification {n.get('id')}: integration {integration_id} not found")
-                        skipped_count += 1
-                        continue
-                except Exception as e:
-                    logger.warning(f"Error checking integration for notification {n.get('id')}: {e}")
-                    skipped_count += 1
-                    continue
         
         # Return global notifications:
         # - contradiction: memory contradictions (visible to all users in tenant)
