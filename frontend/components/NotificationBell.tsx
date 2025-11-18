@@ -266,6 +266,7 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                         handleResolve(notification.id, resolution)
                       }
                       onDelete={handleDelete}
+                      onClose={() => setIsOpen(false)}
                     />
                   ))}
                 </div>
@@ -282,11 +283,14 @@ function NotificationItem({
   notification,
   onResolve,
   onDelete,
+  onClose,
 }: {
   notification: Notification
   onResolve: (resolution: string) => void
   onDelete: (notificationId: string) => void
+  onClose?: () => void
 }) {
+  const router = useRouter()
   const [resolution, setResolution] = useState('')
   const [showOptions, setShowOptions] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -485,7 +489,9 @@ function NotificationItem({
             // Navigate to session using Next.js router
             router.push(`/sessions/${sessionId}`)
             // Close notification popup
-            setIsOpen(false)
+            if (onClose) {
+              onClose()
+            }
           }}
           className="w-full mt-3 px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm font-medium transition-colors"
         >
