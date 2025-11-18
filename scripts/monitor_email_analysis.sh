@@ -15,17 +15,21 @@ echo "Premi Ctrl+C per fermare il monitoraggio"
 echo ""
 
 # Monitor backend logs
-if command -v docker-compose &> /dev/null; then
-    echo "📋 Monitorando log backend (docker-compose)..."
-    docker-compose logs -f backend 2>/dev/null | grep -E "(Email analysis|Created automatic session|Created notification|email_analysis|EmailPoller)" || echo "⚠️  Nessun log trovato. Verifica che il backend sia in esecuzione."
-elif [ -f "backend/logs/app.log" ]; then
-    echo "📋 Monitorando log backend (file)..."
-    tail -f backend/logs/app.log | grep -E "(Email analysis|Created automatic session|Created notification|email_analysis|EmailPoller)" || echo "⚠️  Nessun log trovato."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ -f "$PROJECT_ROOT/backend/backend.log" ]; then
+    echo "📋 Monitorando log backend (backend/backend.log)..."
+    tail -f "$PROJECT_ROOT/backend/backend.log" | grep -E "(🔍|📧|📋|✅|⏭️|❌|⚠️|ℹ️|Email analysis|Created automatic session|Created notification|email_analysis|EmailPoller|Gmail API)" || echo "⚠️  Nessun log trovato. Verifica che il backend sia in esecuzione."
+elif [ -f "$PROJECT_ROOT/backend/logs/backend.log" ]; then
+    echo "📋 Monitorando log backend (backend/logs/backend.log)..."
+    tail -f "$PROJECT_ROOT/backend/logs/backend.log" | grep -E "(🔍|📧|📋|✅|⏭️|❌|⚠️|ℹ️|Email analysis|Created automatic session|Created notification|email_analysis|EmailPoller|Gmail API)" || echo "⚠️  Nessun log trovato."
 else
     echo "⚠️  Impossibile trovare i log. Monitora manualmente i log del backend."
     echo ""
     echo "Per vedere i log:"
-    echo "  - Se usi docker-compose: docker-compose logs -f backend"
-    echo "  - Se backend locale: tail -f backend/logs/app.log"
+    echo "  tail -f backend/backend.log"
+    echo "  oppure"
+    echo "  tail -f backend/logs/backend.log"
 fi
 
