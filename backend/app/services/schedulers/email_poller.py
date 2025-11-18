@@ -42,8 +42,8 @@ class EmailPoller:
         self.db = db
         self.email_service = EmailService()
         self.notification_service = NotificationService(db)
-        # Track last checked email ID per integration per evitare duplicati
-        self._last_email_ids: Dict[str, str] = {}
+        # Note: We no longer use _last_email_ids in-memory tracking
+        # Instead, we check existing notifications in database to avoid duplicates
         
         # Initialize email analysis services if enabled
         self.email_analyzer = None
@@ -146,28 +146,35 @@ class EmailPoller:
             return events_created
         
         # Filtra solo email nuove (non già controllate)
+        # Usa le notifiche esistenti nel database per deduplicare invece di memoria volatile
         new_messages = []
-        if last_email_id:
-            # Trova l'indice dell'ultima email controllata
-            for i, msg in enumerate(messages):
-                if msg.get("id") == last_email_id:
-                    # Tutte le email dopo questa sono nuove
-                    new_messages = messages[:i]
-                    break
-            else:
-                # Ultima email non trovata, tutte sono nuove
-                new_messages = messages
-        else:
-            # Prima volta che controlliamo, prendi solo le più recenti
-            new_messages = messages[:5]  # Limita a 5 per evitare spam
+        
+        # Get all existing email notifications for this tenant to avoid duplicates
+        from app.models.database import Notification as NotificationModel
+        existing_notifications_result = await self.db.execute(
+            select(NotificationModel).where(
+                NotificationModel.tenant_id == integration.tenant_id,
+                NotificationModel.type == "email_received"
+            )
+        )
+        existing_notifications = existing_notifications_result.scalars().all()
+        existing_email_ids = set()
+        for notif in existing_notifications:
+            email_id = notif.content.get("email_id") if isinstance(notif.content, dict) else None
+            if email_id:
+                existing_email_ids.add(str(email_id))
+        
+        # Filter out emails that already have notifications
+        for msg in messages:
+            email_id = msg.get("id")
+            if email_id and str(email_id) not in existing_email_ids:
+                new_messages.append(msg)
         
         if not new_messages:
-            logger.debug(f"No new emails since last check for integration {integration.id}")
+            logger.debug(f"No new emails since last check for integration {integration.id} (all already have notifications)")
             return events_created
         
-        # Aggiorna last_email_id con la più recente
-        if new_messages:
-            self._last_email_ids[integration_key] = new_messages[0].get("id")
+        logger.info(f"Found {len(new_messages)} new emails (filtered from {len(messages)} total) for integration {integration.id}")
         
         # Crea notifiche per ogni nuova email
         for msg in new_messages:

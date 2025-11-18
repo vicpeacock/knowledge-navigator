@@ -276,15 +276,29 @@ class NotificationService:
         notification = result.scalar_one_or_none()
         
         if not notification:
-            logger.warning(f"Notification {notification_id} not found")
+            logger.warning(f"Notification {notification_id} not found (tenant: {tenant_id})")
             return False
         
         # Delete the notification
         try:
-            await self.db.delete(notification)
+            # Use delete statement for better reliability
+            from sqlalchemy import delete as sql_delete
+            delete_stmt = sql_delete(NotificationModel).where(
+                NotificationModel.id == notification_id
+            )
+            if tenant_id:
+                delete_stmt = delete_stmt.where(NotificationModel.tenant_id == tenant_id)
+            
+            result = await self.db.execute(delete_stmt)
             await self.db.commit()
-            logger.info(f"✅ Successfully deleted notification {notification_id} (tenant: {tenant_id})")
-            return True
+            
+            # Verify deletion
+            if result.rowcount > 0:
+                logger.info(f"✅ Successfully deleted notification {notification_id} (tenant: {tenant_id}, rowcount: {result.rowcount})")
+                return True
+            else:
+                logger.warning(f"⚠️  Delete executed but no rows affected for notification {notification_id}")
+                return False
         except Exception as e:
             logger.error(f"❌ Error deleting notification {notification_id}: {e}", exc_info=True)
             await self.db.rollback()
