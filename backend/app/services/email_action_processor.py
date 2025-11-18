@@ -98,23 +98,23 @@ class EmailActionProcessor:
             logger.info(f"Created automatic session {session.id} for email {email.get('id')}")
             
             # Create initial message with email summary and action request
+            # IMPORTANT: This message should be from the ASSISTANT, not the user
+            # because it's the assistant summarizing the email and suggesting actions
             initial_message = self._create_initial_message(email, analysis)
             
-            # Save initial message
+            # Save initial message as ASSISTANT message (not user)
+            # The assistant is informing the user about the email
             message = MessageModel(
                 session_id=session.id,
                 tenant_id=tenant_id,
-                role="user",
+                role="assistant",  # Changed from "user" to "assistant"
                 content=initial_message,
             )
             self.db.add(message)
             await self.db.commit()
             
-            # Trigger chat response (async, in background)
-            # This will generate an automatic response suggesting actions
-            asyncio.create_task(
-                self._trigger_chat_response(session.id, initial_message, tenant_id)
-            )
+            # Note: We don't trigger a chat response here because the assistant
+            # has already provided the initial message. The user will respond when ready.
             
             return session.id
         except Exception as e:
@@ -158,7 +158,9 @@ class EmailActionProcessor:
 
 Come vuoi procedere? Posso aiutarti a:
 {suggestions_text}
-- Solo archiviare l'email se non è importante"""
+- Solo archiviare l'email se non è importante
+
+Dimmi come vuoi procedere e ti aiuterò!"""
         
         return message
     
