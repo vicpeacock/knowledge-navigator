@@ -39,7 +39,6 @@ class CalendarService:
     # Google Calendar
     def create_google_oauth_flow(
         self,
-        state: Optional[str] = None,
         scopes: Optional[Sequence[str]] = None,
     ) -> Flow:
         """Create OAuth2 flow for Google Calendar"""
@@ -71,9 +70,6 @@ class CalendarService:
             scopes=scope_list,
             redirect_uri=settings.google_redirect_uri_calendar,
         )
-        
-        if state:
-            flow.state = state
         
         return flow
     

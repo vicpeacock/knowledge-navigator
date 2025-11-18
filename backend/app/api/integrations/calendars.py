@@ -99,11 +99,13 @@ async def authorize_google_calendar(
             json_lib.dumps(state_payload).encode("utf-8")
         ).decode("utf-8")
 
-        flow = calendar_service.create_google_oauth_flow(state=state_str)
+        flow = calendar_service.create_google_oauth_flow()
+        # Pass state directly to authorization_url() to ensure it's preserved
         authorization_url, _ = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
             prompt='consent',
+            state=state_str,  # Pass state directly to authorization_url
         )
         return {"authorization_url": authorization_url}
     except Exception as e:
@@ -135,7 +137,7 @@ async def oauth_callback(
                 except Exception:  # pragma: no cover - fallback path
                     new_scopes = []
                 if new_scopes:
-                    flow = calendar_service.create_google_oauth_flow(state=state, scopes=new_scopes)
+                    flow = calendar_service.create_google_oauth_flow(scopes=new_scopes)
                     # Ensure oauthlib compares against updated scopes order
                     flow.oauth2session.scope = new_scopes
                     flow.fetch_token(code=code)

@@ -89,11 +89,13 @@ async def authorize_gmail(
             json_lib.dumps(state_payload).encode("utf-8")
         ).decode("utf-8")
 
-        flow = email_service.create_gmail_oauth_flow(state=state_str)
+        flow = email_service.create_gmail_oauth_flow()
+        # Pass state directly to authorization_url() to ensure it's preserved
         authorization_url, _ = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
             prompt='consent',
+            state=state_str,  # Pass state directly to authorization_url
         )
         return {"authorization_url": authorization_url}
     except Exception as e:
