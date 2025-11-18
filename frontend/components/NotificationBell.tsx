@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell } from 'lucide-react'
 import axios from 'axios'
+import { sessionsApi } from '@/lib/api'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -489,7 +490,8 @@ function NotificationItem({
             
             // Verify session exists before navigating
             try {
-              const response = await axios.get(`${API_URL}/api/sessions/${sessionId}`)
+              // Use sessionsApi which includes authentication headers
+              const response = await sessionsApi.get(sessionId)
               if (response.data && response.data.id) {
                 // Session exists, navigate to it
                 router.push(`/sessions/${sessionId}`)
@@ -505,6 +507,8 @@ function NotificationItem({
               console.error('Error verifying session:', error)
               if (error.response?.status === 404) {
                 alert(`La sessione ${sessionId} non esiste più o non è stata creata correttamente.`)
+              } else if (error.response?.status === 401) {
+                alert(`Errore di autenticazione. Per favore, effettua il login.`)
               } else {
                 alert(`Errore nel verificare la sessione: ${error.message}`)
               }
