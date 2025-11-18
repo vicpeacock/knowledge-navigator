@@ -2109,6 +2109,223 @@ async def get_session_memory(
     )
 
 
+@router.post("/notifications/{notification_id}/create-session", response_model=Session, status_code=201)
+async def create_session_from_notification(
+    notification_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Create or retrieve a session from an email notification.
+    If a session already exists for this email, return it. Otherwise, create a new one.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Creating session from notification {notification_id} for user {current_user.id}")
+    
+    from app.models.database import Notification as NotificationModel
+    from app.services.email_action_processor import EmailActionProcessor
+    from app.services.email_analyzer import EmailAnalyzer
+    from app.services.email_service import EmailService
+    from app.core.dependencies import get_ollama_client, get_memory_manager
+    
+    # Get notification
+    notification_result = await db.execute(
+        select(NotificationModel).where(
+            NotificationModel.id == notification_id,
+            NotificationModel.tenant_id == tenant_id,
+        )
+    )
+    notification = notification_result.scalar_one_or_none()
+    
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    # Only handle email_received notifications
+    if notification.type != "email_received":
+        raise HTTPException(status_code=400, detail="This endpoint only supports email_received notifications")
+    
+    content = notification.content or {}
+    email_id = content.get("email_id")
+    
+    if not email_id:
+        raise HTTPException(status_code=400, detail="Notification does not contain email_id")
+    
+    # Check if session already exists for this email
+    existing_session_result = await db.execute(
+        select(SessionModel).where(
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id,
+            SessionModel.session_metadata["email_id"].astext == str(email_id),
+            SessionModel.status == "active",
+        )
+    )
+    existing_session = existing_session_result.scalar_one_or_none()
+    
+    if existing_session:
+        logger.info(f"Session {existing_session.id} already exists for email {email_id}, returning it")
+        return Session(
+            id=existing_session.id,
+            name=existing_session.name,
+            title=existing_session.title,
+            description=existing_session.description,
+            status=existing_session.status,
+            created_at=existing_session.created_at,
+            updated_at=existing_session.updated_at,
+            archived_at=existing_session.archived_at,
+            metadata=existing_session.session_metadata or {},
+        )
+    
+    # Get email integration for current user
+    from app.models.database import Integration
+    from app.api.integrations.emails import _decrypt_credentials
+    from sqlalchemy import or_
+    
+    integration_result = await db.execute(
+        select(Integration).where(
+            Integration.provider == "google",
+            Integration.service_type == "email",
+            Integration.enabled == True,
+            Integration.tenant_id == tenant_id,
+            or_(Integration.user_id == current_user.id, Integration.user_id.is_(None))
+        ).order_by(Integration.user_id.desc())  # Prefer integrations with user_id
+    )
+    integration = integration_result.scalar_one_or_none()
+    
+    if not integration:
+        raise HTTPException(status_code=404, detail="No email integration found for current user")
+    
+    # Fetch email details from Gmail
+    try:
+        credentials = _decrypt_credentials(
+            integration.credentials_encrypted,
+            settings.credentials_encryption_key
+        )
+        
+        email_service = EmailService()
+        await email_service.setup_gmail(credentials, str(integration.id))
+        
+        # Get email details
+        messages = await email_service.get_gmail_messages(
+            max_results=1,
+            query=f"rfc822msgid:{email_id}",
+            integration_id=str(integration.id),
+            include_body=True,
+        )
+        
+        if not messages:
+            # Try searching by ID directly
+            try:
+                from googleapiclient.discovery import build
+                from google.oauth2.credentials import Credentials
+                creds = Credentials.from_authorized_user_info(credentials)
+                service = build('gmail', 'v1', credentials=creds)
+                msg_detail = service.users().messages().get(
+                    userId="me",
+                    id=email_id,
+                    format="full"
+                ).execute()
+                
+                # Extract email data
+                headers = {h["name"]: h["value"] for h in msg_detail["payload"].get("headers", [])}
+                email_data = {
+                    "id": email_id,
+                    "subject": headers.get("Subject", ""),
+                    "from": headers.get("From", ""),
+                    "to": headers.get("To", ""),
+                    "date": headers.get("Date", ""),
+                    "snippet": msg_detail.get("snippet", ""),
+                    "body": email_service._extract_email_body(msg_detail["payload"]),
+                }
+            except Exception as e:
+                logger.error(f"Error fetching email {email_id} from Gmail: {e}")
+                # Use notification content as fallback
+                email_data = {
+                    "id": email_id,
+                    "subject": content.get("subject", "No Subject"),
+                    "from": content.get("from", "Unknown"),
+                    "snippet": content.get("snippet", ""),
+                    "body": content.get("snippet", ""),  # Use snippet as body fallback
+                }
+        else:
+            email_data = messages[0]
+        
+    except Exception as e:
+        logger.error(f"Error fetching email from Gmail: {e}", exc_info=True)
+        # Use notification content as fallback
+        email_data = {
+            "id": email_id,
+            "subject": content.get("subject", "No Subject"),
+            "from": content.get("from", "Unknown"),
+            "snippet": content.get("snippet", ""),
+            "body": content.get("snippet", ""),
+        }
+    
+    # Analyze email if analysis not already present
+    analysis = content.get("analysis")
+    if not analysis:
+        try:
+            ollama_client = get_ollama_client()
+            email_analyzer = EmailAnalyzer(ollama_client=ollama_client)
+            analysis = await email_analyzer.analyze_email(email_data)
+        except Exception as e:
+            logger.warning(f"Error analyzing email: {e}")
+            # Use default analysis
+            analysis = {
+                "category": "direct",
+                "requires_action": True,
+                "action_type": "reply",
+                "action_summary": "Email richiede attenzione",
+                "urgency": "medium",
+            }
+    
+    # Create session using EmailActionProcessor
+    memory_manager = get_memory_manager()
+    email_action_processor = EmailActionProcessor(
+        db=db,
+        memory_manager=memory_manager,
+        ollama_client=get_ollama_client(),
+    )
+    
+    session_id = await email_action_processor.process_email_action(
+        email=email_data,
+        analysis=analysis,
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+    )
+    
+    if not session_id:
+        raise HTTPException(status_code=500, detail="Failed to create session from notification")
+    
+    # Get created session
+    session_result = await db.execute(
+        select(SessionModel).where(SessionModel.id == session_id)
+    )
+    session = session_result.scalar_one_or_none()
+    
+    if not session:
+        raise HTTPException(status_code=500, detail="Session was created but could not be retrieved")
+    
+    # Update notification with new session_id
+    notification.content = {**content, "auto_session_id": str(session_id)}
+    notification.session_id = session_id
+    await db.commit()
+    
+    logger.info(f"Created session {session_id} from notification {notification_id}")
+    
+    return Session(
+        id=session.id,
+        name=session.name,
+        title=session.title,
+        description=session.description,
+        status=session.status,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        archived_at=session.archived_at,
+        metadata=session.session_metadata or {},
+    )
+
+
 @router.post("/{session_id}/notifications/{notification_id}/resolve")
 async def resolve_notification(
     session_id: UUID,
