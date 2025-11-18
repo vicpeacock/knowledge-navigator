@@ -483,14 +483,31 @@ function NotificationItem({
       {hasSession && sessionId && (
         <button
           type="button"
-          onClick={(e) => {
+          onClick={async (e) => {
             e.preventDefault()
             e.stopPropagation()
-            // Navigate to session using Next.js router
-            router.push(`/sessions/${sessionId}`)
-            // Close notification popup
-            if (onClose) {
-              onClose()
+            
+            // Verify session exists before navigating
+            try {
+              const response = await axios.get(`${API_URL}/api/sessions/${sessionId}`)
+              if (response.data && response.data.id) {
+                // Session exists, navigate to it
+                router.push(`/sessions/${sessionId}`)
+                // Close notification popup
+                if (onClose) {
+                  onClose()
+                }
+              } else {
+                console.error('Session not found:', sessionId)
+                alert(`Sessione non trovata: ${sessionId}`)
+              }
+            } catch (error: any) {
+              console.error('Error verifying session:', error)
+              if (error.response?.status === 404) {
+                alert(`La sessione ${sessionId} non esiste più o non è stata creata correttamente.`)
+              } else {
+                alert(`Errore nel verificare la sessione: ${error.message}`)
+              }
             }
           }}
           className="w-full mt-3 px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm font-medium transition-colors"
