@@ -253,7 +253,7 @@ export const memoryApi = {
   listLongTerm: (limit: number = 100, offset: number = 0, minImportance?: number) =>
     api.get('/api/memory/long/list', { params: { limit, offset, min_importance: minImportance } }),
   deleteLongTermBatch: (memoryIds: string[]) =>
-    api.delete('/api/memory/long/batch', { data: memoryIds }),
+    api.delete('/api/memory/long/batch', { data: { memory_ids: memoryIds } }),
 }
 
 // Tools API

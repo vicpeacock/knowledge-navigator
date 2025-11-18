@@ -205,17 +205,23 @@ async def list_long_term_memory(
     }
 
 
+class DeleteMemoryBatchRequest(BaseModel):
+    memory_ids: List[UUID]
+
+
 @router.delete("/long/batch")
 async def delete_long_term_memory_batch(
-    memory_ids: List[UUID],
+    request: DeleteMemoryBatchRequest,
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
     tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_admin),
 ):
     """Delete multiple long-term memory items (admin only)"""
-    if not memory_ids:
+    if not request.memory_ids:
         raise HTTPException(status_code=400, detail="No memory IDs provided")
+    
+    memory_ids = request.memory_ids
     
     # Get memories to delete (only for current tenant)
     result = await db.execute(
