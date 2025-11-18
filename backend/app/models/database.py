@@ -50,6 +50,10 @@ class User(Base):
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     last_login_ip = Column(String(45), nullable=True)  # IPv6 support
     
+    # User preferences
+    timezone = Column(String(50), nullable=True, default="UTC")  # User timezone (e.g., "Europe/Rome", "America/New_York")
+    inactivity_timeout_minutes = Column(Integer, nullable=True, default=30)  # Screen saver timeout
+    
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     user_metadata = Column("metadata", JSONB, default={})  # Use user_metadata as attribute name, but "metadata" as column name
