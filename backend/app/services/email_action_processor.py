@@ -55,7 +55,8 @@ class EmailActionProcessor:
             logger.debug(f"Skipping session creation for low urgency email: {email.get('subject')} (urgency: {urgency}, min required: {min_urgency_str})")
             return None
         
-        # Check if session already exists for this email
+        # Check if session already exists for this email (including deleted/archived sessions)
+        # IMPORTANTE: Include anche sessioni cancellate/archiviate per evitare di ricrearle
         email_id = email.get("id")
         if email_id:
             from sqlalchemy import select
@@ -64,11 +65,12 @@ class EmailActionProcessor:
                     SessionModel.tenant_id == tenant_id,
                     SessionModel.user_id == user_id,
                     SessionModel.session_metadata["email_id"].astext == str(email_id),
-                    SessionModel.status == "active",
+                    # NON filtrare per status - include anche "deleted" e "archived" per deduplicazione
                 )
             )
-            if existing_session.scalar_one_or_none():
-                logger.debug(f"Session already exists for email {email_id}, skipping creation")
+            existing = existing_session.scalar_one_or_none()
+            if existing:
+                logger.debug(f"Session already exists for email {email_id} (status: {existing.status}), skipping creation")
                 return None
         
         try:

@@ -198,6 +198,7 @@ class EmailPoller:
         
         # Also check sessions created from emails by THIS integration's user (even if notification was deleted)
         # IMPORTANTE: Controlla solo le sessioni create dall'utente di questa integrazione
+        # IMPORTANTE: Include anche sessioni cancellate/archiviate per evitare di ricrearle
         try:
             if integration.user_id:
                 existing_sessions_result = await self.db.execute(
@@ -205,10 +206,11 @@ class EmailPoller:
                         SessionModel.tenant_id == integration.tenant_id,
                         SessionModel.user_id == integration.user_id,  # Filtra per user_id dell'integrazione
                         SessionModel.session_metadata["source"].astext == "email_analysis"
+                        # NON filtrare per status - include anche "deleted" e "archived" per deduplicazione
                     )
                 )
                 existing_sessions = existing_sessions_result.scalars().all()
-                logger.debug(f"Found {len(existing_sessions)} sessions created from emails by user {integration.user_id}")
+                logger.debug(f"Found {len(existing_sessions)} sessions created from emails by user {integration.user_id} (including deleted/archived)")
                 for session in existing_sessions:
                     # Extract email_id from session metadata
                     metadata = session.session_metadata
@@ -222,7 +224,7 @@ class EmailPoller:
                             email_id = None
                     if email_id:
                         existing_email_ids.add(str(email_id))
-                        logger.debug(f"  - Session {session.id} has email_id: {email_id}")
+                        logger.debug(f"  - Session {session.id} (status: {session.status}) has email_id: {email_id}")
             else:
                 logger.debug("Integration has no user_id, skipping session deduplication check")
                 existing_sessions = []
