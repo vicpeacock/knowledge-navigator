@@ -159,12 +159,13 @@ async def oauth_callback(
                     logger.info(f"OAuth callback (Email) - Setting user_id={user_id} for new integration")
             except Exception as e:
                 logger.warning(f"OAuth callback (Email) - Failed to decode state as JSON: {e}, trying as UUID")
-                # Fallback: treat state as raw UUID (old behavior)
+                # Fallback: treat state as raw UUID (old behavior - deprecated)
                 try:
                     integration_id = UUID(state)
-                    # Use current_user.id as fallback for user_id when state can't be decoded
-                    user_id = current_user.id
-                    logger.info(f"OAuth callback (Email) - Using current_user.id={user_id} as fallback (state decode failed)")
+                    # Old format: state was just integration_id UUID, no user_id
+                    # This is deprecated - we need user_id from state
+                    logger.warning(f"OAuth callback (Email) - State is old format UUID (no user_id). This is deprecated.")
+                    user_id = None  # Will need to be set manually or from integration
                 except (ValueError, TypeError):
                     integration_id = None
                     # Cannot get user_id without state - this is an error
@@ -214,6 +215,12 @@ async def oauth_callback(
                 raise HTTPException(
                     status_code=400,
                     detail="L'autorizzazione non ha fornito il refresh token. Concedi tutti i permessi richiesti e riprova."
+                )
+            if not user_id:
+                logger.error(f"OAuth callback (Email) - Cannot create new integration: no user_id in state")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid state parameter: user_id is required. Please try connecting again."
                 )
             encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
             integration = Integration(
