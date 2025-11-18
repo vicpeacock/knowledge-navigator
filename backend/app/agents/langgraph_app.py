@@ -219,6 +219,7 @@ _AGENT_REGISTRY: Dict[str, str] = {
     "task_dispatcher": "Task Dispatcher",
     "background_integrity_agent": "Background Integrity Agent",
     "service_health_agent": "Service Health Agent",
+    "event_monitor": "Event Monitor",
 }
 
 

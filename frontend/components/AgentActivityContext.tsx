@@ -35,6 +35,7 @@ const AGENT_ORDER = [
   'task_dispatcher',
   'notification_collector',
   'response_formatter',
+  'event_monitor',
 ]
 
 // Increased ACTIVE_WINDOW_MS to ensure "started" events are shown even for fast-executing agents
