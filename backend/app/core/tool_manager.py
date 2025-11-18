@@ -1186,7 +1186,7 @@ Riassunto:"""
             error_msg = str(auth_error)
             if "insufficient" in error_msg.lower() or "scope" in error_msg.lower() or "permission" in error_msg.lower():
                 return {"error": "Permessi Gmail insufficienti. Per favore riconnetti l'integrazione Gmail per ottenere i permessi necessari per archiviare email."}
-            return {"error": f"Errore di autorizzazione Gmail: {auth_error.error_type}"}
+            return {"error": f"Errore di autorizzazione Gmail: {auth_error.reason}"}
         except Exception as e:
             logger.error(f"Error in archive_email: {e}", exc_info=True)
             # Extract a clean error message without stack traces
@@ -1288,7 +1288,7 @@ Riassunto:"""
             error_msg = str(auth_error)
             if "insufficient" in error_msg.lower() or "scope" in error_msg.lower() or "permission" in error_msg.lower():
                 return {"error": "Permessi Gmail insufficienti. Per favore riconnetti l'integrazione Gmail per ottenere i permessi necessari per inviare email."}
-            return {"error": f"Errore di autorizzazione Gmail: {auth_error.error_type}"}
+            return {"error": f"Errore di autorizzazione Gmail: {auth_error.reason}"}
         except Exception as e:
             logger.error(f"Error in send_email: {e}", exc_info=True)
             # Extract a clean error message without stack traces
@@ -1387,7 +1387,7 @@ Riassunto:"""
             error_msg = str(auth_error)
             if "insufficient" in error_msg.lower() or "scope" in error_msg.lower() or "permission" in error_msg.lower():
                 return {"error": "Permessi Gmail insufficienti. Per favore riconnetti l'integrazione Gmail per ottenere i permessi necessari per inviare email."}
-            return {"error": f"Errore di autorizzazione Gmail: {auth_error.error_type}"}
+            return {"error": f"Errore di autorizzazione Gmail: {auth_error.reason}"}
         except Exception as e:
             logger.error(f"Error in reply_to_email: {e}", exc_info=True)
             # Extract a clean error message without stack traces
