@@ -1107,14 +1107,25 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             else:
                 # Check for tool_calls directly in response_data (OpenAI-style format)
                 if "tool_calls" in response_data:
-                    tool_calls = [
-                        {
-                            "name": tc.get("function", {}).get("name"),
-                            "parameters": tc.get("function", {}).get("arguments", {}),
-                        }
-                        for tc in response_data["tool_calls"]
-                        if isinstance(tc, dict) and "function" in tc
-                    ]
+                    tool_calls = []
+                    for tc in response_data["tool_calls"]:
+                        if isinstance(tc, dict) and "function" in tc:
+                            func = tc.get("function", {})
+                            tool_name = func.get("name")
+                            arguments = func.get("arguments", {})
+                            
+                            # Parse arguments if it's a JSON string (OpenAI format)
+                            if isinstance(arguments, str):
+                                try:
+                                    arguments = json.loads(arguments)
+                                except (json.JSONDecodeError, TypeError):
+                                    logger.warning(f"Failed to parse arguments as JSON for tool {tool_name}: {arguments}")
+                                    arguments = {}
+                            
+                            tool_calls.append({
+                                "name": tool_name,
+                                "parameters": arguments if isinstance(arguments, dict) else {},
+                            })
                 else:
                     # Fallback: check in raw_result.message (Ollama format)
                     message = response_data.get("raw_result", {}).get("message")
