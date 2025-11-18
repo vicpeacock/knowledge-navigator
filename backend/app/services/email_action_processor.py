@@ -48,9 +48,26 @@ class EmailActionProcessor:
         # Check if we should create a session based on urgency
         # Only create sessions for medium+ urgency by default
         urgency_levels = {"high": 3, "medium": 2, "low": 1}
-        if urgency_levels.get(urgency, 0) < urgency_levels.get("medium", 2):
+        min_urgency_level = urgency_levels.get("medium", 2)
+        if urgency_levels.get(urgency, 0) < min_urgency_level:
             logger.debug(f"Skipping session creation for low urgency email: {email.get('subject')}")
             return None
+        
+        # Check if session already exists for this email
+        email_id = email.get("id")
+        if email_id:
+            from sqlalchemy import select
+            existing_session = await self.db.execute(
+                select(SessionModel).where(
+                    SessionModel.tenant_id == tenant_id,
+                    SessionModel.user_id == user_id,
+                    SessionModel.session_metadata["email_id"].astext == str(email_id),
+                    SessionModel.status == "active",
+                )
+            )
+            if existing_session.scalar_one_or_none():
+                logger.debug(f"Session already exists for email {email_id}, skipping creation")
+                return None
         
         try:
             # Create session with email context
