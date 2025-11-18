@@ -279,7 +279,8 @@ class NotificationService:
             logger.warning(f"Notification {notification_id} not found")
             return False
         
-        await self.db.delete(notification)
+        # Delete the notification (delete() is not async, only commit() is)
+        self.db.delete(notification)
         await self.db.commit()
         
         logger.info(f"Deleted notification {notification_id}")
