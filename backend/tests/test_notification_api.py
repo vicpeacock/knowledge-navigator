@@ -34,10 +34,10 @@ class TestNotificationDeleteAPI:
     
     @patch('app.api.notifications.get_db')
     @patch('app.api.notifications.get_tenant_id')
-    @patch('app.services.notification_service.NotificationService.delete_notification')
+    @patch('app.services.notification_service.NotificationService')
     async def test_delete_notification_success(
         self,
-        mock_delete,
+        mock_service_class,
         mock_get_tenant_id,
         mock_get_db,
         client,
@@ -49,7 +49,11 @@ class TestNotificationDeleteAPI:
         mock_db = AsyncMock()
         mock_get_db.return_value = mock_db
         mock_get_tenant_id.return_value = mock_tenant_id
-        mock_delete.return_value = True
+        
+        # Create service instance and mock delete method
+        mock_service = AsyncMock()
+        mock_service.delete_notification = AsyncMock(return_value=True)
+        mock_service_class.return_value = mock_service
         
         # Make request
         response = client.delete(f"/api/notifications/{mock_notification_id}")
@@ -58,14 +62,14 @@ class TestNotificationDeleteAPI:
         assert response.status_code == 200
         assert response.json()["message"] == "Notification deleted"
         assert response.json()["notification_id"] == str(mock_notification_id)
-        mock_delete.assert_called_once_with(mock_notification_id, tenant_id=mock_tenant_id)
+        mock_service.delete_notification.assert_called_once_with(mock_notification_id, tenant_id=mock_tenant_id)
     
     @patch('app.api.notifications.get_db')
     @patch('app.api.notifications.get_tenant_id')
-    @patch('app.services.notification_service.NotificationService.delete_notification')
+    @patch('app.services.notification_service.NotificationService')
     async def test_delete_notification_not_found(
         self,
-        mock_delete,
+        mock_service_class,
         mock_get_tenant_id,
         mock_get_db,
         client,
@@ -77,7 +81,11 @@ class TestNotificationDeleteAPI:
         mock_db = AsyncMock()
         mock_get_db.return_value = mock_db
         mock_get_tenant_id.return_value = mock_tenant_id
-        mock_delete.return_value = False  # Not found
+        
+        # Create service instance and mock delete method
+        mock_service = AsyncMock()
+        mock_service.delete_notification = AsyncMock(return_value=False)  # Not found
+        mock_service_class.return_value = mock_service
         
         # Make request
         response = client.delete(f"/api/notifications/{mock_notification_id}")
@@ -85,14 +93,14 @@ class TestNotificationDeleteAPI:
         # Assertions
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
-        mock_delete.assert_called_once_with(mock_notification_id, tenant_id=mock_tenant_id)
+        mock_service.delete_notification.assert_called_once_with(mock_notification_id, tenant_id=mock_tenant_id)
     
     @patch('app.api.notifications.get_db')
     @patch('app.api.notifications.get_tenant_id')
-    @patch('app.services.notification_service.NotificationService.delete_notification')
+    @patch('app.services.notification_service.NotificationService')
     async def test_delete_notification_invalid_uuid(
         self,
-        mock_delete,
+        mock_service_class,
         mock_get_tenant_id,
         mock_get_db,
         client,
@@ -104,5 +112,6 @@ class TestNotificationDeleteAPI:
         
         # Should return 422 (validation error)
         assert response.status_code == 422
-        mock_delete.assert_not_called()
+        # Service should not be instantiated for invalid UUID
+        mock_service_class.assert_not_called()
 

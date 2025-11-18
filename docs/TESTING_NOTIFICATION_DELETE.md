@@ -29,9 +29,11 @@ python -m pytest tests/test_notification_service.py -v
 
 **3 test** che coprono:
 
-- ✅ **test_delete_notification_success**: Endpoint DELETE funziona correttamente
-- ✅ **test_delete_notification_not_found**: Restituisce 404 quando notifica non esiste
+- ⚠️ **test_delete_notification_success**: Endpoint DELETE funziona correttamente (richiede setup database mock più complesso)
+- ⚠️ **test_delete_notification_not_found**: Restituisce 404 quando notifica non esiste (richiede setup database mock più complesso)
 - ✅ **test_delete_notification_invalid_uuid**: Validazione UUID (restituisce 422 per UUID invalido)
+
+**Nota**: I test API integration richiedono un setup più complesso per mockare completamente il database async. I test unitari del service (che testano la logica core) passano tutti. Per testare l'endpoint API, si può usare un test manuale o E2E.
 
 **Esecuzione**:
 ```bash
