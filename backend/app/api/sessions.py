@@ -731,7 +731,7 @@ async def get_pending_notifications(
                 summary = content.get("summary", "Evento senza titolo")
                 start_time = content.get("start_time", "")
                 formatted_content["message"] = f"Evento imminente: {summary}" + (f" alle {start_time}" if start_time else "")
-        
+            
         result.append({
             "id": str(notif.get("id")),
             "type": notif_type,

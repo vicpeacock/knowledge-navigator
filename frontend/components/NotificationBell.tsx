@@ -429,7 +429,7 @@ function NotificationItem({
   // Email or calendar notification with optional session link
   const hasSession = notification.content.has_session || notification.session_id
   const sessionId = notification.content.session_id || notification.session_id
-  
+
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 relative">
       <button
