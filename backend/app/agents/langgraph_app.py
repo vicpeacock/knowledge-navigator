@@ -1244,7 +1244,26 @@ Se c'è un errore, spiega all'utente cosa è andato storto e come può risolvere
                 logger.error(f"🔍🔍🔍 Ollama response type: {type(final_response)}")
                 # When return_raw=False, generate_with_context returns a string
                 if isinstance(final_response, str):
+                    # Check if the string is actually JSON (Ollama sometimes returns JSON even with tools=None)
                     response_text = final_response
+                    # Try to parse as JSON to extract content if it's a JSON string
+                    try:
+                        parsed_json = json.loads(final_response)
+                        if isinstance(parsed_json, dict):
+                            # Extract content from JSON structure
+                            if "content" in parsed_json:
+                                response_text = parsed_json["content"]
+                            elif "message" in parsed_json and isinstance(parsed_json["message"], dict):
+                                response_text = parsed_json["message"].get("content", "")
+                            elif "message" in parsed_json and isinstance(parsed_json["message"], str):
+                                response_text = parsed_json["message"]
+                            # If it still has tool_calls, ignore them and use content or empty string
+                            if "tool_calls" in parsed_json and not response_text:
+                                logger.warning("⚠️  Response contains tool_calls but no content - ignoring tool_calls")
+                                response_text = ""
+                    except (json.JSONDecodeError, TypeError):
+                        # Not JSON, use as-is
+                        pass
                     logger.error(f"🔍🔍🔍 String response length: {len(response_text)}")
                 elif isinstance(final_response, dict):
                     # Fallback: if it's a dict, extract content
