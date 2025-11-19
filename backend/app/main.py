@@ -231,7 +231,12 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3003", "http://localhost:3002", "http://localhost:3000"],  # Next.js frontend
+    allow_origins=[
+        "http://localhost:3003",  # Frontend locale (dev)
+        "http://localhost:3002",  # MCP Gateway
+        "http://localhost:3000",  # Frontend locale (alternativo)
+        "http://localhost:3004",  # Frontend Docker (test cloud)
+    ],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
