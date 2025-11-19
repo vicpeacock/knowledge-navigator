@@ -498,21 +498,9 @@ async def analyze_message_for_plan(
 ) -> Dict[str, Any]:
     tool_catalog = build_tool_catalog(available_tools)
     analysis_prompt = (
-        "Analizza la richiesta dell'utente e valuta se per soddisfarla servono più azioni coordinate."\
-        " Hai questi tool disponibili (studia attentamente le loro descrizioni e scegli SEMPRE quelli più pertinenti al compito):\n"
-        f"{tool_catalog if tool_catalog else '- Nessun tool disponibile'}\n\n"
-        "Linee guida obbligatorie:\n"
-        "1. Se per rispondere devi consultare dati da integrazioni (email, calendario, file, ecc.), questo richiede un piano multi-step e l'uso esplicito del relativo tool.\n"
-        "2. IMPORTANTE: Se l'utente chiede di 'leggere', 'vedere', 'recuperare', 'controllare' email, calendario, o file, DEVI creare un piano che usa il tool corrispondente (get_emails, get_calendar_events, search_memory, ecc.). NON rispondere direttamente senza chiamare il tool.\n"
-        "3. Esempi di richieste che RICHIEDONO un tool:\n"
-        "   - 'leggi le ultime 5 email' → needs_plan=true, step con tool='get_emails', query='' (vuoto per tutte le email), max_results=5\n"
-        "   - 'leggi le email non lette' → needs_plan=true, step con tool='get_emails', query='is:unread'\n"
-        "   - 'controlla il calendario' → needs_plan=true, step con tool='get_calendar_events'\n"
-        "4. Preferisci tool specialistici alle ricerche generiche: usa web_search solo quando l'informazione richiesta arriva dal web pubblico o non esistono tool dedicati.\n"
-        "5. Quando accedi a dati sensibili (email, calendario, file personali) includi uno step \"wait_user\" per richiedere conferma esplicita prima di eseguire il tool.\n"
-        "6. Ogni piano deve descrivere in modo chiaro gli step successivi (max 5) con \"action\" tra tool/respond/wait_user, il tool da chiamare e i parametri essenziali.\n"
-        "7. Se puoi rispondere immediatamente senza strumenti esterni, imposta needs_plan=false e steps=[].\n\n"
-        "Rispondi SEMPRE con JSON valido, senza testo extra:\n"
+        "Analizza la richiesta dell'utente e valuta se servono tool per rispondere.\n"
+        f"Tool disponibili:\n{tool_catalog if tool_catalog else '- Nessun tool disponibile'}\n\n"
+        "Rispondi con JSON:\n"
         "{\n"
         "  \"needs_plan\": true|false,\n"
         "  \"reason\": \"spiega perché\",\n"
@@ -528,8 +516,7 @@ async def analyze_message_for_plan(
     )
 
     system_prompt = (
-        "Sei un pianificatore strategico. Identifica quando la richiesta richiede l'uso di strumenti o conferme, quindi produci un piano strutturato che li orchestria."\
-        " Se una risposta diretta è sufficiente, restituisci needs_plan=false. In caso contrario, needs_plan=true e steps deve includere almeno un'azione tool seguita da una risposta finale."
+        "Sei un pianificatore. Valuta se la richiesta richiede tool esterni. Se sì, crea un piano con steps. Se no, needs_plan=false."
     )
 
     try:
@@ -1248,9 +1235,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
 
 {tool_results_text}
 
-IMPORTANTE: Genera una risposta testuale completa e utile per l'utente basata sui risultati dei tool sopra. 
-La risposta deve essere in italiano e spiegare chiaramente cosa è stato trovato o calcolato.
-Se c'è un errore, spiega all'utente cosa è andato storto e come può risolvere."""
+Rispondi all'utente basandoti sui risultati dei tool sopra."""
             try:
                 logger.error(f"🔍🔍🔍 Calling Ollama to generate final response. Prompt length: {len(final_prompt)}")
                 # IMPORTANT: When tools=None, generate_with_context returns a string, not a dict

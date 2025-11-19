@@ -1632,25 +1632,7 @@ L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool g
 
 {tool_results_text}
 
-=== ISTRUZIONI CRITICHE ===
-1. Hai ricevuto i risultati dei tool chiamati sopra - questi sono DATI REALI ottenuti dal web o da WhatsApp
-2. Per tool web_search: i risultati contengono informazioni da ricerche web. Analizza attentamente TITOLI, URL e CONTENUTO di ciascun risultato
-3. Per tool web_fetch: il contenuto contiene il testo completo di una pagina web specifica
-4. Per tool browser: il contenuto della pagina è nel formato YAML/accessibility snapshot
-5. Per tool get_whatsapp_messages: i risultati contengono messaggi WhatsApp con testo, data/ora, e mittente. Se l'utente chiede "messaggi di oggi", il tool è già stato chiamato con date_filter='today' e i risultati mostrano SOLO i messaggi di oggi. Se vedi count=0, significa che non ci sono messaggi per quella data, NON che WhatsApp non è configurato. Se vedi un errore nel risultato del tool, allora WhatsApp potrebbe non essere configurato.
-6. DEVI analizzare ATTENTAMENTE i risultati sopra - contengono informazioni REALI che rispondono alla domanda dell'utente
-7. Se i risultati contengono informazioni rilevanti (anche parziali), USA QUELLE INFORMAZIONI per rispondere
-8. NON dire "non ho trovato informazioni" se i risultati contengono dati - i tool hanno funzionato e hai informazioni reali sopra
-9. Se vedi risultati con titoli, URL e contenuto, significa che la ricerca ha trovato informazioni - usale!
-10. Se vedi messaggi WhatsApp nei risultati, usa le informazioni di data/ora e mittente per rispondere accuratamente
-11. Rispondi in italiano, in modo naturale e diretto, basandoti SUI DATI REALI sopra
-12. NON usare più tool - i tool sono già stati eseguiti
-
-IMPORTANTE: 
-- Se vedi "=== Risultati Ricerca Web ===" con titoli e contenuti sopra, significa che hai informazioni reali. Usale per rispondere all'utente, non dire che non hai trovato nulla!
-- Se vedi messaggi WhatsApp, usa le date e gli orari per filtrare correttamente (es. "messaggi di oggi" = solo messaggi con data di oggi)
-
-Ora analizza i risultati sopra e rispondi all'utente basandoti sui DATI REALI:"""
+Analizza i risultati dei tool sopra e rispondi all'utente in modo naturale e diretto basandoti sui dati ottenuti."""
             logger.info(f"Reinvoking LLM with tool results. Prompt length: {len(current_prompt)}")
             tool_results.extend(iteration_tool_results)
             

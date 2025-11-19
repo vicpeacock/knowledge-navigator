@@ -37,7 +37,7 @@ class ToolManager:
         return [
             {
                 "name": "get_calendar_events",
-                "description": "Recupera eventi dal calendario Google. Usa questo tool quando l'utente chiede informazioni sul calendario, eventi, appuntamenti, meeting.",
+                "description": "Recupera eventi dal calendario Google.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -58,22 +58,22 @@ class ToolManager:
             },
             {
                 "name": "get_emails",
-                "description": "Recupera email da Gmail. DEVI usare questo tool quando l'utente chiede di leggere, vedere, controllare, o recuperare email. IMPORTANTE: Se l'utente chiede 'ultime N email' o 'leggi le email' senza specificare 'non lette', usa query vuota (o None) per recuperare TUTTE le email (incluse quelle già lette). Usa 'is:unread' solo se l'utente chiede specificamente email non lette.",
+                "description": "Recupera email da Gmail. Usa query Gmail standard (es: 'is:unread' per email non lette, 'from:example@gmail.com' per email da un mittente).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Query Gmail (es: 'is:unread' per SOLO email non lette, 'from:example@gmail.com' per email da un mittente). IMPORTANTE: Se l'utente chiede 'ultime N email' o 'leggi le email' senza menzionare 'non lette', lascia questo campo VUOTO o None per recuperare TUTTE le email (incluse quelle già lette)."
+                            "description": "Query Gmail. Lasciare vuoto per recuperare tutte le email. Usa 'is:unread' per email non lette."
                         },
                         "max_results": {
                             "type": "integer",
-                            "description": "Numero massimo di email da recuperare. Se l'utente dice 'ultime 5 email', usa 5. Default: 10, max: 50",
+                            "description": "Numero massimo di email da recuperare. Default: 10, max: 50",
                             "default": 10
                         },
                         "include_body": {
                             "type": "boolean",
-                            "description": "Includere il corpo completo delle email. DEVI impostarlo a true se l'utente chiede di leggere, vedere il contenuto, o un riassunto delle email (default: true)",
+                            "description": "Includere il corpo completo delle email. Default: true",
                             "default": True
                         }
                     }
@@ -81,7 +81,7 @@ class ToolManager:
             },
             {
                 "name": "summarize_emails",
-                "description": "Riassume automaticamente le email non lette usando AI. Usa questo tool quando l'utente chiede un riassunto delle email o delle ultime email.",
+                "description": "Riassume automaticamente le email non lette usando AI.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -95,13 +95,13 @@ class ToolManager:
             },
             {
                 "name": "archive_email",
-                "description": "Archivia un'email rimuovendola dalla Posta in arrivo. Usa questo tool quando l'utente chiede di archiviare, rimuovere dalla posta in arrivo, o mettere via un'email. IMPORTANTE: Richiede l'email_id dell'email da archiviare.",
+                "description": "Archivia un'email rimuovendola dalla Posta in arrivo.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "email_id": {
                             "type": "string",
-                            "description": "ID dell'email Gmail da archiviare (es: '19a98336265a2d64'). DEVI recuperare questo ID usando get_emails prima di archiviare."
+                            "description": "ID dell'email Gmail da archiviare (es: '19a98336265a2d64')"
                         }
                     },
                     "required": ["email_id"]
@@ -109,7 +109,7 @@ class ToolManager:
             },
             {
                 "name": "send_email",
-                "description": "Invia un'email tramite Gmail. Usa questo tool quando l'utente chiede di inviare, mandare, o scrivere un'email. IMPORTANTE: Se l'utente vuole rispondere a un'email esistente, usa reply_to_email invece di send_email.",
+                "description": "Invia un'email tramite Gmail.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -135,13 +135,13 @@ class ToolManager:
             },
             {
                 "name": "reply_to_email",
-                "description": "Risponde a un'email esistente tramite Gmail. Usa questo tool quando l'utente chiede di rispondere, replicare, o rispondere a un'email specifica. IMPORTANTE: Richiede l'email_id dell'email a cui rispondere.",
+                "description": "Risponde a un'email esistente tramite Gmail.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "email_id": {
                             "type": "string",
-                            "description": "ID dell'email Gmail a cui rispondere (es: '19a98336265a2d64'). DEVI recuperare questo ID usando get_emails prima di rispondere."
+                            "description": "ID dell'email Gmail a cui rispondere (es: '19a98336265a2d64')"
                         },
                         "body": {
                             "type": "string",
@@ -157,7 +157,7 @@ class ToolManager:
             },
             {
                 "name": "web_search",
-                "description": "Esegue una ricerca sul web usando l'API di ricerca web di Ollama. Usa questo tool quando l'utente chiede informazioni aggiornate dal web, notizie, o informazioni che potrebbero non essere nel tuo training data. Richiede OLLAMA_API_KEY configurata.",
+                "description": "Esegue una ricerca sul web usando l'API di ricerca web di Ollama. Richiede OLLAMA_API_KEY configurata.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -171,7 +171,7 @@ class ToolManager:
             },
             {
                 "name": "web_fetch",
-                "description": "Recupera il contenuto di una pagina web specifica usando l'API di Ollama. Usa questo tool quando l'utente chiede di accedere a un URL specifico o di leggere il contenuto di una pagina web. Richiede OLLAMA_API_KEY configurata.",
+                "description": "Recupera il contenuto di una pagina web specifica usando l'API di Ollama. Richiede OLLAMA_API_KEY configurata.",
                 "parameters": {
                     "type": "object",
                     "properties": {
