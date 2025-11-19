@@ -31,6 +31,7 @@ def mock_user():
     user = MagicMock()
     user.id = uuid4()
     user.email = "test@example.com"
+    user.timezone = "UTC"  # Required for daily_session_manager
     return user
 
 
