@@ -834,7 +834,7 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
           <div className="text-center text-gray-500 dark:text-gray-400 text-sm">
             <p className="mb-2">Questa sessione è archiviata.</p>
             <p>Puoi visualizzare i messaggi ma non puoi inviare nuovi messaggi.</p>
-            <p className="mt-2 text-xs">Usa il pulsante "Restore" nella barra superiore per riattivarla.</p>
+            <p className="mt-2 text-xs">Usa il pulsante &quot;Restore&quot; nella barra superiore per riattivarla.</p>
           </div>
         </div>
       ) : (
