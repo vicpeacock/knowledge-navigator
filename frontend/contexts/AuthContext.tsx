@@ -55,8 +55,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(response.data)
       setIsLoading(false)
     } catch (error: any) {
-      // Token invalid or expired
+      // Token invalid or expired - try to refresh
       console.error('Auth check failed:', error)
+      
+      // Try to refresh token if we have a refresh token
+      const storedRefreshToken = localStorage.getItem('refresh_token')
+      if (storedRefreshToken && error.response?.status === 401) {
+        try {
+          // Call refresh API directly to avoid circular dependency
+          const refreshResponse = await authApi.refresh({ refresh_token: storedRefreshToken })
+          const { access_token } = refreshResponse.data
+          
+          localStorage.setItem('access_token', access_token)
+          setToken(access_token)
+          
+          // Retry checkAuth after refresh
+          const retryResponse = await authApi.me()
+          setUser(retryResponse.data)
+          setIsLoading(false)
+          return
+        } catch (refreshError) {
+          console.error('Token refresh failed:', refreshError)
+          // Fall through to clear tokens
+        }
+      }
+      
+      // Clear tokens and redirect to login
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
       setUser(null)
