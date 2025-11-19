@@ -1,0 +1,53 @@
+# Docker Compose per testare il deployment cloud localmente
+# Usa l'immagine Docker buildata invece di Ollama locale
+version: '3.8'
+
+services:
+  # Usa PostgreSQL e ChromaDB esistenti dal docker-compose.yml principale
+  # (assumiamo che siano già in esecuzione)
+
+  backend-cloud-test:
+    image: knowledge-navigator-backend:test
+    container_name: knowledge-navigator-backend-cloud-test
+    ports:
+      - "8002:8000"  # Porta diversa per non confliggere con backend locale
+    environment:
+      # Database (usa PostgreSQL esistente)
+      - DATABASE_URL=postgresql+asyncpg://knavigator:knavigator_pass@host.docker.internal:5432/knowledge_navigator
+      
+      # ChromaDB (usa ChromaDB esistente)
+      - CHROMADB_HOST=host.docker.internal
+      - CHROMADB_PORT=8001
+      
+      # LLM Provider - Gemini per cloud
+      - LLM_PROVIDER=gemini
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      
+      # Google OAuth (per integrazioni)
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI_CALENDAR=http://localhost:8002/api/integrations/calendars/oauth/callback
+      - GOOGLE_REDIRECT_URI_EMAIL=http://localhost:8002/api/integrations/emails/oauth/callback
+      
+      # Encryption
+      - CREDENTIALS_ENCRYPTION_KEY=${CREDENTIALS_ENCRYPTION_KEY:-your-32-byte-encryption-key-change-me}
+      
+      # JWT
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-jwt-secret-key-change-in-production}
+      
+      # Port
+      - PORT=8000
+      
+      # Logging
+      - LOG_LEVEL=INFO
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Per accedere a servizi host da container
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
