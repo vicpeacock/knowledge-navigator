@@ -51,3 +51,23 @@ services:
       start_period: 40s
     restart: unless-stopped
 
+  frontend-cloud-test:
+    image: knowledge-navigator-frontend:test
+    container_name: knowledge-navigator-frontend-cloud-test
+    ports:
+      - "3004:3000"  # Porta diversa per non confliggere con frontend locale (3003)
+    environment:
+      # Backend URL (usa backend Docker test)
+      - NEXT_PUBLIC_API_URL=http://localhost:8002
+      - PORT=3000
+      - NODE_ENV=production
+    depends_on:
+      - backend-cloud-test
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
