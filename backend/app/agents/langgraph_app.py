@@ -757,7 +757,6 @@ class LangGraphChatState(TypedDict, total=False):
 async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
     """Normalizza l'evento in arrivo e aggiorna la history."""
     logger = logging.getLogger(__name__)
-    logger.error("📥📥📥 Event Handler node executing - CRITICAL LOG")
     logger.info("📥 Event Handler node executing")
     log_agent_activity(state, agent_id="event_handler", status="started")
     try:
@@ -765,13 +764,20 @@ async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
         event = state.get("event", {})
         role = event.get("role", "user")
         content = event.get("content", "")
+        
+        # Validate event
+        if not content:
+            logger.warning("⚠️  Event has empty content")
+        
+        # Add message to history
         messages.append({"role": role, "content": content})
         state["messages"] = messages
-        logger.error("✅✅✅ Event Handler completed, returning state - CRITICAL LOG")
+        
+        logger.info(f"✅ Event Handler completed. Message added: {role} - {content[:50]}...")
         log_agent_activity(state, agent_id="event_handler", status="completed")
         return state
     except Exception as exc:
-        logger.error("❌❌❌ Event Handler ERROR: %s", exc, exc_info=True)
+        logger.error("❌ Event Handler ERROR: %s", exc, exc_info=True)
         log_agent_activity(
             state,
             agent_id="event_handler",
@@ -1609,6 +1615,12 @@ async def response_formatter_node(state: LangGraphChatState) -> LangGraphChatSta
 
 
 def _routing_router(state: LangGraphChatState) -> str:
+    """Route from orchestrator to appropriate next node"""
+    logger = logging.getLogger(__name__)
+    
+    # Always route to tool_loop - it will handle planning and execution
+    # The tool_loop_node will decide whether to plan, execute tools, or respond directly
+    logger.info("Routing from orchestrator to tool_loop")
     return "tool_loop"
 
 
