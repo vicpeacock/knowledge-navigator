@@ -11,7 +11,10 @@ from app.main import app
 
 @pytest.fixture
 def client():
-    """Create test client"""
+    """Create test client with authentication bypass"""
+    from app.main import app
+    # Override dependencies to bypass authentication
+    app.dependency_overrides = {}
     return TestClient(app)
 
 
@@ -211,7 +214,7 @@ class TestChatEndpoint:
         mock_background_task_manager.return_value = mock_bg_tasks
         mock_daily_mgr = AsyncMock()
         mock_daily_mgr.check_day_transition = AsyncMock(return_value=(False, None))
-        mock_daily_session_manager.return_value = mock_daily_mgr
+        mock_get_daily_session_manager.return_value = mock_daily_mgr
         
         # Mock LangGraph returning empty response
         with patch('app.api.sessions.run_langgraph_chat') as mock_langgraph:
@@ -238,10 +241,14 @@ class TestChatEndpoint:
                 headers={"Authorization": "Bearer test_token"}
             )
             
-            # Assertions - should still return a non-empty response due to fallback
-            assert response.status_code == 200
-            data = response.json()
-            assert "response" in data
-            assert data["response"] is not None
-            assert len(data["response"].strip()) > 0, "Response should have fallback message when LangGraph returns empty"
+            try:
+                # Assertions - should still return a non-empty response due to fallback
+                assert response.status_code == 200
+                data = response.json()
+                assert "response" in data
+                assert data["response"] is not None
+                assert len(data["response"].strip()) > 0, "Response should have fallback message when LangGraph returns empty"
+            finally:
+                # Clean up dependency overrides
+                app.dependency_overrides.clear()
 
