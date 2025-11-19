@@ -1242,6 +1242,15 @@ async def chat(
             # Try to get the response anyway, even if commit failed
             logger.warning("⚠️  Database commit failed, but returning response anyway")
 
+        # Ensure response is not empty - if it is, provide a fallback message
+        if not chat_response.response or not chat_response.response.strip():
+            logger.warning("⚠️  Chat response is empty, providing fallback message")
+            chat_response = chat_response.model_copy(
+                update={
+                    "response": "Mi dispiace, non sono riuscito a generare una risposta. Potresti riprovare?"
+                }
+            )
+
         agent_events = [
             normalized
             for evt in chat_response.agent_activity

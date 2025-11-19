@@ -1506,6 +1506,15 @@ async def response_formatter_node(state: LangGraphChatState) -> LangGraphChatSta
             logger.error(f"🔍 Response Formatter: response preview: {response_text[:100] if response_text else 'EMPTY'}")
             logger.error(f"🔍 Response Formatter: tools_used: {len(tools_used)}, tool_results: {len(tool_results)}")
             
+            # Ensure response is not empty - provide fallback if needed
+            if not response_text or not response_text.strip():
+                logger.warning("⚠️  Response text is empty in response_formatter_node, using fallback")
+                if tool_results:
+                    # If we have tool results but no response, create a summary
+                    response_text = "Ho completato le azioni richieste."
+                else:
+                    response_text = "Ho ricevuto il tuo messaggio. Come posso aiutarti?"
+            
             state["chat_response"] = ChatResponse(
                 response=response_text,
                 session_id=state["session_id"],
