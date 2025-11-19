@@ -157,7 +157,7 @@ class ToolManager:
             },
             {
                 "name": "web_search",
-                "description": "Esegue una ricerca sul web usando l'API di ricerca web di Ollama. Usa questo tool quando l'utente chiede informazioni che non sono nella memoria o nel contesto della sessione, o quando chiede di cercare qualcosa sul web. Richiede OLLAMA_API_KEY configurata.",
+                "description": "Esegue una ricerca sul web usando l'API di ricerca web di Ollama. Usa questo tool SOLO per informazioni generali che NON sono email o calendario dell'utente. Esempi: 'cerca informazioni su X', 'notizie su Y', 'cosa è Z'. NON usare per domande su email ('ci sono email non lette?' → usa get_emails) o calendario ('cosa ho domani?' → usa get_calendar_events). Richiede OLLAMA_API_KEY configurata.",
                 "parameters": {
                     "type": "object",
                     "properties": {

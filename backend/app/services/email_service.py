@@ -97,6 +97,8 @@ class EmailService:
         include_body: bool = False,
     ) -> List[Dict[str, Any]]:
         """Get messages from Gmail"""
+        import asyncio
+        
         service_key = self._get_service_key("gmail", integration_id)
         service = self._services.get(service_key)
         
@@ -108,23 +110,50 @@ class EmailService:
             query_params["q"] = query
         
         try:
-            messages_result = (
-                service.users()
-                .messages()
-                .list(userId="me", **query_params)
-                .execute()
-            )
+            # Wrap Gmail API calls in timeout to prevent hanging
+            # Gmail API can be slow, especially with many emails
+            async def _fetch_messages():
+                loop = asyncio.get_event_loop()
+                # Run blocking Gmail API call in thread pool
+                messages_result = await loop.run_in_executor(
+                    None,
+                    lambda: service.users().messages().list(userId="me", **query_params).execute()
+                )
+                return messages_result
+            
+            # Set timeout to 60 seconds for Gmail API calls
+            messages_result = await asyncio.wait_for(_fetch_messages(), timeout=60.0)
             
             messages = messages_result.get("messages", [])
             result = []
             
-            for msg in messages:
-                msg_detail = (
-                    service.users()
-                    .messages()
-                    .get(userId="me", id=msg["id"], format="full" if include_body else "metadata")
-                    .execute()
+            # Process messages with timeout for each detail fetch
+            async def _fetch_message_detail(msg_id: str):
+                loop = asyncio.get_event_loop()
+                return await loop.run_in_executor(
+                    None,
+                    lambda: service.users().messages().get(
+                        userId="me", 
+                        id=msg_id, 
+                        format="full" if include_body else "metadata"
+                    ).execute()
                 )
+            
+            for msg in messages:
+                try:
+                    # Set timeout to 30 seconds per message detail
+                    msg_detail = await asyncio.wait_for(
+                        _fetch_message_detail(msg["id"]), 
+                        timeout=30.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"Timeout fetching Gmail message detail for {msg['id']}")
+                    # Skip this message and continue with others
+                    continue
+                except Exception as e:
+                    logger.error(f"Error fetching Gmail message detail for {msg['id']}: {e}")
+                    # Skip this message and continue with others
+                    continue
                 
                 headers = {h["name"]: h["value"] for h in msg_detail["payload"].get("headers", [])}
                 
@@ -132,7 +161,7 @@ class EmailService:
                 label_ids = msg_detail.get("labelIds", [])
                 
                 email_data = {
-                    "id": msg["id"],
+                    "id": msg_detail["id"],
                     "subject": headers.get("Subject", ""),
                     "from": headers.get("From", ""),
                     "to": headers.get("To", ""),
@@ -150,6 +179,9 @@ class EmailService:
                 result.append(email_data)
             
             return result
+        except asyncio.TimeoutError:
+            logger.error("Timeout fetching Gmail messages list")
+            raise ValueError("Gmail API timeout: The request took too long. Please try again.")
         except HttpError as exc:
             if exc.resp.status in (401, 403):
                 # Token revoked or scope insufficient

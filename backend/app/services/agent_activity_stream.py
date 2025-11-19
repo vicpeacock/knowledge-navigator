@@ -71,6 +71,34 @@ class AgentActivityStream:
         import logging
         logger = logging.getLogger(__name__)
         
+        # Check for null UUID (00000000-0000-0000-0000-000000000000)
+        null_uuid = UUID('00000000-0000-0000-0000-000000000000')
+        if session_id == null_uuid:
+            agent_id = event.get('agent_id', 'unknown') if isinstance(event, dict) else getattr(event, 'agent_id', 'unknown')
+            status = event.get('status', 'unknown') if isinstance(event, dict) else getattr(event, 'status', 'unknown')
+            logger.warning(f"⚠️⚠️⚠️  Attempted to publish telemetry with null UUID! agent_id={agent_id}, status={status}. This should not happen.")
+            import sys
+            import traceback
+            try:
+                # Get the full stack trace
+                stack_lines = traceback.format_stack()
+                if stack_lines:
+                    print(f"[TELEMETRY] ERROR: Attempted to publish with null UUID! agent_id={agent_id}, status={status}", file=sys.stderr)
+                    print(f"[TELEMETRY] Stack trace:", file=sys.stderr)
+                    for line in stack_lines:
+                        print(line, file=sys.stderr, end='')
+                else:
+                    # Fallback: use format_exc if format_stack is empty
+                    import sys as sys_module
+                    exc_type, exc_value, exc_traceback = sys_module.exc_info()
+                    if exc_traceback:
+                        stack_lines = traceback.format_tb(exc_traceback)
+                        for line in stack_lines:
+                            print(line, file=sys.stderr, end='')
+            except Exception as e:
+                logger.error(f"Failed to print stack trace: {e}", exc_info=True)
+            return
+        
         serialised = self._serialize_event(event)
         history = self._history[session_id]
         history.append(serialised)
@@ -88,9 +116,13 @@ class AgentActivityStream:
         
         if not subscribers:
             logger.warning(f"⚠️  No subscribers for session {session_id}. Event will not be delivered: {agent_id} ({status}). Active sessions: {all_sessions}")
+            import sys
+            print(f"[TELEMETRY] No subscribers for session {session_id}, active sessions: {all_sessions}", file=sys.stderr)
             return
         
-        logger.info(f"📡 Publishing event to {len(subscribers)} subscriber(s) for session {session_id}: {agent_id} ({status})")
+        logger.error(f"📡📡📡 Publishing event to {len(subscribers)} subscriber(s) for session {session_id}: {agent_id} ({status})")
+        import sys
+        print(f"[TELEMETRY] Publishing event to {len(subscribers)} subscriber(s): {agent_id} ({status})", file=sys.stderr)
 
         # Process subscribers outside the lock to avoid blocking
         events_sent = 0
@@ -114,9 +146,13 @@ class AgentActivityStream:
                     continue
         
         if events_sent > 0:
-            logger.debug(f"✅ Successfully sent event to {events_sent}/{len(subscribers)} subscribers: {agent_id} ({status})")
+            logger.error(f"✅✅✅ Successfully sent event to {events_sent}/{len(subscribers)} subscribers: {agent_id} ({status})")
+            import sys
+            print(f"[TELEMETRY] Successfully queued event: {agent_id} ({status}) to {events_sent} subscriber(s)", file=sys.stderr)
         else:
-            logger.warning(f"⚠️  Failed to send event to any subscriber: {agent_id} ({status})")
+            logger.error(f"⚠️⚠️⚠️  Failed to send event to any subscriber: {agent_id} ({status})")
+            import sys
+            print(f"[TELEMETRY] FAILED to queue event: {agent_id} ({status})", file=sys.stderr)
 
     def snapshot(self, session_id: UUID) -> List[Dict[str, Any]]:
         """Return the current history snapshot for the session."""

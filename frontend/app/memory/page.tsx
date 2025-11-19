@@ -3,14 +3,24 @@
 import MemoryView from '@/components/MemoryView'
 import LongTermMemoryManager from '@/components/LongTermMemoryManager'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft } from 'lucide-react'
 
 export default function MemoryPage() {
   const [activeTab, setActiveTab] = useState<'search' | 'manage'>('manage')
+  const router = useRouter()
 
   return (
     <div className="min-h-screen p-8">
       <div className="max-w-6xl mx-auto">
         <div className="mb-6">
+          <button
+            onClick={() => router.back()}
+            className="mb-4 flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+          >
+            <ArrowLeft size={20} />
+            <span>Indietro</span>
+          </button>
           <div className="flex gap-2 border-b">
             <button
               onClick={() => setActiveTab('manage')}

@@ -16,8 +16,9 @@ class OllamaClient:
         self.base_url = base_url or settings.ollama_base_url
         self.model = model or settings.ollama_model
         # Use longer timeout for background agent (phi3:mini can be very slow)
+        # Increased timeouts to handle Gmail API calls and LangGraph execution
         actual_base_url = self.base_url
-        timeout_value = 300.0 if actual_base_url == settings.ollama_background_base_url else 120.0  # 5 minutes for background
+        timeout_value = 600.0 if actual_base_url == settings.ollama_background_base_url else 300.0  # 10 minutes for background, 5 minutes for main
         self.client = httpx.AsyncClient(timeout=timeout_value)
 
     async def generate(
@@ -124,12 +125,17 @@ class OllamaClient:
 
 Hai accesso a memoria multi-livello (short/medium/long-term), integrazioni (Gmail, Calendar, web), e tool per eseguire azioni.
 
-IMPORTANTE: Quando l'utente chiede informazioni che richiedono dati esterni (email, calendario, web) o azioni specifiche (inviare email, archiviare email, cercare sul web), DEVI usare i tool appropriati. Non rispondere direttamente senza aver prima recuperato i dati necessari tramite i tool.
+IMPORTANTE - Regole per l'uso dei tool:
+1. EMAIL: Se l'utente chiede di leggere, vedere, controllare email, o domande come "ci sono email non lette?", "email nuove", "leggi le email" → USA SEMPRE get_emails (NON web_search)
+2. CALENDARIO: Se l'utente chiede eventi, appuntamenti, meeting, impegni → USA get_calendar_events (NON web_search)
+3. WEB SEARCH: Usa web_search SOLO per informazioni generali che NON sono email/calendario (es: "cerca informazioni su X", "notizie su Y")
+4. MAI usare web_search per domande su email o calendario dell'utente
 
 Esempi:
-- Se l'utente chiede "Ci sono email non lette?" → usa get_emails con query='is:unread'
-- Se l'utente chiede "Cosa ho in calendario domani?" → usa get_calendar_events
-- Se l'utente chiede informazioni che non sono nella memoria → usa web_search
+- "Ci sono email non lette?" → usa get_emails con query='is:unread'
+- "Cosa ho in calendario domani?" → usa get_calendar_events
+- "Cerca informazioni su Python" → usa web_search
+- "Email di oggi" → usa get_emails (NON web_search)
 
 Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
         

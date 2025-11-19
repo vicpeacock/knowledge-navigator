@@ -35,7 +35,7 @@ Personal AI Assistant - Sistema multi-agente per gestione conoscenza e automazio
 - Una sessione per giorno per utente
 - Archiviazione automatica con riassunto
 - Transizione di giorno con dialog di conferma
-- Supporto timezone personalizzato
+- Supporto timezone personalizzato (configurabile nel Profile)
 
 ### 📧 Integrazioni
 - **Gmail**: Lettura email, invio, archiviazione, risposte automatiche
@@ -48,6 +48,8 @@ Personal AI Assistant - Sistema multi-agente per gestione conoscenza e automazio
 - Raggruppamento per tipo
 - Cancellazione batch
 - Ottimizzazioni database per performance
+- UI semplificata con bottoni testo + icona
+- Popup allargato (500px) per migliore usabilità
 
 ### 💾 Gestione Memoria
 - Memoria a lungo termine con gestione dedicata
@@ -60,6 +62,7 @@ Personal AI Assistant - Sistema multi-agente per gestione conoscenza e automazio
 - Isolamento dati per utente
 - Autenticazione JWT con refresh tokens
 - Ruoli utente (admin, user, viewer)
+- Gestione profilo utente con configurazione timezone
 
 ## 📚 Documentazione
 

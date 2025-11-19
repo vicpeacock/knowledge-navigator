@@ -78,9 +78,10 @@ Sistema di analisi intelligente delle email implementato con successo!
    - Link a sessione automatica (se creata)
    ↓
 6. Utente vede:
-   - Notifica nella campanella
+   - Notifica nella campanella (popup allargato 500px, bottoni semplificati)
    - Nuova sessione nella lista (se creata)
    - Messaggio iniziale con suggerimenti azioni
+   - **Nota**: I bottoni "Integrazioni" e "Memoria" sono stati rimossi da SessionList (disponibili solo nel menu principale)
 ```
 
 ---

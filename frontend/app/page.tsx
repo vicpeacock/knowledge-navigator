@@ -7,7 +7,7 @@ import { sessionsApi } from '@/lib/api'
 import { Session } from '@/types'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { useAuth } from '@/contexts/AuthContext'
-import { Menu, X, User, Users, BarChart3, LogOut, Settings } from 'lucide-react'
+import { Menu, X, User, Users, BarChart3, LogOut, Settings, Brain } from 'lucide-react'
 
 function DashboardContent() {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -138,6 +138,16 @@ function DashboardContent() {
                     >
                       <Settings size={16} />
                       Integrazioni
+                    </button>
+                    <button
+                      onClick={() => {
+                        router.push('/memory')
+                        setMenuOpen(false)
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                    >
+                      <Brain size={16} />
+                      Memoria
                     </button>
                     {user.role === 'admin' && (
                       <>

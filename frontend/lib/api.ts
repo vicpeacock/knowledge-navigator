@@ -9,7 +9,7 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
   withCredentials: false,
-  timeout: 120000, // 2 minutes - increased for longer responses (file summaries can take time)
+  timeout: 300000, // 5 minutes - increased for long-running operations (Gmail API, LangGraph, tool execution)
 })
 
 // Request interceptor: Add JWT token, multi-tenant headers, and trace ID
@@ -188,6 +188,10 @@ export const usersApi = {
   delete: (id: string) => api.delete(`/api/v1/users/${id}`),
   resendInvitation: (id: string) =>
     api.post(`/api/v1/users/${id}/resend-invitation`, {}),
+  getProfile: () =>
+    api.get('/api/v1/users/me'),
+  updateProfile: (data: { name?: string; timezone?: string }) =>
+    api.put('/api/v1/users/me', data),
   getToolsPreferences: () =>
     api.get('/api/v1/users/me/tools'),
   updateToolsPreferences: (enabledTools: string[]) =>
@@ -217,7 +221,7 @@ export const sessionsApi = {
   restore: (id: string) => api.post(`/api/sessions/${id}/restore`),
   getMessages: (id: string) => api.get(`/api/sessions/${id}/messages`),
   chat: (id: string, message: string, proceedWithNewDay: boolean = false) =>
-    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: true, force_web_search: false, proceed_with_new_day: proceedWithNewDay }, { timeout: 300000 }), // 5 minutes to allow long-running background tasks
+    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: true, force_web_search: false, proceed_with_new_day: proceedWithNewDay }, { timeout: 600000 }), // 10 minutes to allow long-running operations (Gmail API, LangGraph, tool execution)
   getMemory: (id: string) => api.get(`/api/sessions/${id}/memory`, { timeout: 30000 }), // 30 seconds
   cleanContradictionNotifications: () => api.delete('/api/sessions/notifications/contradictions'),
 }
@@ -230,18 +234,18 @@ export const notificationsApi = {
     read?: boolean
     limit?: number
     offset?: number
-  }) => api.get('/api/notifications/', { params }),
+  }) => api.get('/api/notifications/', { params, timeout: 30000 }), // 30 seconds timeout
   count: (params?: {
     session_id?: string
     urgency?: string
     read?: boolean
-  }) => api.get('/api/notifications/count', { params }),
-  markRead: (notificationId: string) => api.post(`/api/notifications/${notificationId}/read`),
+  }) => api.get('/api/notifications/count', { params, timeout: 30000 }), // 30 seconds timeout
+  markRead: (notificationId: string) => api.post(`/api/notifications/${notificationId}/read`, null, { timeout: 30000 }),
   markAllRead: (params?: { session_id?: string; urgency?: string }) =>
-    api.post('/api/notifications/read-all', null, { params }),
-  delete: (notificationId: string) => api.delete(`/api/notifications/${notificationId}`),
+    api.post('/api/notifications/read-all', null, { params, timeout: 30000 }), // 30 seconds timeout
+  delete: (notificationId: string) => api.delete(`/api/notifications/${notificationId}`, { timeout: 30000 }),
   deleteBatch: (notificationIds: string[]) =>
-    api.post('/api/notifications/batch/delete', notificationIds),
+    api.post('/api/notifications/batch/delete', notificationIds, { timeout: 30000 }), // 30 seconds timeout
 }
 
 // Files API

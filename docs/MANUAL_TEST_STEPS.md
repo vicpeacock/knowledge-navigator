@@ -141,6 +141,7 @@ Error processing email action for {email_id}: ...
 ### Step 6: Verifica Sessione Automatica
 
 1. **Vai alla lista sessioni** (sidebar o `/sessions`)
+   - **Nota**: I bottoni "Integrazioni" e "Memoria" sono stati rimossi da SessionList e sono disponibili solo nel menu principale
 2. **Cerca nuova sessione** con:
    - Titolo: "Email: Please confirm your attendance..."
    - Descrizione: "Email da {mittente}"

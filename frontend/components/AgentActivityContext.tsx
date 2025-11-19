@@ -122,17 +122,23 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
     const source = new EventSource(streamUrl)
 
     source.onopen = () => {
-      console.log('[AgentActivity] SSE connection opened')
+      console.log('[AgentActivity] ✅✅✅ SSE connection opened for session:', sessionId)
       setConnectionState('open')
     }
 
     source.onerror = (error) => {
-      console.error('[AgentActivity] SSE connection error:', error)
+      console.error('[AgentActivity] ❌❌❌ SSE connection error:', error)
+      console.error('[AgentActivity] Error details:', {
+        readyState: source.readyState,
+        url: streamUrl.replace(token || '', '[TOKEN]'),
+        sessionId,
+      })
       source.close()
       setConnectionState('closed')
       if (!isUnmountedRef.current && !reconnectTimerRef.current) {
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null
+          console.log('[AgentActivity] 🔄 Reconnecting SSE stream...')
           connectStream()
         }, 3000)
       }

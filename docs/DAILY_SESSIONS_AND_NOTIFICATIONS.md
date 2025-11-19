@@ -31,6 +31,14 @@ Servizio che gestisce le sessioni giornaliere:
 - Aggiunto campo `inactivity_timeout_minutes` alla tabella `users` (default: 30)
 - Migration: `4d2ea1f98574_add_user_timezone_and_inactivity_timeout.py`
 
+#### Gestione Profilo Utente
+
+- Endpoint `GET /api/v1/users/me` per ottenere il profilo corrente (incluso timezone)
+- Endpoint `PUT /api/v1/users/me` per aggiornare nome e timezone
+- Sezione "Profile Settings" nella pagina Profile (`/settings/profile`)
+- Lista di 17 timezone comuni disponibili per selezione
+- Il timezone selezionato viene utilizzato dal `DailySessionManager` per determinare il giorno corrente
+
 #### Integrazione con Email
 
 - `EmailActionProcessor` ora aggiunge le email alla sessione giornaliera invece di creare sessioni ad-hoc
@@ -188,6 +196,12 @@ Pagina completa per gestire tutte le notifiche:
 - "Pulisci": elimina tutte le notifiche pendenti (batch delete)
 - "Vedi Tutte": link alla pagina dedicata `/notifications`
 
+**Design Semplificato**:
+- Bottoni con solo testo + icona (senza gradienti o effetti visivi complessi)
+- Popup allargato da 384px a 500px per evitare sovrapposizioni
+- Layout header ottimizzato con `flex-1` e `flex-shrink-0` per evitare overflow
+- Bottoni nelle notifiche di contraddizione semplificati (Risolvi, Ignora, Conferma, Annulla)
+
 **Real-Time**:
 - SSE quando popup aperto per aggiornamenti immediati
 - Polling quando popup chiuso per mantenere conteggio aggiornato
@@ -213,6 +227,19 @@ Marca tutte le notifiche come lette:
 
 Cancellazione batch:
 - Body: array di `notification_ids`
+
+#### `GET /api/v1/users/me`
+
+Ottiene il profilo dell'utente corrente:
+- Restituisce: `id`, `email`, `name`, `role`, `active`, `email_verified`, `timezone`, `last_login_at`, `created_at`
+- Utilizzato dalla pagina Profile per visualizzare e modificare le impostazioni
+
+#### `PUT /api/v1/users/me`
+
+Aggiorna il profilo dell'utente corrente:
+- Body: `UserProfileUpdate` con `name` e `timezone` opzionali
+- Restituisce: profilo aggiornato
+- Utilizzato dalla pagina Profile per salvare modifiche a nome e timezone
 
 ---
 
@@ -263,10 +290,13 @@ Test per il componente dialog:
 - `backend/app/models/database.py` - Aggiunti campi `timezone` e `inactivity_timeout_minutes` a User
 - `backend/app/models/schemas.py` - Aggiunti campi `day_transition_pending` e `new_session_id` a ChatResponse
 - `backend/app/api/sessions.py` - Integrazione DailySessionManager, ottimizzazione query notifiche
+- `backend/app/api/users.py` - Endpoint `/me` per gestione profilo utente (timezone), routing fix
 - `backend/app/api/memory.py` - Nuovi endpoint per gestione memoria
 - `backend/app/api/notifications.py` - Endpoint SSE, batch delete, paginazione
 - `backend/app/services/email_action_processor.py` - Integrazione DailySessionManager
 - `backend/app/services/notification_service.py` - Supporto paginazione
+- `backend/app/services/agent_activity_stream.py` - Fix UUID nullo, migliorato stack trace logging
+- `backend/app/services/service_health_agent.py` - Fix uso `publish_to_all_active_sessions()` invece di UUID nullo
 - `backend/app/core/dependencies.py` - Dependency per DailySessionManager
 
 ### Frontend
@@ -279,9 +309,11 @@ Test per il componente dialog:
 
 **File Modificati**:
 - `frontend/components/ChatInterface.tsx` - Integrazione DayTransitionDialog
-- `frontend/components/NotificationBell.tsx` - SSE, raggruppamento, nuovi pulsanti
-- `frontend/app/memory/page.tsx` - Tab navigation
-- `frontend/lib/api.ts` - Nuovi endpoint API
+- `frontend/components/NotificationBell.tsx` - SSE, raggruppamento, nuovi pulsanti, UI semplificata (testo + icona), popup allargato (500px)
+- `frontend/components/SessionList.tsx` - Rimossi bottoni "Integrazioni" e "Memoria" (ora solo nel menu principale)
+- `frontend/app/settings/profile/page.tsx` - Sezione "Profile Settings" con selezione timezone, gestione errori Pydantic
+- `frontend/app/memory/page.tsx` - Tab navigation, bottone "back"
+- `frontend/lib/api.ts` - Nuovi endpoint API (`usersApi.getProfile`, `usersApi.updateProfile`)
 - `frontend/types/index.ts` - Nuovi tipi per day transition
 
 ---

@@ -770,212 +770,232 @@ async def get_pending_notifications(
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    limit: Optional[int] = Query(100, ge=1, le=1000, description="Limit number of notifications"),
 ):
     """Get pending notifications that require user input (for current tenant and current user)"""
+    import time
+    start_time = time.time()
     logger = logging.getLogger(__name__)
-    logger.info(f"Fetching pending notifications for tenant {tenant_id}, user {current_user.id}")
+    logger.info(f"📬 Fetching pending notifications for tenant {tenant_id}, user {current_user.id}, limit={limit}")
+    import sys
+    print(f"[NOTIFICATIONS] Starting fetch for session {session_id}, user {current_user.id}", file=sys.stderr)
     
-    # Verify session belongs to tenant
-    session_result = await db.execute(
-        select(SessionModel).where(
-            SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
-        )
-    )
-    if not session_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    service = NotificationService(db)
-    notifications = await service.get_pending_notifications(read=False, tenant_id=tenant_id)
-    
-    logger.info(f"Found {len(notifications)} total pending notifications for tenant {tenant_id}")
-    
-    # OPTIMIZATION: Pre-load all integrations for this tenant/user once instead of querying per notification
-    from app.models.database import Integration
-    from sqlalchemy import or_
-    
-    # Get all integrations for current user (with user_id)
-    user_integrations_result = await db.execute(
-        select(Integration).where(
-            Integration.tenant_id == tenant_id,
-            Integration.user_id == current_user.id,
-            Integration.enabled == True,
-        )
-    )
-    user_integrations = {str(integration.id): integration for integration in user_integrations_result.scalars().all()}
-    
-    # Get all integrations without user_id for this tenant (for backward compatibility)
-    integrations_without_user_id_result = await db.execute(
-        select(Integration).where(
-            Integration.tenant_id == tenant_id,
-            Integration.user_id.is_(None),
-            Integration.enabled == True,
-        )
-    )
-    integrations_without_user_id = {str(integration.id): integration for integration in integrations_without_user_id_result.scalars().all()}
-    
-    # Collect all integration IDs from notifications to batch-load them
-    integration_ids_to_check = set()
-    for n in notifications:
-        notif_type = n.get("type")
-        if notif_type in ["email_received", "calendar_event_starting"]:
-            integration_id = n.get("content", {}).get("integration_id")
-            if integration_id and integration_id not in user_integrations and integration_id not in integrations_without_user_id:
-                try:
-                    integration_ids_to_check.add(UUID(integration_id))
-                except:
-                    pass
-    
-    # Batch-load missing integrations
-    if integration_ids_to_check:
-        missing_integrations_result = await db.execute(
-            select(Integration).where(
-                Integration.id.in_(integration_ids_to_check),
-                Integration.tenant_id == tenant_id,
+    try:
+        # Verify session belongs to tenant
+        session_result = await db.execute(
+            select(SessionModel).where(
+                SessionModel.id == session_id,
+                SessionModel.tenant_id == tenant_id
             )
         )
-        for integration in missing_integrations_result.scalars().all():
-            if integration.user_id == current_user.id:
-                user_integrations[str(integration.id)] = integration
-            elif integration.user_id is None:
-                integrations_without_user_id[str(integration.id)] = integration
-    
-    # Cache: check if user has only one email integration (for heuristic)
-    user_email_integrations = [
-        i for i in user_integrations.values()
-        if i.provider == "google" and i.service_type == "email"
-    ]
-    only_one_email_integration = len(user_email_integrations) == 1
-    
-    # Filter by type that requires user input AND by user_id (multi-tenant multi-user)
-    global_notifications = []
-    skipped_count = 0
-    for n in notifications:
-        notif_type = n.get("type")
-        content = n.get("content", {})
+        if not session_result.scalar_one_or_none():
+            logger.warning(f"❌ Session {session_id} not found for tenant {tenant_id}")
+            raise HTTPException(status_code=404, detail="Session not found")
         
-        # For email_received and calendar_event_starting, filter by user_id
-        # (each user should only see notifications from their own integrations)
-        if notif_type in ["email_received", "calendar_event_starting"]:
-            notification_user_id = content.get("user_id")
-            integration_id = content.get("integration_id")
+        service = NotificationService(db)
+        # Add limit to avoid loading too many notifications
+        notifications = await service.get_pending_notifications(read=False, tenant_id=tenant_id, limit=limit)
+        
+        logger.info(f"Found {len(notifications)} total pending notifications for tenant {tenant_id}")
+        
+        # OPTIMIZATION: Pre-load all integrations for this tenant/user once instead of querying per notification
+        from app.models.database import Integration
+        from sqlalchemy import or_
+        
+        # Get all integrations for current user (with user_id)
+        user_integrations_result = await db.execute(
+            select(Integration).where(
+                Integration.tenant_id == tenant_id,
+                Integration.user_id == current_user.id,
+                Integration.enabled == True,
+            )
+        )
+        user_integrations = {str(integration.id): integration for integration in user_integrations_result.scalars().all()}
+        
+        # Get all integrations without user_id for this tenant (for backward compatibility)
+        integrations_without_user_id_result = await db.execute(
+            select(Integration).where(
+                Integration.tenant_id == tenant_id,
+                Integration.user_id.is_(None),
+                Integration.enabled == True,
+            )
+        )
+        integrations_without_user_id = {str(integration.id): integration for integration in integrations_without_user_id_result.scalars().all()}
+        
+        # Collect all integration IDs from notifications to batch-load them
+        integration_ids_to_check = set()
+        for n in notifications:
+            notif_type = n.get("type")
+            if notif_type in ["email_received", "calendar_event_starting"]:
+                integration_id = n.get("content", {}).get("integration_id")
+                if integration_id and integration_id not in user_integrations and integration_id not in integrations_without_user_id:
+                    try:
+                        integration_ids_to_check.add(UUID(integration_id))
+                    except:
+                        pass
+        
+        # Batch-load missing integrations
+        if integration_ids_to_check:
+            missing_integrations_result = await db.execute(
+                select(Integration).where(
+                    Integration.id.in_(integration_ids_to_check),
+                    Integration.tenant_id == tenant_id,
+                )
+            )
+            for integration in missing_integrations_result.scalars().all():
+                if integration.user_id == current_user.id:
+                    user_integrations[str(integration.id)] = integration
+                elif integration.user_id is None:
+                    integrations_without_user_id[str(integration.id)] = integration
+        
+        # Cache: check if user has only one email integration (for heuristic)
+        user_email_integrations = [
+            i for i in user_integrations.values()
+            if i.provider == "google" and i.service_type == "email"
+        ]
+        only_one_email_integration = len(user_email_integrations) == 1
+        
+        # Filter by type that requires user input AND by user_id (multi-tenant multi-user)
+        global_notifications = []
+        skipped_count = 0
+        for n in notifications:
+            notif_type = n.get("type")
+            content = n.get("content", {})
             
-            if notification_user_id:
-                # Only show if notification belongs to current user
-                if str(notification_user_id) != str(current_user.id):
-                    skipped_count += 1
-                    continue
-            elif integration_id:
-                # Check cached integrations
-                integration_id_str = str(integration_id)
+            # For email_received and calendar_event_starting, filter by user_id
+            # (each user should only see notifications from their own integrations)
+            if notif_type in ["email_received", "calendar_event_starting"]:
+                notification_user_id = content.get("user_id")
+                integration_id = content.get("integration_id")
                 
-                # Check if integration belongs to current user
-                if integration_id_str in user_integrations:
-                    # Integration belongs to current user - allow notification
-                    logger.debug(f"✅ Allowing notification {n.get('id')}: integration {integration_id} belongs to current user")
-                elif integration_id_str in integrations_without_user_id:
-                    # Integration has no user_id - use heuristic
-                    if only_one_email_integration and user_email_integrations[0].id == UUID(integration_id):
-                        # User has only one email integration and it's this one - allow
-                        logger.debug(f"✅ Allowing notification {n.get('id')}: integration {integration_id} is the only email integration for current user")
-                    elif len(integrations_without_user_id) == 1 and list(integrations_without_user_id.values())[0].id == UUID(integration_id):
-                        # Only one integration without user_id for tenant - allow
-                        logger.debug(f"✅ Allowing notification {n.get('id')}: integration {integration_id} is the only integration without user_id")
+                if notification_user_id:
+                    # Only show if notification belongs to current user
+                    if str(notification_user_id) != str(current_user.id):
+                        skipped_count += 1
+                        continue
+                elif integration_id:
+                    # Check cached integrations
+                    integration_id_str = str(integration_id)
+                    
+                    # Check if integration belongs to current user
+                    if integration_id_str in user_integrations:
+                        # Integration belongs to current user - allow notification
+                        logger.debug(f"✅ Allowing notification {n.get('id')}: integration {integration_id} belongs to current user")
+                    elif integration_id_str in integrations_without_user_id:
+                        # Integration has no user_id - use heuristic
+                        if only_one_email_integration and user_email_integrations[0].id == UUID(integration_id):
+                            # User has only one email integration and it's this one - allow
+                            logger.debug(f"✅ Allowing notification {n.get('id')}: integration {integration_id} is the only email integration for current user")
+                        elif len(integrations_without_user_id) == 1 and list(integrations_without_user_id.values())[0].id == UUID(integration_id):
+                            # Only one integration without user_id for tenant - allow
+                            logger.debug(f"✅ Allowing notification {n.get('id')}: integration {integration_id} is the only integration without user_id")
+                        else:
+                            # Multiple integrations without user_id or user has multiple - skip
+                            skipped_count += 1
+                            continue
                     else:
-                        # Multiple integrations without user_id or user has multiple - skip
+                        # Integration not found or belongs to different user - skip
                         skipped_count += 1
                         continue
                 else:
-                    # Integration not found or belongs to different user - skip
+                    # No user_id and no integration_id - skip notification (can't verify ownership)
+                    logger.info(f"⏭️  Skipping notification {n.get('id')}: no user_id or integration_id")
                     skipped_count += 1
                     continue
-            else:
-                # No user_id and no integration_id - skip notification (can't verify ownership)
-                logger.info(f"⏭️  Skipping notification {n.get('id')}: no user_id or integration_id")
-                skipped_count += 1
-                continue
-        
-        # Return global notifications:
-        # - contradiction: memory contradictions (visible to all users in tenant)
-        # - email_received: new emails from proactivity system (filtered by user_id above)
-        # - calendar_event_starting: upcoming calendar events (filtered by user_id above)
-        if notif_type in ["contradiction", "email_received", "calendar_event_starting"]:
-            global_notifications.append(n)
-    
-    logger.info(f"Found {len(global_notifications)} global notifications requiring user input (filtered for user {current_user.id}, skipped {skipped_count} notifications)")
-    
-    # Format for frontend
-    result = []
-    for notif in global_notifications:
-        content = notif.get("content", {})
-        created_at = notif.get("created_at")
-        # Handle both datetime and string formats
-        if created_at:
-            if isinstance(created_at, str):
-                created_at_str = created_at
-            else:
-                created_at_str = created_at.isoformat()
-        else:
-            created_at_str = None
             
-        # Format content based on notification type
-        formatted_content: Dict[str, Any] = {
-            "message": content.get("message", ""),
-            "title": content.get("title"),
-        }
+            # Return global notifications:
+            # - contradiction: memory contradictions (visible to all users in tenant)
+            # - email_received: new emails from proactivity system (filtered by user_id above)
+            # - calendar_event_starting: upcoming calendar events (filtered by user_id above)
+            if notif_type in ["contradiction", "email_received", "calendar_event_starting"]:
+                global_notifications.append(n)
         
-        # Add type-specific content
-        if notif_type == "contradiction":
-            formatted_content["new_statement"] = content.get("new_statement") or content.get("new_knowledge", {}).get("content") or content.get("new_knowledge", {}).get("text")
-            formatted_content["contradictions"] = content.get("contradictions", [])
-        elif notif_type == "email_received":
-            # Include email-specific fields
-            formatted_content["subject"] = content.get("subject")
-            formatted_content["from"] = content.get("from")
-            formatted_content["snippet"] = content.get("snippet")
-            formatted_content["email_id"] = content.get("email_id")
-            # Include auto_session_id if present (session created automatically from email analysis)
-            auto_session_id = content.get("auto_session_id")
-            if auto_session_id:
-                formatted_content["auto_session_id"] = auto_session_id
-                formatted_content["has_session"] = True
-            # Also check session_id at notification level
-            if notif.get("session_id"):
-                formatted_content["session_id"] = str(notif.get("session_id"))
-                if not formatted_content.get("has_session"):
+        logger.info(f"Found {len(global_notifications)} global notifications requiring user input (filtered for user {current_user.id}, skipped {skipped_count} notifications)")
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"⏱️  Notification fetch completed in {elapsed_time:.2f}s: {len(global_notifications)} notifications")
+        print(f"[NOTIFICATIONS] Fetch completed in {elapsed_time:.2f}s: {len(global_notifications)} notifications", file=sys.stderr)
+        
+        # Format for frontend
+        result = []
+        for notif in global_notifications:
+            content = notif.get("content", {})
+            created_at = notif.get("created_at")
+            notif_type = notif.get("type")
+            # Handle both datetime and string formats
+            if created_at:
+                if isinstance(created_at, str):
+                    created_at_str = created_at
+                else:
+                    created_at_str = created_at.isoformat()
+            else:
+                created_at_str = None
+                
+            # Format content based on notification type
+            formatted_content: Dict[str, Any] = {
+                "message": content.get("message", ""),
+                "title": content.get("title"),
+            }
+            
+            # Add type-specific content
+            if notif_type == "contradiction":
+                formatted_content["new_statement"] = content.get("new_statement") or content.get("new_knowledge", {}).get("content") or content.get("new_knowledge", {}).get("text")
+                formatted_content["contradictions"] = content.get("contradictions", [])
+            elif notif_type == "email_received":
+                # Include email-specific fields
+                formatted_content["subject"] = content.get("subject")
+                formatted_content["from"] = content.get("from")
+                formatted_content["snippet"] = content.get("snippet")
+                formatted_content["email_id"] = content.get("email_id")
+                # Include auto_session_id if present (session created automatically from email analysis)
+                auto_session_id = content.get("auto_session_id")
+                if auto_session_id:
+                    formatted_content["auto_session_id"] = auto_session_id
                     formatted_content["has_session"] = True
-            # Add session link if auto-created session exists
-            session_id_for_link = auto_session_id or (str(notif.get("session_id")) if notif.get("session_id") else None)
-            if session_id_for_link:
-                formatted_content["session_link"] = f"/sessions/{session_id_for_link}"
-            # Create a user-friendly message if not present
-            if not formatted_content["message"]:
-                subject = content.get("subject", "No Subject")
-                sender = content.get("from", "Unknown Sender")
-                formatted_content["message"] = f"Nuova email da {sender}: {subject}"
-        elif notif_type == "calendar_event_starting":
-            # Calendar notification content
-            formatted_content["summary"] = content.get("summary")
-            formatted_content["start_time"] = content.get("start_time")
-            formatted_content["end_time"] = content.get("end_time")
-            formatted_content["event_id"] = content.get("event_id")
-            # Create a user-friendly message if not present
-            if not formatted_content["message"]:
-                summary = content.get("summary", "Evento senza titolo")
-                start_time = content.get("start_time", "")
-                formatted_content["message"] = f"Evento imminente: {summary}" + (f" alle {start_time}" if start_time else "")
-            
-        result.append({
-            "id": str(notif.get("id")),
-            "type": notif_type,
-            "priority": notif.get("urgency", "medium"),
-            "created_at": created_at_str,
-            "session_id": str(notif.get("session_id")) if notif.get("session_id") else None,
-            "content": formatted_content,
-        })
-    
-    logger.info(f"Returning {len(result)} formatted notifications")
-    return result
+                # Also check session_id at notification level
+                if notif.get("session_id"):
+                    formatted_content["session_id"] = str(notif.get("session_id"))
+                    if not formatted_content.get("has_session"):
+                        formatted_content["has_session"] = True
+                # Add session link if auto-created session exists
+                session_id_for_link = auto_session_id or (str(notif.get("session_id")) if notif.get("session_id") else None)
+                if session_id_for_link:
+                    formatted_content["session_link"] = f"/sessions/{session_id_for_link}"
+                # Create a user-friendly message if not present
+                if not formatted_content["message"]:
+                    subject = content.get("subject", "No Subject")
+                    sender = content.get("from", "Unknown Sender")
+                    formatted_content["message"] = f"Nuova email da {sender}: {subject}"
+            elif notif_type == "calendar_event_starting":
+                # Calendar notification content
+                formatted_content["summary"] = content.get("summary")
+                formatted_content["start_time"] = content.get("start_time")
+                formatted_content["end_time"] = content.get("end_time")
+                formatted_content["event_id"] = content.get("event_id")
+                # Create a user-friendly message if not present
+                if not formatted_content["message"]:
+                    summary = content.get("summary", "Evento senza titolo")
+                    start_time = content.get("start_time", "")
+                    formatted_content["message"] = f"Evento imminente: {summary}" + (f" alle {start_time}" if start_time else "")
+                
+            result.append({
+                "id": str(notif.get("id")),
+                "type": notif_type,
+                "priority": notif.get("urgency", "medium"),
+                "created_at": created_at_str,
+                "session_id": str(notif.get("session_id")) if notif.get("session_id") else None,
+                "content": formatted_content,
+            })
+        
+        total_time = time.time() - start_time
+        logger.info(f"✅ Returning {len(result)} notifications in {total_time:.2f}s total")
+        print(f"[NOTIFICATIONS] Returning {len(result)} notifications in {total_time:.2f}s", file=sys.stderr)
+        return result
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ Error fetching notifications after {elapsed_time:.2f}s: {e}", exc_info=True)
+        print(f"[NOTIFICATIONS] ERROR after {elapsed_time:.2f}s: {e}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Error fetching notifications: {str(e)}")
 
 
 @router.post("/{session_id}/chat", response_model=ChatResponse)
@@ -992,6 +1012,18 @@ async def chat(
     current_user: User = Depends(get_current_user),
 ):
     """Send a message and get AI response (for current user)"""
+    logger.info(f"📨📨📨 CHAT REQUEST RECEIVED: session_id={session_id}, message='{request.message[:100]}', user={current_user.email}")
+    import sys
+    print(f"[SESSIONS] CHAT REQUEST: session_id={session_id}, message='{request.message[:100]}', user={current_user.email}", file=sys.stderr)
+    
+    # Check active SSE connections for this session
+    active_sessions = agent_activity_stream.get_active_sessions()
+    logger.error(f"🔍🔍🔍 Active SSE sessions before chat: {len(active_sessions)} - {active_sessions}")
+    print(f"[SESSIONS] Active SSE sessions: {len(active_sessions)} - {active_sessions}", file=sys.stderr)
+    if session_id not in active_sessions:
+        logger.warning(f"⚠️⚠️⚠️  Session {session_id} has NO active SSE connection! Telemetry events will not be delivered.")
+        print(f"[SESSIONS] WARNING: Session {session_id} has NO active SSE connection!", file=sys.stderr)
+    
     from app.core.dependencies import get_daily_session_manager
     
     # Check for day transition
@@ -1963,17 +1995,23 @@ async def stream_agent_activity(
 
     async def event_generator():
         logger.error(f"✅✅✅ Starting SSE stream for session {session_id} - CRITICAL LOG")
+        import sys
+        print(f"[SSE] Starting stream for session {session_id}", file=sys.stderr)
+        
         snapshot_payload = agent_activity_stream.snapshot_sse_payload(session_id)
         snapshot_events = agent_activity_stream.snapshot(session_id)
         if snapshot_payload:
             logger.error(f"📸📸📸 Sending snapshot with {len(snapshot_events)} events - CRITICAL LOG")
+            print(f"[SSE] Sending snapshot with {len(snapshot_events)} events", file=sys.stderr)
             yield snapshot_payload
         else:
             logger.error(f"📸📸📸 No snapshot available (history empty) - CRITICAL LOG")
+            print(f"[SSE] No snapshot available (history empty)", file=sys.stderr)
 
         queue = await agent_activity_stream.register(session_id)
         active_sessions = agent_activity_stream.get_active_sessions()
         logger.error(f"📡📡📡 Registered subscriber for session {session_id}, active sessions: {len(active_sessions)} - {active_sessions} - CRITICAL LOG")
+        print(f"[SSE] Registered subscriber, active sessions: {len(active_sessions)} - {active_sessions}", file=sys.stderr)
         try:
             while True:
                 if await request.is_disconnected():
@@ -1985,6 +2023,8 @@ async def stream_agent_activity(
                     agent_id = event.get('agent_id', 'unknown') if isinstance(event, dict) else getattr(event, 'agent_id', 'unknown')
                     status = event.get('status', 'unknown') if isinstance(event, dict) else getattr(event, 'status', 'unknown')
                     logger.error(f"📨📨📨 Sending event to session {session_id}: {agent_id} ({status})")
+                    import sys
+                    print(f"[SSE] Sending event: {agent_id} ({status}) to session {session_id}", file=sys.stderr)
                     yield agent_activity_stream.as_sse_payload(event)
                 except asyncio.TimeoutError:
                     continue
@@ -2000,6 +2040,41 @@ async def stream_agent_activity(
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/{session_id}/agent-activity/debug")
+async def debug_agent_activity(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    agent_activity_stream: AgentActivityStream = Depends(get_agent_activity_stream),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """Debug endpoint to check telemetry status for a session"""
+    from sqlalchemy import select
+    
+    # Verify session belongs to user
+    result = await db.execute(
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    active_sessions = agent_activity_stream.get_active_sessions()
+    history = agent_activity_stream.snapshot(session_id)
+    
+    return {
+        "session_id": str(session_id),
+        "has_active_sse_connection": session_id in active_sessions,
+        "active_sessions_count": len(active_sessions),
+        "active_sessions": [str(s) for s in active_sessions],
+        "history_events_count": len(history),
+        "recent_events": history[-10:] if history else [],
+    }
 
 
 @router.get("/{session_id}/memory", response_model=MemoryInfo)

@@ -90,7 +90,11 @@ npm run dev
 2. **Chat**: Type messages and get AI responses
 3. **Upload Files**: Click "Upload File" to analyze documents
 4. **Memory**: The system automatically uses short/medium/long-term memory
+   - Access memory management via menu or `/memory` page
+   - Note: "Integrations" and "Memory" buttons removed from SessionList (available in main menu only)
 5. **Tools**: Access MCP tools via API endpoints
+6. **Profile Settings**: Configure timezone and user preferences at `/settings/profile`
+7. **Notifications**: Click bell icon 🔔 for real-time notifications (SSE enabled)
 
 ## Testing
 

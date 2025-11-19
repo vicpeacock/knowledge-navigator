@@ -12,6 +12,12 @@
 - Script `create_today_session.py` per creare sessioni giornaliere
 - Script `cleanup_sessions_and_memory.py` per pulizia sessioni e memoria
 
+#### Gestione Profilo Utente
+- Endpoint `GET /api/v1/users/me` per ottenere il profilo corrente
+- Endpoint `PUT /api/v1/users/me` per aggiornare nome e timezone
+- Sezione "Profile Settings" nella pagina Profile con selezione timezone
+- Lista di 17 timezone comuni disponibili per selezione
+
 #### Gestione Memoria a Lungo Termine
 - Pagina dedicata `/memory` con tab "Gestione Memoria" e "Ricerca Memoria"
 - Componente `LongTermMemoryManager` con lista completa memorie
@@ -28,6 +34,8 @@
 - UI migliorata `NotificationBell` con raggruppamento per tipo
 - Nuovi pulsanti: "Segna Lette", "Pulisci", "Vedi Tutte"
 - Cancellazione batch notifiche
+- Bottoni semplificati: solo testo + icona (senza gradienti o effetti)
+- Popup allargato da 384px a 500px per evitare sovrapposizioni
 
 #### Miglioramenti Email
 - Tool `archive_email` per archiviare email
@@ -43,6 +51,10 @@
 - Migliorata deduplicazione email basata su `integration_id`
 - Gestione corretta sessioni cancellate/archiviate
 - Migliorata gestione OAuth per integrazioni Google
+- Rimossi bottoni "Integrazioni" e "Memoria" da SessionList (ora solo nel menu principale)
+- UI semplificata: bottoni notifiche con solo testo + icona
+- Popup notifiche allargato per migliore usabilità
+- Migliorata gestione errori nel Profile (gestione corretta errori Pydantic)
 
 ### 🐛 Bug Fixes
 
@@ -52,6 +64,10 @@
 - Fix aggiornamento notifiche quando viene creata nuova sessione
 - Fix gestione sessioni cancellate nella deduplicazione email
 - Fix import `html2pdf.js` nella pagina metrics (dynamic import per SSR)
+- Fix routing FastAPI: endpoint `/me` spostato prima di `/{user_id}` per evitare conflitti UUID
+- Fix telemetria: `service_health_agent` ora usa `publish_to_all_active_sessions()` invece di UUID nullo
+- Fix gestione errori Profile: corretta visualizzazione errori Pydantic (array di oggetti)
+- Migliorato stack trace logging per debug telemetria
 
 ### 📚 Documentazione
 

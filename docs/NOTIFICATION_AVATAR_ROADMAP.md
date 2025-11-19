@@ -19,6 +19,10 @@ Implementare un sistema di notifiche avanzato con avatar che riconosce la presen
    - Navigazione automatica alla sessione usando Next.js router
    - Chiusura automatica del popup dopo la navigazione
    - Visualizzazione migliorata per email e calendar notifications
+   - **UI migliorata**: Popup allargato (500px), bottoni semplificati (testo + icona)
+   - **Nuovi bottoni**: "Segna Lette", "Pulisci", "Vedi Tutte" nell'header
+   - **Eliminazione individuale**: Pulsante [X] su ogni notifica
+   - **Server-Sent Events (SSE)**: Aggiornamenti real-time quando il popup è aperto
 
 ---
 
