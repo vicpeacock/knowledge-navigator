@@ -9,6 +9,7 @@ import logging
 
 from app.core.memory_manager import MemoryManager
 from app.core.ollama_client import OllamaClient
+from app.core.dependencies import get_ollama_client
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,8 @@ class ConversationSummarizer:
         ollama_client: Optional[OllamaClient] = None,
     ):
         self.memory_manager = memory_manager
-        self.ollama_client = ollama_client or OllamaClient()
+        # Use get_ollama_client() which returns OllamaClient or GeminiClient based on LLM_PROVIDER
+        self.ollama_client = ollama_client or get_ollama_client()
     
     def estimate_tokens(self, text: str) -> int:
         """

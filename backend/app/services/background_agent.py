@@ -18,6 +18,12 @@ from app.services.task_queue import TaskQueue, Task, TaskPriority, TaskStatus
 logger = logging.getLogger(__name__)
 
 
+def _get_background_client_lazy():
+    """Lazy import to avoid circular dependency"""
+    from app.core.dependencies import get_ollama_background_client
+    return get_ollama_background_client()
+
+
 class BackgroundAgent:
     """
     Background agent for autonomous thinking.
@@ -35,8 +41,10 @@ class BackgroundAgent:
         self.db = db
         self.task_queue = task_queue
 
-        # Use background Ollama client (phi3:mini) for background tasks
-        self.ollama_client = ollama_client or self._create_background_client()
+        # Use background LLM client (Ollama/llama.cpp or Gemini based on LLM_PROVIDER)
+        # This supports both local (Ollama/llama.cpp) and cloud (Gemini) deployments
+        # Use lazy import to avoid circular dependency
+        self.ollama_client = ollama_client or _get_background_client_lazy()
 
         # Initialize services
         self.integrity_checker = SemanticIntegrityChecker(
@@ -141,27 +149,6 @@ class BackgroundAgent:
             logger.error(f"Error processing new knowledge in background: {e}", exc_info=True)
             # Don't raise - background tasks should not fail the main flow
 
-    @staticmethod
-    def _create_background_client() -> Optional[OllamaClient]:
-        try:
-            if settings.use_llama_cpp_background:
-                from app.core.llama_cpp_client import LlamaCppClient
-
-                return LlamaCppClient(
-                    base_url=settings.ollama_background_base_url,
-                    model=settings.ollama_background_model,
-                )
-
-            return OllamaClient(
-                base_url=settings.ollama_background_base_url,
-                model=settings.ollama_background_model,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Background Ollama client unavailable (%s). Background tasks will be disabled.",
-                exc,
-            )
-            return None
     
     async def check_external_events(self):
         """Check external events (email, calendar, etc.) - to be implemented"""

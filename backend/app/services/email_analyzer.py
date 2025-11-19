@@ -5,6 +5,7 @@ import logging
 import json
 from typing import Dict, Any, Optional
 from app.core.ollama_client import OllamaClient
+from app.core.dependencies import get_ollama_client
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,8 @@ class EmailAnalyzer:
     """Analyzes emails to detect required actions and categorize them"""
     
     def __init__(self, ollama_client: Optional[OllamaClient] = None):
-        self.ollama_client = ollama_client or OllamaClient()
+        # Use get_ollama_client() which returns OllamaClient or GeminiClient based on LLM_PROVIDER
+        self.ollama_client = ollama_client or get_ollama_client()
     
     async def analyze_email(
         self,
