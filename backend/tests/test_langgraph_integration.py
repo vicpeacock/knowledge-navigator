@@ -73,7 +73,7 @@ async def test_run_langgraph_chat_complete_flow(
 ):
     """Test complete LangGraph execution flow"""
     session_id = uuid4()
-    request = ChatRequest(message="Ciao, come stai?", use_memory=False)
+    request = ChatRequest(message="Ciao, come stai?", use_memory=False, session_id=session_id)
     
     result = await run_langgraph_chat(
         db=mock_db,
@@ -122,7 +122,7 @@ async def test_run_langgraph_chat_with_empty_response_from_ollama(
 ):
     """Test that LangGraph handles empty response from Ollama gracefully"""
     session_id = uuid4()
-    request = ChatRequest(message="Test", use_memory=False)
+    request = ChatRequest(message="Test", use_memory=False, session_id=session_id)
     
     # Mock Ollama to return empty response
     mock_ollama.generate_with_context = AsyncMock(return_value="")
@@ -159,7 +159,7 @@ async def test_run_langgraph_chat_with_tool_calls(
 ):
     """Test LangGraph execution when tools are called"""
     session_id = uuid4()
-    request = ChatRequest(message="Ci sono email non lette?", use_memory=False)
+    request = ChatRequest(message="Ci sono email non lette?", use_memory=False, session_id=session_id)
     
     # Mock Ollama to return tool calls
     mock_ollama.generate_with_context = AsyncMock(

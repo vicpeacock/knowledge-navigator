@@ -48,10 +48,10 @@ class TestChatEndpoint:
     @patch('app.api.sessions.get_memory_manager')
     @patch('app.api.sessions.get_agent_activity_stream')
     @patch('app.api.sessions.get_background_task_manager')
-    @patch('app.api.sessions.get_daily_session_manager')
+    @patch('app.core.dependencies.get_daily_session_manager')
     async def test_chat_never_returns_empty_response(
         self,
-        mock_daily_session_manager,
+        mock_get_daily_session_manager,
         mock_background_task_manager,
         mock_agent_activity_stream,
         mock_memory_manager,
@@ -116,7 +116,7 @@ class TestChatEndpoint:
         # Mock daily session manager
         mock_daily_mgr = AsyncMock()
         mock_daily_mgr.check_day_transition = AsyncMock(return_value=(False, None))
-        mock_daily_session_manager.return_value = mock_daily_mgr
+        mock_get_daily_session_manager.return_value = mock_daily_mgr
         
         # Mock LangGraph
         with patch('app.api.sessions.run_langgraph_chat') as mock_langgraph:
@@ -158,10 +158,10 @@ class TestChatEndpoint:
     @patch('app.api.sessions.get_memory_manager')
     @patch('app.api.sessions.get_agent_activity_stream')
     @patch('app.api.sessions.get_background_task_manager')
-    @patch('app.api.sessions.get_daily_session_manager')
+    @patch('app.core.dependencies.get_daily_session_manager')
     async def test_chat_handles_empty_response_from_langgraph(
         self,
-        mock_daily_session_manager,
+        mock_get_daily_session_manager,
         mock_background_task_manager,
         mock_agent_activity_stream,
         mock_memory_manager,

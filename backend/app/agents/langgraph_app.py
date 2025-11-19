@@ -545,7 +545,13 @@ async def analyze_message_for_plan(
             context=session_context[-3:] if session_context else None,
             system=system_prompt,
         )
-        content = response.get("message", {}).get("content", "")
+        # response is a dict from generate()
+        if isinstance(response, dict):
+            content = response.get("message", {}).get("content", "")
+        elif isinstance(response, str):
+            content = response
+        else:
+            content = str(response)
         parsed = safe_json_loads(content)
         if isinstance(parsed, dict):
             return parsed
