@@ -326,6 +326,12 @@ function MetricsContent() {
   const downloadPDF = async () => {
     if (!evaluationReport) return
     
+    // Guard: ensure we're in browser environment
+    if (typeof window === 'undefined') {
+      console.error('downloadPDF can only be called in browser')
+      return
+    }
+    
     try {
       // Dynamic import per evitare problemi SSR
       const html2pdf = (await import('html2pdf.js')).default

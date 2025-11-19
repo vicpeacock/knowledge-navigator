@@ -37,7 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } else {
       setIsLoading(false)
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // checkAuth is stable (useCallback with no deps)
 
   const checkAuth = useCallback(async () => {
     try {
