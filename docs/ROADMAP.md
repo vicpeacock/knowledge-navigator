@@ -24,7 +24,8 @@
 - ✅ Sistema memoria multi-livello (short/medium/long-term)
 - ✅ **Gestione memoria a lungo termine** - Pagina dedicata con cancellazione batch
 - ✅ RAG con ChromaDB per ricerca semantica
-- ✅ Tool calling dinamico (LLM decide quando usare tool)
+- ✅ **LangGraph refactoring completo** - Tutti i nodi eseguono correttamente, fallback multipli per risposte vuote
+- ✅ Tool calling dinamico (LLM decide quando usare tool) - Descrizioni funzionali senza euristiche hardcoded
 - ✅ Archiviazione chat con indicizzazione semantica
 - ✅ Title e description per ogni chat
 - ✅ Home page con solo chat attive

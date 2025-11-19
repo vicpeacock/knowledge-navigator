@@ -66,6 +66,7 @@ Personal AI Assistant - Sistema multi-agente per gestione conoscenza e automazio
 Tutta la documentazione è in `docs/`:
 - **`docs/ROADMAP.md`** - Roadmap generale del progetto
 - **`docs/DAILY_SESSIONS_AND_NOTIFICATIONS.md`** - Sistema sessioni giornaliere e miglioramenti notifiche
+- **`docs/LANGGRAPH_REFACTORING.md`** - Refactoring completo LangGraph con test e fallback multipli
 - **`docs/SCRIPTS.md`** - Documentazione degli script
 - **`docs/KAGGLE_SUBMISSION_ROADMAP.md`** - Roadmap challenge Kaggle
 - **`docs/PROACTIVITY_ARCHITECTURE.md`** - Architettura sistema proattività
