@@ -52,17 +52,20 @@ services:
     restart: unless-stopped
 
   frontend-cloud-test:
-    image: knowledge-navigator-frontend:test
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8002
     container_name: knowledge-navigator-frontend-cloud-test
     ports:
       - "3004:3000"  # Porta diversa per non confliggere con frontend locale (3003)
     environment:
-      # Backend URL (usa backend Docker test)
-      - NEXT_PUBLIC_API_URL=http://localhost:8002
       - PORT=3000
       - NODE_ENV=production
     depends_on:
-      - backend-cloud-test
+      backend-cloud-test:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
@@ -70,4 +73,6 @@ services:
       retries: 3
       start_period: 40s
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Per accedere a servizi host da container
 
