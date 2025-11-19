@@ -6,7 +6,6 @@ import logging
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any, Dict, Optional
-from uuid import UUID
 
 from app.core.health_check import HealthCheckService
 from app.models.notifications import (
@@ -20,9 +19,6 @@ from app.services.agent_activity_stream import AgentActivityStream
 from app.services.notification_center import NotificationCenter
 
 logger = logging.getLogger(__name__)
-
-# Sentinel session used when broadcasting agent activity events that are not tied to a chat session.
-_SYSTEM_SESSION_ID = UUID(int=0)
 
 _PRIORITY_BY_STATUS = {
     "healthy": NotificationPriority.INFO,
@@ -261,7 +257,8 @@ class ServiceHealthAgent:
             event.update(extra)
 
         try:
-            self._activity_stream.publish(_SYSTEM_SESSION_ID, event)
+            # Use publish_to_all_active_sessions for system-wide events
+            self._activity_stream.publish_to_all_active_sessions(event)
         except Exception:
             logger.debug(
                 "Unable to publish service health telemetry event", exc_info=True

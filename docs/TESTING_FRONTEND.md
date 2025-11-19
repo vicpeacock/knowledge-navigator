@@ -38,7 +38,7 @@ npm run test:coverage
 
 **File**: `frontend/components/__tests__/NotificationBell.test.tsx`
 
-**19 test** che coprono:
+**25 test** che coprono (include 6 nuovi test per eliminazione individuale):
 
 #### Rendering (3 test)
 - ✅ Render bell icon
@@ -49,6 +49,7 @@ npm run test:coverage
 - ✅ Open popup when bell clicked
 - ✅ Close popup when backdrop clicked
 - ✅ Close popup when close button clicked
+- **Nota**: Il popup è stato allargato a 500px e i bottoni sono stati semplificati (testo + icona)
 
 #### Notification Fetching (4 test)
 - ✅ Fetch notifications on mount
@@ -68,6 +69,14 @@ npm run test:coverage
 
 #### Notification Resolution (1 test)
 - ✅ Resolve notification structure
+
+#### Delete Functionality (6 test)
+- ✅ Shows delete button [X] on each notification
+- ✅ Deletes notification when [X] is clicked and confirmed
+- ✅ Does not delete notification when user cancels confirmation
+- ✅ Handles delete error gracefully
+- ✅ Shows delete button on contradiction notifications
+- ✅ Shows delete button on calendar notifications
 
 #### Edge Cases (2 test)
 - ✅ Don't fetch when sessionId missing

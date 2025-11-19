@@ -140,6 +140,23 @@ Nel frontend, apri la console del browser (F12) e cerca:
    }
    ```
 
+### UUID nullo nella telemetria
+
+Se vedi errori `[TELEMETRY] ERROR: Attempted to publish with null UUID!`:
+
+1. **Verifica che `service_health_agent` usi `publish_to_all_active_sessions()`:**
+   ```python
+   # backend/app/services/service_health_agent.py
+   # Dovrebbe usare:
+   self._activity_stream.publish_to_all_active_sessions(event)
+   # NON:
+   self._activity_stream.publish(_SYSTEM_SESSION_ID, event)
+   ```
+
+2. **Verifica che non ci siano tentativi di pubblicare con UUID nullo:**
+   - Controlla i log per stack trace quando si verifica l'errore
+   - Assicurati che tutti gli agenti di sistema usino `publish_to_all_active_sessions()`
+
 ## Test Manuale
 
 Puoi triggerare manualmente un check per vedere gli eventi:

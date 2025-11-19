@@ -96,6 +96,14 @@ Per ogni integrazione Calendar attiva:
 
 ## 📊 Tipi di Notifiche Create
 
+**Nota**: Il sistema di notifiche è stato migliorato con:
+- Popup allargato (500px) per migliore usabilità
+- Bottoni semplificati (testo + icona) senza gradienti
+- Pulsante [X] per eliminazione individuale su ogni notifica
+- Bottoni header: "Segna Lette", "Pulisci", "Vedi Tutte"
+- Server-Sent Events (SSE) per aggiornamenti real-time
+- Pagina dedicata `/notifications` con filtri avanzati
+
 ### Email Notifications
 
 **Type**: `email_received`  

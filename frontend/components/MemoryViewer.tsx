@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { sessionsApi } from '@/lib/api'
-import { Brain, X, Clock, Archive, FileText, MessageSquare } from 'lucide-react'
+import { Brain, X, Clock, Archive, FileText, MessageSquare, Settings } from 'lucide-react'
 import { format } from 'date-fns'
 
 interface LongTermMemoryItem {
@@ -32,6 +33,7 @@ interface MemoryViewerProps {
 }
 
 export default function MemoryViewer({ sessionId, isOpen, onClose }: MemoryViewerProps) {
+  const router = useRouter()
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfo | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -97,12 +99,25 @@ export default function MemoryViewer({ sessionId, isOpen, onClose }: MemoryViewe
             <Brain size={24} className="text-blue-600 dark:text-blue-400" />
             <h2 className="text-xl font-semibold">Memoria della Sessione</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-          >
-            <X size={24} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                onClose()
+                router.push('/memory')
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm transition-colors"
+              title="Gestisci memoria a lungo termine"
+            >
+              <Settings size={16} />
+              Manage
+            </button>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            >
+              <X size={24} />
+            </button>
+          </div>
         </div>
 
         {loading ? (

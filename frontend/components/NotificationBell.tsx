@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell } from 'lucide-react'
+import { Bell, CheckCheck, Trash2, Eye, X, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 import axios from 'axios'
 import { sessionsApi } from '@/lib/api'
 
@@ -66,13 +66,17 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
       const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
       const headers = token ? { Authorization: `Bearer ${token}` } : {}
       
+      console.log(`[NotificationBell] Fetching notifications for session ${sessionId}...`)
+      const startTime = Date.now()
       const response = await axios.get(
-        `${API_URL}/api/sessions/${sessionId}/notifications/pending`,
+        `${API_URL}/api/sessions/${sessionId}/notifications/pending?limit=100`,
         { 
           headers,
-          timeout: 5000 // 5 secondi timeout
+          timeout: 30000 // 30 secondi timeout - aumentato per operazioni lente
         }
       )
+      const elapsed = Date.now() - startTime
+      console.log(`[NotificationBell] Received ${response.data?.length || 0} notifications in ${elapsed}ms`)
       setNotifications(response.data || [])
       
       // Restore scroll position after update
@@ -240,19 +244,19 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
           
           {/* Popup */}
           <div
-            className="fixed top-16 right-4 w-96 max-h-[80vh] bg-white dark:bg-gray-800 rounded-lg shadow-xl z-[120] overflow-hidden flex flex-col"
+            className="fixed top-16 right-4 w-[500px] max-h-[80vh] bg-white dark:bg-gray-800 rounded-lg shadow-xl z-[120] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-semibold">Notifiche</h3>
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-800">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Notifiche</h3>
                 {pendingCount > 0 && (
-                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                  <span className="text-sm text-gray-600 dark:text-gray-400 font-medium whitespace-nowrap">
                     {pendingCount} {pendingCount === 1 ? 'notifica' : 'notifiche'}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                 {pendingCount > 0 && (
                   <>
                     <button
@@ -269,10 +273,11 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                           console.error('Error marking all as read:', error)
                         }
                       }}
-                      className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                      className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                       title="Segna tutte come lette"
                     >
-                      Segna Lette
+                      <CheckCheck size={16} />
+                      <span>Segna Lette</span>
                     </button>
                     <button
                       type="button"
@@ -293,19 +298,21 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                           }
                         }
                       }}
-                      className="text-xs px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                      className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                       title="Elimina tutte le notifiche pendenti"
                     >
-                      Pulisci
+                      <Trash2 size={16} />
+                      <span>Pulisci</span>
                     </button>
                   </>
                 )}
                 <a
                   href="/notifications"
-                  className="text-xs px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+                  className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
                   title="Vedi tutte le notifiche"
                 >
-                  Vedi Tutte
+                  <Eye size={16} />
+                  <span>Vedi Tutte</span>
                 </a>
                 <button
                   type="button"
@@ -314,9 +321,10 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
                     e.stopPropagation()
                     setIsOpen(false)
                   }}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                  title="Chiudi"
                 >
-                  ✕
+                  <X size={16} />
                 </button>
               </div>
             </div>
@@ -472,9 +480,10 @@ function NotificationItem({
                 e.stopPropagation()
                 setShowOptions(true)
               }}
-              className="flex-1 px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
+              className="flex items-center gap-1.5 flex-1 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
             >
-              Risolvi
+              <CheckCircle size={16} />
+              <span>Risolvi</span>
             </button>
             <button
               type="button"
@@ -483,9 +492,10 @@ function NotificationItem({
                 e.stopPropagation()
                 onResolve('ignore')
               }}
-              className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 text-sm"
+              className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
             >
-              Ignora
+              <XCircle size={16} />
+              <span>Ignora</span>
             </button>
           </div>
         ) : (
@@ -505,10 +515,11 @@ function NotificationItem({
                   e.stopPropagation()
                   onResolve(resolution || 'resolved')
                 }}
-                className="flex-1 px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
+                className="flex items-center gap-1.5 flex-1 text-sm text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={!resolution.trim()}
               >
-                Conferma
+                <CheckCircle size={16} />
+                <span>Conferma</span>
               </button>
               <button
                 type="button"
@@ -518,9 +529,10 @@ function NotificationItem({
                   setResolution('')
                   setShowOptions(false)
                 }}
-                className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 text-sm"
+                className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
               >
-                Annulla
+                <XCircle size={16} />
+                <span>Annulla</span>
               </button>
             </div>
             <button
@@ -530,9 +542,10 @@ function NotificationItem({
                 e.stopPropagation()
                 onResolve('no_contradiction')
               }}
-              className="w-full px-3 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm"
+              className="flex items-center gap-1.5 w-full text-sm text-yellow-600 dark:text-yellow-400 hover:text-yellow-700 dark:hover:text-yellow-300 transition-colors"
             >
-              Non c&apos;è contraddizione
+              <AlertCircle size={16} />
+              <span>Non c&apos;è contraddizione</span>
             </button>
           </div>
         )}
@@ -693,9 +706,10 @@ function NotificationItem({
               }
             }
           }}
-          className="w-full mt-3 px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm font-medium transition-colors"
+          className="flex items-center gap-1.5 w-full mt-3 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
         >
-          Apri Sessione →
+          <Eye size={16} />
+          <span>Apri Sessione</span>
         </button>
       )}
     </div>

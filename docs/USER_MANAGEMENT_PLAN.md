@@ -377,11 +377,14 @@ interface AuthContextType {
 
 #### 5. ProfileSettings
 ```typescript
-// frontend/components/settings/ProfileSettings.tsx
+// frontend/app/settings/profile/page.tsx
 - Informazioni utente (read-only)
 - Cambio password form
-- Impostazioni notifiche
-- Gestione API keys personali
+- Sezione "Profile Settings" con:
+  - Campo nome (modificabile)
+  - Selezione timezone (17 timezone comuni disponibili)
+- Gestione errori Pydantic (visualizzazione corretta errori array)
+- Endpoint API: GET/PUT /api/v1/users/me
 ```
 
 ### Interceptor Axios (JWT)

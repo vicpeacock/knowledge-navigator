@@ -188,6 +188,9 @@
 - [x] **Pagina dedicata notifiche** ✅ (`/notifications` con filtri avanzati)
 - [x] **Gestione memoria a lungo termine** ✅ (pagina dedicata con cancellazione batch)
 - [x] **Dialog transizione giorno** ✅ (conferma utente per nuovo giorno)
+- [x] **UI semplificata notifiche** ✅ (bottoni testo + icona, popup allargato)
+- [x] **Gestione timezone nel Profile** ✅ (selezione timezone nella pagina Profile)
+- [x] **Navigazione semplificata** ✅ (rimossi bottoni duplicati da SessionList)
 - [ ] Notifiche push browser
 - [ ] Dashboard avanzato con statistiche
 - [ ] Export/Import sessioni

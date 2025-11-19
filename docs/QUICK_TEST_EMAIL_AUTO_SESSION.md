@@ -56,6 +56,7 @@ Oppure usa il frontend: vai su una sessione qualsiasi e clicca sulla campanella 
 #### ✅ Verifica Sessione Automatica
 
 1. Vai alla lista sessioni (`/sessions` o sidebar)
+   - **Nota**: I bottoni "Integrazioni" e "Memoria" sono stati rimossi da SessionList e sono disponibili solo nel menu principale
 2. Cerca una nuova sessione con:
    - Titolo: "Email: {oggetto email}"
    - Descrizione: "Email da {mittente}"

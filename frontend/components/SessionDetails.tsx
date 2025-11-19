@@ -23,6 +23,7 @@ import {
   MessageSquare,
   FileText,
   Wrench,
+  Calendar,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAgentActivity } from './AgentActivityContext'
@@ -110,7 +111,27 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
   }, [events, statusLabelMap])
 
   const renderAgentStatus = (agentId: string, status: typeof agentStatuses[number]) => {
-    const definition = agentDefinitions.get(agentId)
+    // Handle tool agents dynamically
+    let definition = agentDefinitions.get(agentId)
+    if (!definition && agentId.startsWith('tool_')) {
+      const toolName = agentId.replace('tool_', '')
+      // Map common tool names to icons
+      const toolIconMap: Record<string, LucideIcon> = {
+        'get_emails': MessageSquare,
+        'get_calendar_events': Calendar,
+        'web_search': Network,
+        'web_fetch': Network,
+        'send_email': MessageSquare,
+        'archive_email': Archive,
+        'reply_to_email': MessageSquare,
+        'summarize_emails': FileText,
+      }
+      const Icon = toolIconMap[toolName] || Wrench
+      definition = {
+        label: toolName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        icon: Icon,
+      }
+    }
     const Icon = definition?.icon ?? Activity
     const bubbleClasses = clsx(
       'flex h-12 w-12 items-center justify-center rounded-full text-sm transition-colors',
@@ -419,17 +440,6 @@ export default function SessionDetails({ session, onUpdate }: SessionDetailsProp
                   Delete
                 </button>
               </>
-            )}
-            {session.status === 'archived' && (
-              <button
-                onClick={handleRestore}
-                disabled={loading}
-                className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-1 text-sm"
-                title="Restore session"
-              >
-                <RotateCcw size={14} />
-                Restore
-              </button>
             )}
           </div>
         </div>

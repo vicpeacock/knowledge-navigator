@@ -69,14 +69,6 @@ export default function SessionList({ currentSessionId }: SessionListProps) {
           <Plus size={16} />
         </button>
       </div>
-      <div className="mb-4">
-        <Link
-          href="/integrations"
-          className="block w-full px-3 py-2 text-sm bg-gray-700 dark:bg-gray-800 text-white rounded hover:bg-gray-600 dark:hover:bg-gray-700 transition-colors text-center"
-        >
-          ⚙️ Integrazioni
-        </Link>
-      </div>
       <div className="space-y-2 flex-1 overflow-y-auto">
         {sessions.map((session) => (
           <Link
@@ -146,12 +138,16 @@ export default function SessionList({ currentSessionId }: SessionListProps) {
                       <RotateCcw size={12} />
                       Restore
                     </button>
-                    <Link
-                      href={`/sessions/${session.id}`}
-                      className="flex-1 px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs text-center"
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        router.push(`/sessions/${session.id}`)
+                      }}
+                      className="flex-1 px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs text-center transition-colors"
                     >
                       View
-                    </Link>
+                    </button>
                   </div>
                 </div>
               ))

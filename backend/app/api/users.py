@@ -35,6 +35,12 @@ class UserUpdate(BaseModel):
     active: Optional[bool] = None
 
 
+class UserProfileUpdate(BaseModel):
+    """Update model for current user's own profile"""
+    name: Optional[str] = None
+    timezone: Optional[str] = None
+
+
 class UserResponse(BaseModel):
     id: UUID
     email: str
@@ -42,6 +48,7 @@ class UserResponse(BaseModel):
     role: str
     active: bool
     email_verified: bool
+    timezone: Optional[str] = None
     last_login_at: Optional[str]
     created_at: str
 
@@ -159,6 +166,58 @@ async def create_user(
         email_verified=user.email_verified,
         last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
         created_at=user.created_at.isoformat() if user.created_at else None,
+    )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current user's profile"""
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        name=current_user.name,
+        role=current_user.role,
+        active=current_user.active,
+        email_verified=current_user.email_verified,
+        timezone=current_user.timezone,
+        last_login_at=current_user.last_login_at.isoformat() if current_user.last_login_at else None,
+        created_at=current_user.created_at.isoformat() if current_user.created_at else None,
+    )
+
+
+@router.put("/me", response_model=UserResponse)
+async def update_current_user_profile(
+    profile_data: UserProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update current user's own profile (name, timezone)"""
+    update_data = profile_data.model_dump(exclude_unset=True)
+    
+    # Update allowed fields only
+    if "name" in update_data:
+        current_user.name = update_data["name"]
+    if "timezone" in update_data:
+        current_user.timezone = update_data["timezone"]
+    
+    await db.commit()
+    await db.refresh(current_user)
+    
+    logger.info(f"User {current_user.email} updated their profile")
+    
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        name=current_user.name,
+        role=current_user.role,
+        active=current_user.active,
+        email_verified=current_user.email_verified,
+        timezone=current_user.timezone,
+        last_login_at=current_user.last_login_at.isoformat() if current_user.last_login_at else None,
+        created_at=current_user.created_at.isoformat() if current_user.created_at else None,
     )
 
 

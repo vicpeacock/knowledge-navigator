@@ -23,11 +23,13 @@ function SessionPageContent() {
   }, [sessionId])
 
   const loadSession = async () => {
+    setLoading(true)
     try {
       const response = await sessionsApi.get(sessionId)
       setSession(response.data)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading session:', error)
+      setSession(null)
     } finally {
       setLoading(false)
     }
@@ -44,14 +46,29 @@ function SessionPageContent() {
     )
   }
 
+  if (!session) {
+    return (
+      <div className="flex h-screen">
+        <SessionList currentSessionId={sessionId} />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-gray-500">Session not found</div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-screen">
       <SessionList currentSessionId={sessionId} />
       <div className="flex-1 flex flex-col overflow-hidden">
         <AgentActivityProvider sessionId={sessionId}>
-          {session && <SessionDetails session={session} onUpdate={loadSession} />}
+          <SessionDetails session={session} onUpdate={loadSession} />
           <div className="flex-1 overflow-hidden flex flex-col">
-            <ChatInterface sessionId={sessionId} />
+            {session.status === 'archived' ? (
+              <ChatInterface key={sessionId} sessionId={sessionId} readOnly={true} />
+            ) : (
+              <ChatInterface key={sessionId} sessionId={sessionId} />
+            )}
           </div>
         </AgentActivityProvider>
       </div>

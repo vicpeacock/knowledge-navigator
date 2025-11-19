@@ -27,10 +27,8 @@ export function StatusProvider({ children }: { children: ReactNode }) {
     const id = Date.now().toString() + Math.random().toString(36).substr(2, 9)
     const newMessage: StatusMessage = { id, type, message, timestamp: new Date() }
     setStatusMessages(prev => [...prev, newMessage].slice(-50)) // Keep last 50 messages (increased from 20)
-    // Auto-expand panel when new message arrives
-    if (!statusPanelExpanded) {
-      setStatusPanelExpanded(true)
-    }
+    // Don't auto-expand panel - only update the counter
+    // User can manually expand if they want to see the messages
     // Messages are now persistent - user must manually remove them
     // No auto-removal to prevent important notifications from disappearing
   }

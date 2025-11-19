@@ -13,9 +13,10 @@ import DayTransitionDialog from './DayTransitionDialog'
 
 interface ChatInterfaceProps {
   sessionId: string
+  readOnly?: boolean
 }
 
-export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
+export default function ChatInterface({ sessionId, readOnly = false }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -35,20 +36,20 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
 
   // Define loadMessages before using it in useEffect
   const loadMessages = useCallback(async () => {
-    if (!sessionId) {
-      console.warn('No sessionId provided, cannot load messages')
+    const currentSessionId = sessionId
+    
+    if (!currentSessionId) {
       setLoadingMessages(false)
       return
     }
 
     setLoadingMessages(true)
     try {
-      console.log('Fetching messages for session:', sessionId)
-      const response = await sessionsApi.getMessages(sessionId)
-      console.log('Messages loaded:', response.data?.length || 0, 'messages')
-      setMessages(response.data || [])
+      const response = await sessionsApi.getMessages(currentSessionId)
+      const messagesData = response.data || []
+      setMessages(messagesData)
       setInitialLoad(true) // Mark as initial load to scroll to bottom
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading messages:', error)
       setMessages([]) // Set empty array on error
     } finally {
@@ -56,14 +57,41 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
     }
   }, [sessionId])
 
-  // Load messages when sessionId changes or component mounts
+  // Load messages when component mounts or sessionId changes
   useEffect(() => {
-    if (sessionId) {
-      console.log('Loading messages for session:', sessionId)
-      loadMessages()
+    if (!sessionId) {
+      setMessages([])
+      setLoadingMessages(false)
+      return
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]) // Only depend on sessionId to avoid infinite loops
+
+    // Reset state when session changes
+    setMessages([])
+    setInput('')
+    setLoading(false)
+    setLoadingMessages(true)
+    setInitialLoad(true)
+    setIsUserAtBottom(true)
+    
+    // Load messages directly
+    const loadMessagesDirect = async () => {
+      const currentSessionId = sessionId
+      
+      try {
+        const response = await sessionsApi.getMessages(currentSessionId)
+        const messagesData = response.data || []
+        setMessages(messagesData)
+        setInitialLoad(true)
+      } catch (error: any) {
+        console.error('Error loading messages:', error)
+        setMessages([])
+      } finally {
+        setLoadingMessages(false)
+      }
+    }
+    
+    loadMessagesDirect()
+  }, [sessionId]) // Only depend on sessionId
 
   // Scroll to bottom when messages are loaded or updated (but only if user is at bottom)
   useEffect(() => {
@@ -534,6 +562,17 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
       setInput('')
       setDayTransitionDialog({ isOpen: false, newSessionId: '' })
       
+      // Add user message to local state immediately for better UX
+      const userMessage: Message = {
+        id: '',
+        session_id: dayTransitionDialog.newSessionId, // Use new session ID
+        role: 'user',
+        content: messageToResend,
+        timestamp: new Date().toISOString(),
+        metadata: {},
+      }
+      setMessages((prev) => [...prev, userMessage])
+      
       // Resend with proceed_with_new_day flag
       setLoading(true)
       try {
@@ -587,6 +626,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
                 <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
               </div>
               <p className="text-gray-500">Caricamento messaggi...</p>
+              <p className="text-xs text-gray-400 mt-2">Session: {sessionId}</p>
             </div>
           </div>
         ) : messages.length === 0 ? (
@@ -594,6 +634,7 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
             <div className="text-center">
               <p className="text-lg mb-2">Nessun messaggio ancora</p>
               <p className="text-sm">Inizia una conversazione inviando un messaggio</p>
+              <p className="text-xs text-gray-400 mt-2">Session: {sessionId}</p>
             </div>
           </div>
         ) : (
@@ -788,26 +829,36 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         )}
       </div>
 
-      <div className="p-4 border-t bg-white dark:bg-gray-800 pb-20 relative z-10">
-        <div className="flex gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type your message..."
-            className="flex-1 p-3 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-            rows={2}
-            disabled={loading}
-          />
-          <button
-            onClick={handleSend}
-            disabled={loading || !input.trim()}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Send
-          </button>
+      {readOnly ? (
+        <div className="p-4 border-t bg-gray-50 dark:bg-gray-900 pb-20 relative z-10">
+          <div className="text-center text-gray-500 dark:text-gray-400 text-sm">
+            <p className="mb-2">Questa sessione è archiviata.</p>
+            <p>Puoi visualizzare i messaggi ma non puoi inviare nuovi messaggi.</p>
+            <p className="mt-2 text-xs">Usa il pulsante "Restore" nella barra superiore per riattivarla.</p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="p-4 border-t bg-white dark:bg-gray-800 pb-20 relative z-10">
+          <div className="flex gap-2">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Type your message..."
+              className="flex-1 p-3 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              rows={2}
+              disabled={loading}
+            />
+            <button
+              onClick={handleSend}
+              disabled={loading || !input.trim()}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

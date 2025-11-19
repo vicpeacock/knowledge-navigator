@@ -194,10 +194,15 @@ Le notifiche appaiono automaticamente quando:
 ### 6.3 Visualizzare le Notifiche
 
 1. Clicca sull'icona **campanella** 🔔
-2. Vedrai un popup con tutte le notifiche pendenti
+2. Vedrai un popup allargato (500px) con tutte le notifiche pendenti
 3. Le notifiche mostrano:
    - **Email**: Mittente, oggetto, snippet
    - **Calendar**: Titolo evento, tempo rimanente, location
+4. Il popup include bottoni semplificati (testo + icona):
+   - **Segna Lette**: marca tutte le notifiche come lette
+   - **Pulisci**: elimina tutte le notifiche pendenti
+   - **Vedi Tutte**: link alla pagina dedicata `/notifications`
+5. Ogni notifica ha un pulsante **[X]** per eliminazione individuale
 
 ### 6.4 Tipi di Notifiche
 
