@@ -41,6 +41,10 @@ services:
       
       # Logging
       - LOG_LEVEL=INFO
+      
+      # MCP Gateway (se configurato)
+      - MCP_GATEWAY_URL=${MCP_GATEWAY_URL:-http://host.docker.internal:8080}
+      - MCP_GATEWAY_AUTH_TOKEN=${MCP_GATEWAY_AUTH_TOKEN:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"  # Per accedere a servizi host da container
     healthcheck:
