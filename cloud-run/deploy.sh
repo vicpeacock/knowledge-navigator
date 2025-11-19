@@ -42,8 +42,12 @@ function check_docker() {
 }
 
 function build_backend() {
-    log_info "Building backend Docker image..."
-    docker build -f Dockerfile.backend -t gcr.io/${PROJECT_ID}/${BACKEND_SERVICE}:latest .
+    log_info "Building backend Docker image with Gemini support..."
+    # Use requirements-cloud.txt for cloud deployment (includes Gemini SDK)
+    docker build \
+        -f Dockerfile.backend \
+        --build-arg REQUIREMENTS_FILE=requirements-cloud.txt \
+        -t gcr.io/${PROJECT_ID}/${BACKEND_SERVICE}:latest .
     docker tag gcr.io/${PROJECT_ID}/${BACKEND_SERVICE}:latest gcr.io/${PROJECT_ID}/${BACKEND_SERVICE}:$(date +%Y%m%d-%H%M%S)
 }
 
@@ -53,7 +57,23 @@ function push_backend() {
 }
 
 function deploy_backend() {
-    log_info "Deploying backend to Cloud Run..."
+    log_info "Deploying backend to Cloud Run with Gemini..."
+    
+    # Check if GEMINI_API_KEY is set
+    if [ -z "$GEMINI_API_KEY" ]; then
+        log_warn "GEMINI_API_KEY not set. Set it as a Cloud Run secret or env var."
+        log_info "Get API key from: https://aistudio.google.com/app/apikey"
+    fi
+    
+    # Build env vars for Cloud Run
+    ENV_VARS="PORT=8000,LLM_PROVIDER=gemini"
+    if [ -n "$GEMINI_API_KEY" ]; then
+        ENV_VARS="${ENV_VARS},GEMINI_API_KEY=${GEMINI_API_KEY}"
+    fi
+    if [ -n "$GEMINI_MODEL" ]; then
+        ENV_VARS="${ENV_VARS},GEMINI_MODEL=${GEMINI_MODEL}"
+    fi
+    
     gcloud run deploy ${BACKEND_SERVICE} \
         --image gcr.io/${PROJECT_ID}/${BACKEND_SERVICE}:latest \
         --platform managed \
@@ -64,8 +84,11 @@ function deploy_backend() {
         --cpu 2 \
         --timeout 300 \
         --max-instances 10 \
-        --set-env-vars "PORT=8000" \
+        --set-env-vars "${ENV_VARS}" \
         --add-cloudsql-instances ${PROJECT_ID}:${REGION}:knowledge-navigator-db || log_warn "Cloud SQL instance non configurato. Usa database esterno."
+    
+    log_info "Backend deployed with Gemini LLM provider"
+    log_info "Make sure to set GEMINI_API_KEY as Cloud Run secret or env var if not already set"
 }
 
 function build_frontend() {

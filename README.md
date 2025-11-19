@@ -104,9 +104,28 @@ cd frontend && npm test
 - **Fase 2 Completamento**: ~90%
 - **Code Quality**: Nessun warning, Pydantic V2 compatibile
 
+## 🌐 Deployment
+
+### Locale (Development)
+- **LLM**: Ollama + llama.cpp con supporto Metal GPU
+- **Configurazione**: Usa `LLM_PROVIDER=ollama` in `.env`
+- **Switch**: `./scripts/switch-env.sh local`
+
+### Cloud (Production)
+- **LLM**: Gemini API (Google AI Studio) - Nessuna GPU necessaria
+- **Configurazione**: Usa `LLM_PROVIDER=gemini` in `.env`
+- **Switch**: `./scripts/switch-env.sh cloud`
+- **Deployment**: Google Cloud Run con Docker
+- **Bonus**: +5 punti Kaggle challenge per uso Gemini
+
+**Note**: I due deployment non interferiscono tra loro. Usa gli script `switch-env.sh` e `check-env.sh` per gestire gli ambienti.
+
+Vedi `cloud-run/README.md` per dettagli sul deployment cloud.
+
 ## 🔧 Tecnologie
 
-- **Backend**: FastAPI, LangGraph, SQLAlchemy, ChromaDB, Ollama
+- **Backend**: FastAPI, LangGraph, SQLAlchemy, ChromaDB
+- **LLM**: Ollama/llama.cpp (locale) o Gemini API (cloud)
 - **Frontend**: Next.js 14, React, TypeScript, TailwindCSS
 - **Database**: PostgreSQL, ChromaDB
 - **Observability**: OpenTelemetry, Prometheus

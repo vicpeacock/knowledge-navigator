@@ -19,8 +19,9 @@ from app.services.daily_session_manager import DailySessionManager
 from app.db.database import AsyncSessionLocal
 
 # Global instances
-_ollama_client: OllamaClient = None
-_planner_client: OllamaClient = None
+# Note: These can be either OllamaClient or GeminiClient depending on llm_provider setting
+_ollama_client = None  # Main LLM client (OllamaClient or GeminiClient)
+_planner_client = None  # Planner LLM client (OllamaClient or GeminiClient)
 _mcp_client: MCPClient = None
 _memory_manager: MemoryManager = None
 _agent_activity_stream: AgentActivityStream = None
@@ -50,23 +51,35 @@ def init_clients():
 
     if _ollama_client is None:
         try:
-            _ollama_client = OllamaClient()
+            if settings.llm_provider == "gemini":
+                from app.core.gemini_client import GeminiClient
+                logger.info(f"Initializing Gemini client (main): model={settings.gemini_model}")
+                _ollama_client = GeminiClient(model=settings.gemini_model)
+            else:
+                logger.info(f"Initializing Ollama client (main): URL={settings.ollama_base_url}, model={settings.ollama_model}")
+                _ollama_client = OllamaClient()
         except Exception as exc:
-            logger.error("Failed to initialize main Ollama client: %s", exc, exc_info=True)
+            logger.error("Failed to initialize main LLM client: %s", exc, exc_info=True)
             raise
 
     if _planner_client is None:
         try:
-            # Use planner URL if set, otherwise fallback to main Ollama URL
-            planner_url = settings.ollama_planner_base_url or settings.ollama_base_url
-            planner_model = settings.ollama_planner_model or settings.ollama_model
-            logger.info(f"Initializing planner client: URL={planner_url}, model={planner_model}")
-            _planner_client = OllamaClient(
-                base_url=planner_url,
-                model=planner_model,
-            )
+            if settings.llm_provider == "gemini":
+                from app.core.gemini_client import GeminiClient
+                planner_model = settings.gemini_planner_model or settings.gemini_model
+                logger.info(f"Initializing Gemini client (planner): model={planner_model}")
+                _planner_client = GeminiClient(model=planner_model)
+            else:
+                # Use planner URL if set, otherwise fallback to main Ollama URL
+                planner_url = settings.ollama_planner_base_url or settings.ollama_base_url
+                planner_model = settings.ollama_planner_model or settings.ollama_model
+                logger.info(f"Initializing Ollama client (planner): URL={planner_url}, model={planner_model}")
+                _planner_client = OllamaClient(
+                    base_url=planner_url,
+                    model=planner_model,
+                )
         except Exception as exc:
-            logger.error("Failed to initialize planner client: %s", exc, exc_info=True)
+            logger.error("Failed to initialize planner LLM client: %s", exc, exc_info=True)
             raise
 
     if _mcp_client is None:
@@ -166,20 +179,38 @@ def init_clients():
         )
 
 
-def get_ollama_client() -> OllamaClient:
-    """Get main Ollama client (for chat)"""
+def get_ollama_client():
+    """
+    Get main LLM client (for chat)
+    
+    Returns OllamaClient or GeminiClient depending on llm_provider setting.
+    Both implement the same interface, so the return type is compatible.
+    """
     return _ollama_client
 
 
-def get_planner_client() -> OllamaClient:
-    """Get dedicated planner LLM client"""
+def get_planner_client():
+    """
+    Get dedicated planner LLM client
+    
+    Returns OllamaClient or GeminiClient depending on llm_provider setting.
+    Both implement the same interface, so the return type is compatible.
+    """
     return _planner_client
 
 
 def get_ollama_background_client():
-    """Get background LLM client (for background tasks) - can be Ollama or llama.cpp"""
+    """
+    Get background LLM client (for background tasks)
     
-    if settings.use_llama_cpp_background:
+    Can be Ollama, llama.cpp, or Gemini depending on configuration.
+    All implement the same interface.
+    """
+    if settings.llm_provider == "gemini":
+        from app.core.gemini_client import GeminiClient
+        background_model = settings.gemini_background_model or settings.gemini_model
+        return GeminiClient(model=background_model)
+    elif settings.use_llama_cpp_background:
         from app.core.llama_cpp_client import LlamaCppClient
         return LlamaCppClient(
             base_url=settings.ollama_background_base_url,

@@ -1,0 +1,12 @@
+# Cloud deployment requirements
+# Includes base requirements + Gemini SDK (no Ollama/llama.cpp needed)
+
+# Include base requirements
+-r requirements.txt
+
+# Gemini SDK for cloud deployment
+google-generativeai>=0.3.0
+
+# Note: Ollama library is still included from requirements.txt but won't be used
+# when LLM_PROVIDER=gemini is set
+
