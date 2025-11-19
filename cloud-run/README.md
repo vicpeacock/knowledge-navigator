@@ -67,11 +67,30 @@ ChromaDB può essere deployato separatamente o usato come servizio esterno. Per 
 2. **Opzione B**: Usa ChromaDB cloud service (se disponibile)
 3. **Opzione C**: Usa database esterno per embeddings (meno performante)
 
-### 4. Variabili Ambiente
+### 4. Gemini API Key Setup
 
-Crea file `.env.cloud-run` con le variabili necessarie:
+**IMPORTANTE**: Il deployment cloud usa Gemini API invece di Ollama (non serve GPU).
+
+1. Ottieni API key da Google AI Studio:
+   - Vai su https://aistudio.google.com/app/apikey
+   - Crea una nuova API key
+   - Copia la chiave
+
+2. Configura la chiave come variabile ambiente Cloud Run (vedi sezione 5)
+
+### 5. Variabili Ambiente
+
+Crea file `.env.cloud-run` con le variabili necessarie (vedi `cloud-run/env.example`):
 
 ```bash
+# LLM Provider - MUST be "gemini" for cloud
+LLM_PROVIDER=gemini
+
+# Gemini Configuration
+GEMINI_API_KEY=your-gemini-api-key-here  # Get from https://aistudio.google.com/app/apikey
+GEMINI_MODEL=gemini-1.5-pro
+# GEMINI_BACKGROUND_MODEL=gemini-1.5-flash  # Optional: faster model for background
+
 # Database
 DATABASE_URL=postgresql+asyncpg://knavigator:PASSWORD@/knowledge_navigator?host=/cloudsql/PROJECT_ID:REGION:INSTANCE_NAME
 POSTGRES_HOST=/cloudsql/PROJECT_ID:REGION:INSTANCE_NAME
@@ -88,10 +107,6 @@ SECRET_KEY=your-secret-key-min-32-chars
 ENCRYPTION_KEY=your-32-byte-encryption-key
 JWT_SECRET_KEY=your-jwt-secret-key-min-32-chars
 
-# Ollama (se usi servizio esterno)
-OLLAMA_BASE_URL=https://your-ollama-service.com
-OLLAMA_API_KEY=your-ollama-api-key
-
 # Google OAuth (per Calendar/Email)
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
@@ -100,7 +115,9 @@ GOOGLE_CLIENT_SECRET=your-google-client-secret
 MCP_GATEWAY_URL=https://your-mcp-gateway.run.app
 ```
 
-### 5. Deploy Backend
+**Note**: Non è necessario configurare Ollama per il deployment cloud. Il sistema usa automaticamente Gemini quando `LLM_PROVIDER=gemini`.
+
+### 6. Deploy Backend
 
 ```bash
 # Build e push immagine
@@ -111,13 +128,16 @@ cd /path/to/knowledge-navigator
 Oppure manualmente:
 
 ```bash
-# Build
-docker build -f Dockerfile.backend -t gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:latest .
+# Build (uses requirements-cloud.txt with Gemini SDK)
+docker build \
+    -f Dockerfile.backend \
+    --build-arg REQUIREMENTS_FILE=requirements-cloud.txt \
+    -t gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:latest .
 
 # Push
 docker push gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:latest
 
-# Deploy con variabili ambiente
+# Deploy con variabili ambiente (include Gemini config)
 gcloud run deploy knowledge-navigator-backend \
     --image gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:latest \
     --platform managed \
@@ -128,11 +148,24 @@ gcloud run deploy knowledge-navigator-backend \
     --cpu 2 \
     --timeout 300 \
     --max-instances 10 \
+    --set-env-vars "LLM_PROVIDER=gemini,GEMINI_API_KEY=your-key-here,GEMINI_MODEL=gemini-1.5-pro" \
     --set-env-vars-file .env.cloud-run \
     --add-cloudsql-instances ${PROJECT_ID}:${REGION}:knowledge-navigator-db
 ```
 
-### 6. Deploy Frontend
+**IMPORTANTE**: Per sicurezza, configura `GEMINI_API_KEY` come Cloud Run Secret invece di variabile ambiente:
+
+```bash
+# Crea secret
+echo -n "your-gemini-api-key" | gcloud secrets create gemini-api-key --data-file=-
+
+# Deploy con secret
+gcloud run deploy knowledge-navigator-backend \
+    ... \
+    --set-secrets="GEMINI_API_KEY=gemini-api-key:latest"
+```
+
+### 7. Deploy Frontend
 
 ```bash
 # Assicurati che BACKEND_URL sia configurato
@@ -209,22 +242,48 @@ gcloud run jobs create run-migrations \
     --args "upgrade head"
 ```
 
+### Gemini Configuration
+
+Il deployment cloud usa **Gemini API** invece di Ollama per evitare la necessità di GPU.
+
+**Vantaggi**:
+- ✅ Nessuna GPU necessaria
+- ✅ Scalabilità automatica
+- ✅ Costi pay-per-use
+- ✅ Bonus +5 punti nella Kaggle challenge
+
+**Configurazione**:
+1. Ottieni API key da https://aistudio.google.com/app/apikey
+2. Configura come Cloud Run Secret (raccomandato) o variabile ambiente
+3. Il sistema usa automaticamente Gemini quando `LLM_PROVIDER=gemini`
+
+**Modelli disponibili**:
+- `gemini-1.5-pro` - Modello principale (default, alta qualità)
+- `gemini-1.5-flash` - Più veloce, consigliato per background tasks
+- `gemini-1.5-pro-latest` - Versione più recente
+- `gemini-pro` - Versione precedente (ancora supportata)
+
+**Note**:
+- Il deployment locale continua a usare Ollama/llama.cpp con Metal GPU
+- I due deployment non interferiscono tra loro
+- Usa `./scripts/switch-env.sh` per passare tra locale e cloud
+
 ### Secrets Management
 
 Per produzione, usa Google Secret Manager invece di variabili ambiente:
 
 ```bash
-# Crea secret
-echo -n "your-secret-value" | gcloud secrets create secret-name --data-file=-
+# Crea secret per Gemini API key
+echo -n "your-gemini-api-key" | gcloud secrets create gemini-api-key --data-file=-
 
 # Grant access al service account Cloud Run
-gcloud secrets add-iam-policy-binding secret-name \
+gcloud secrets add-iam-policy-binding gemini-api-key \
     --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
     --role="roles/secretmanager.secretAccessor"
 
 # Usa secret in Cloud Run
 gcloud run services update knowledge-navigator-backend \
-    --update-secrets SECRET_KEY=secret-name:latest
+    --update-secrets GEMINI_API_KEY=gemini-api-key:latest
 ```
 
 ## 🧪 Testing

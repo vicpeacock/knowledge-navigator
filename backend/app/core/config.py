@@ -4,10 +4,15 @@ from typing import Optional
 import os
 from pathlib import Path
 
+# Find project root (where .env file is located)
+# Go up from backend/app/core/config.py to find project root
+_PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+_ENV_FILE = _PROJECT_ROOT / ".env"
+
 
 class Settings(BaseSettings):
     model_config = ConfigDict(
-        env_file=".env",
+        env_file=str(_ENV_FILE) if _ENV_FILE.exists() else ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
@@ -40,6 +45,15 @@ class Settings(BaseSettings):
     # ChromaDB
     chromadb_host: str = "localhost"
     chromadb_port: int = 8001  # Changed from 8000 to avoid conflict with FastAPI backend
+
+    # LLM Provider Selection
+    llm_provider: str = "ollama"  # Options: "ollama", "gemini"
+
+    # Gemini Configuration (for cloud deployment)
+    gemini_api_key: Optional[str] = None  # Google AI Studio API key
+    gemini_model: str = "gemini-2.5-flash"  # Main model for chat (gemini-2.5-flash is fast and available)
+    gemini_background_model: Optional[str] = None  # Background model (if None, uses gemini_model)
+    gemini_planner_model: Optional[str] = None  # Planner model (if None, uses gemini_model)
 
     # Ollama Main (per chat)
     ollama_base_url: str = "http://localhost:11434"
