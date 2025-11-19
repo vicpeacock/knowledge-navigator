@@ -95,13 +95,6 @@ class TestEmailPoller:
     @pytest.mark.asyncio
     async def test_check_new_emails_with_integration(self, mock_db, mock_integration, mock_email_service, mock_notification_service):
         """Test checking emails with a valid integration"""
-        # Setup: one integration
-        mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = [mock_integration]
-        mock_result.scalars.return_value = mock_scalars
-        mock_db.execute = AsyncMock(return_value=mock_result)
-        
         # Mock email messages
         mock_messages = [
             {
@@ -119,6 +112,47 @@ class TestEmailPoller:
                 "date": datetime.now(timezone.utc).isoformat(),
             },
         ]
+        
+        # Setup mock_db.execute to handle multiple calls:
+        # 1. Query for integrations
+        # 2. Query for existing notifications (for deduplication)
+        # 3. Query for existing sessions (for deduplication)
+        call_count = 0
+        
+        async def mock_execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            
+            # First call: return integrations
+            if call_count == 1:
+                mock_result = MagicMock()
+                mock_scalars = MagicMock()
+                mock_scalars.all.return_value = [mock_integration]
+                mock_result.scalars.return_value = mock_scalars
+                return mock_result
+            # Second call: return empty list for existing notifications (no duplicates)
+            elif call_count == 2:
+                mock_result = MagicMock()
+                mock_scalars = MagicMock()
+                mock_scalars.all.return_value = []  # No existing notifications
+                mock_result.scalars.return_value = mock_scalars
+                return mock_result
+            # Third call: return empty list for existing sessions (no duplicates)
+            elif call_count == 3:
+                mock_result = MagicMock()
+                mock_scalars = MagicMock()
+                mock_scalars.all.return_value = []  # No existing sessions
+                mock_result.scalars.return_value = mock_scalars
+                return mock_result
+            else:
+                # Fallback for any other calls
+                mock_result = MagicMock()
+                mock_scalars = MagicMock()
+                mock_scalars.all.return_value = []
+                mock_result.scalars.return_value = mock_scalars
+                return mock_result
+        
+        mock_db.execute = AsyncMock(side_effect=mock_execute_side_effect)
         
         with patch('app.services.schedulers.email_poller._decrypt_credentials') as mock_decrypt, \
              patch('app.services.schedulers.email_poller.EmailService') as mock_email_service_class, \

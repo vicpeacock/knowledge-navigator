@@ -74,10 +74,26 @@ class TestChatEndpoint:
         mock_session.session_metadata = {}
         
         # Mock database queries
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_session
-        mock_result.scalars.return_value.all.return_value = []
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        # Need to handle multiple queries: session query and user query (for daily_session_manager)
+        from app.models.database import User as UserModel
+        
+        def mock_execute(query):
+            mock_result = MagicMock()
+            # Check if query is for User (daily_session_manager needs user with timezone)
+            if hasattr(query, 'column_descriptions') or str(query).find('user') != -1 or str(query).find('User') != -1:
+                # Return mock user for daily_session_manager
+                mock_user_db = MagicMock(spec=UserModel)
+                mock_user_db.id = mock_user.id
+                mock_user_db.tenant_id = mock_tenant_id
+                mock_user_db.timezone = "UTC"
+                mock_result.scalar_one_or_none.return_value = mock_user_db
+            else:
+                # Return mock session for session query
+                mock_result.scalar_one_or_none.return_value = mock_session
+                mock_result.scalars.return_value.all.return_value = []
+            return mock_result
+        
+        mock_db.execute = AsyncMock(side_effect=mock_execute)
         
         # Mock Ollama client
         mock_ollama = AsyncMock()
@@ -146,7 +162,11 @@ class TestChatEndpoint:
                 data = response.json()
                 assert "response" in data
                 assert data["response"] is not None
-                assert len(data["response"].strip()) > 0, "Response should never be empty"
+                # Day transition responses can be empty (frontend shows dialog)
+                if data.get("day_transition_pending"):
+                    assert data.get("new_session_id") is not None, "Day transition should include new_session_id"
+                else:
+                    assert len(data["response"].strip()) > 0, "Response should never be empty (unless day transition)"
             finally:
                 # Clean up dependency overrides
                 app.dependency_overrides.clear()
@@ -162,7 +182,7 @@ class TestChatEndpoint:
         # Setup mocks (same as above)
         mock_db = AsyncMock()
         
-        from app.models.database import Session as SessionModel
+        from app.models.database import Session as SessionModel, User as UserModel
         mock_session = MagicMock(spec=SessionModel)
         mock_session.id = mock_session_id
         mock_session.tenant_id = mock_tenant_id
@@ -170,10 +190,25 @@ class TestChatEndpoint:
         mock_session.status = "active"
         mock_session.session_metadata = {}
         
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_session
-        mock_result.scalars.return_value.all.return_value = []
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        # Mock database queries - need to handle both session and user queries
+        def mock_execute(query):
+            mock_result = MagicMock()
+            # Check if query is for User (daily_session_manager needs user with timezone)
+            query_str = str(query).lower()
+            if 'user' in query_str and ('timezone' in query_str or 'select' in query_str):
+                # Return mock user for daily_session_manager
+                mock_user_db = MagicMock(spec=UserModel)
+                mock_user_db.id = mock_user.id
+                mock_user_db.tenant_id = mock_tenant_id
+                mock_user_db.timezone = "UTC"
+                mock_result.scalar_one_or_none.return_value = mock_user_db
+            else:
+                # Return mock session for session query
+                mock_result.scalar_one_or_none.return_value = mock_session
+                mock_result.scalars.return_value.all.return_value = []
+            return mock_result
+        
+        mock_db.execute = AsyncMock(side_effect=mock_execute)
         
         mock_ollama = AsyncMock()
         mock_planner = AsyncMock()
@@ -229,7 +264,11 @@ class TestChatEndpoint:
                 data = response.json()
                 assert "response" in data
                 assert data["response"] is not None
-                assert len(data["response"].strip()) > 0, "Response should have fallback message when LangGraph returns empty"
+                # Day transition responses can be empty (frontend shows dialog)
+                if data.get("day_transition_pending"):
+                    assert data.get("new_session_id") is not None, "Day transition should include new_session_id"
+                else:
+                    assert len(data["response"].strip()) > 0, "Response should have fallback message when LangGraph returns empty"
             finally:
                 # Clean up dependency overrides
                 app.dependency_overrides.clear()
