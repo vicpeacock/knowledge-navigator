@@ -1273,27 +1273,10 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             if not response_text or not response_text.strip():
                 logger.warning("Response text is empty and no tool calls - using fallback")
                 response_text = "Ho ricevuto il tuo messaggio. Come posso aiutarti?"
-                        logger.error(f"✅✅✅ Tool {tool_name} executed successfully. Result type: {type(result)}, keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
-                        tool_results.append({
-                            "tool": tool_name,
-                            "parameters": tool_params,
-                            "result": result,
-                        })
-                        tools_used.append(tool_name)
-                    except Exception as exc:
-                        logger.error(f"❌❌❌ Errore eseguendo tool {tool_name}: {exc}", exc_info=True)
-                        tool_results.append({
-                            "tool": tool_name,
-                            "parameters": tool_params,
-                            "result": {"error": str(exc)},
-                        })
-            logger.error(f"🔧🔧🔧 Tool execution complete. Total results: {len(tool_results)}")
-        else:
-            logger.error(f"🔧🔧🔧 No tool calls found in response")
         
         # After all tool calls are executed, generate final response if we have tool results
         # IMPORTANT: Always generate a response after tool execution, even if response_text already exists
-        if tool_results:
+        if tool_results and not response_text:
             logger.error(f"🔍🔍🔍 Tool results found: {len(tool_results)}. Generating final response...")
             tool_results_text = "\n\n=== Risultati Tool ===\n"
             for tr in tool_results:
