@@ -55,18 +55,28 @@ PID=$!
 # Save the PID to a file for later reference
 echo $PID > mcp-gateway.pid
 
-# Wait a bit for the gateway to start and generate token
+# Wait a bit for the gateway to start
 sleep 6
 
-# IMPORTANTE: Il gateway Docker MCP genera SEMPRE un nuovo token, anche se passiamo MCP_GATEWAY_AUTH_TOKEN
-# Dobbiamo estrarre il token generato dai log e usarlo nel backend
-echo "📋 Estraendo il token generato dal gateway dai log..."
+# Check if gateway is using existing token or generated a new one
+echo "📋 Verificando configurazione token MCP Gateway..."
 
-# Wait a bit more for the token to appear in logs
+# Wait a bit more for logs to appear
 sleep 2
 
-# Extract token from logs - il gateway genera sempre un token e lo mostra nei log
-GENERATED_TOKEN=$(tail -100 mcp-gateway.log | grep "Use Bearer token:" | tail -1 | sed -n 's/.*Bearer \([a-zA-Z0-9]*\).*/\1/p')
+# Check if gateway is using the token we passed
+if tail -100 mcp-gateway.log | grep -q "Use Bearer token from MCP_GATEWAY_AUTH_TOKEN"; then
+    echo "✅ Gateway sta usando il token passato come variabile d'ambiente"
+    # Use the token we already have
+    GENERATED_TOKEN="$MCP_GATEWAY_AUTH_TOKEN"
+elif tail -100 mcp-gateway.log | grep -q "Use Bearer token:"; then
+    # Gateway generated a new token - extract it from logs
+    echo "📋 Estraendo il token generato dal gateway dai log..."
+    GENERATED_TOKEN=$(tail -100 mcp-gateway.log | grep "Use Bearer token:" | tail -1 | sed -n 's/.*Bearer \([a-zA-Z0-9]*\).*/\1/p')
+else
+    echo "⚠️  Impossibile determinare il token dal gateway"
+    GENERATED_TOKEN=""
+fi
 
 if [ -n "$GENERATED_TOKEN" ]; then
     echo "✅ Token generato dal gateway: ${GENERATED_TOKEN:0:30}..."
