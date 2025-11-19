@@ -1125,7 +1125,20 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         tool_results = []
         
         if isinstance(response_data, dict):
+            # Extract content first
             response_text = response_data.get("content", "")
+            
+            # If content is empty, try to extract from raw_result
+            if not response_text and "raw_result" in response_data:
+                raw_result = response_data.get("raw_result", {})
+                if isinstance(raw_result, dict):
+                    message = raw_result.get("message", {})
+                    if isinstance(message, dict):
+                        response_text = message.get("content", "")
+                    elif isinstance(message, str):
+                        response_text = message
+            
+            # Extract tool calls
             parsed_tc = response_data.get("_parsed_tool_calls")
             if parsed_tc:
                 tool_calls = parsed_tc
@@ -1189,7 +1202,17 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                                     "parameters": tc.get("parameters", {}),
                                 })
         else:
-            response_text = response_data or ""
+            response_text = str(response_data) if response_data else ""
+        
+        # Ensure response_text is never empty - if it is and there are no tool_calls, provide fallback
+        if not response_text or not response_text.strip():
+            if tool_calls:
+                # If we have tool_calls but no text, that's OK - we'll generate response after tool execution
+                logger.info("Response text is empty but tool_calls present - will generate response after tool execution")
+            else:
+                # No tool_calls and no text - provide fallback
+                logger.warning("⚠️  Response text is empty and no tool_calls - using fallback")
+                response_text = "Ho ricevuto il tuo messaggio. Come posso aiutarti?"
         
         # Execute tool calls if any
         if tool_calls:
@@ -1202,9 +1225,54 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     try:
                         result = await tool_manager.execute_tool(
                             tool_name, tool_params, state["db"], 
-                            session_id=state["session_id"],
+                            session_id=state["session_id"], 
                             current_user=current_user
                         )
+                        tools_used.append(tool_name)
+                        tool_results.append({
+                            "tool": tool_name,
+                            "parameters": tool_params,
+                            "result": result,
+                        })
+                    except Exception as tool_error:
+                        logger.error(f"❌ Tool {tool_name} failed: {tool_error}", exc_info=True)
+                        tools_used.append(tool_name)
+                        tool_results.append({
+                            "tool": tool_name,
+                            "parameters": tool_params,
+                            "result": {"error": str(tool_error)},
+                        })
+            
+            # After executing tools, generate final response
+            if tool_results:
+                logger.info(f"Generating final response after {len(tool_results)} tool execution(s)")
+                try:
+                    final_response = await ollama.generate_with_context(
+                        prompt=f"L'utente ha chiesto: {request.message}\n\nHo eseguito i seguenti tool:\n{json.dumps(tool_results, indent=2, ensure_ascii=False, default=str)}\n\nRispondi all'utente basandoti sui risultati dei tool sopra.",
+                        session_context=session_context,
+                        retrieved_memory=retrieved_memory if retrieved_memory else None,
+                        tools=None,  # No tools needed for final response
+                        tools_description=None,
+                    )
+                    
+                    # Extract response text
+                    if isinstance(final_response, dict):
+                        response_text = final_response.get("content", "")
+                    else:
+                        response_text = str(final_response) if final_response else ""
+                    
+                    if not response_text or not response_text.strip():
+                        logger.warning("Final response after tool execution is empty, using fallback")
+                        response_text = f"Ho completato le azioni richieste. Ho eseguito {len(tool_results)} tool(s)."
+                except Exception as final_error:
+                    logger.error(f"Error generating final response after tools: {final_error}", exc_info=True)
+                    response_text = f"Ho eseguito {len(tool_results)} tool(s). Risultati: {json.dumps(tool_results, indent=2, ensure_ascii=False, default=str)[:500]}"
+        else:
+            # No tool calls - use the response_text we extracted (or fallback if empty)
+            logger.info(f"No tool calls, using direct response. Length: {len(response_text) if response_text else 0}")
+            if not response_text or not response_text.strip():
+                logger.warning("Response text is empty and no tool calls - using fallback")
+                response_text = "Ho ricevuto il tuo messaggio. Come posso aiutarti?"
                         logger.error(f"✅✅✅ Tool {tool_name} executed successfully. Result type: {type(result)}, keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
                         tool_results.append({
                             "tool": tool_name,
