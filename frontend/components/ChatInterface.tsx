@@ -367,12 +367,19 @@ export default function ChatInterface({ sessionId }: ChatInterfaceProps) {
         return
       }
       
-      // If response is empty, it might be a background task - reload messages
+      // If response is empty, show error message instead of reloading
       if (!response.data.response || response.data.response.trim() === '') {
-        console.log('Empty response received (likely background task), reloading messages')
+        console.warn('Empty response received from backend')
+        const errorMessage: Message = {
+          id: '',
+          session_id: sessionId,
+          role: 'assistant',
+          content: response.data.response || 'Mi dispiace, non sono riuscito a generare una risposta. Potresti riprovare?',
+          timestamp: new Date().toISOString(),
+          metadata: {},
+        }
+        setMessages((prev) => [...prev, errorMessage])
         setLoading(false)
-        // Reload messages to get the response that was saved in background
-        setTimeout(() => loadMessages(), 2000)
         return
       }
 
