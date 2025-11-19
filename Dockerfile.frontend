@@ -19,10 +19,14 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ ./
 
-# Variabili ambiente per build
+# Build arg per NEXT_PUBLIC_API_URL (può essere sovrascritto al build)
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# Variabili ambiente per build (NEXT_PUBLIC_* vengono incluse nel bundle)
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production \
-    ESLINT_NO_DEV_ERRORS=true
+    ESLINT_NO_DEV_ERRORS=true \
+    NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 # Build applicazione
 RUN npm run build
