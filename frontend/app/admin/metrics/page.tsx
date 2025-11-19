@@ -342,29 +342,29 @@ function MetricsContent() {
       element.style.width = '210mm' // A4 width
       element.style.padding = '20mm'
       
-      // Opzioni per html2pdf
-      const opt = {
-        margin: [10, 10, 10, 10],
-        filename: `evaluation-report-${new Date().toISOString().split('T')[0]}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { 
-          scale: 2, 
-          useCORS: true,
-          logging: false,
-          letterRendering: true
-        },
-        jsPDF: { 
-          unit: 'mm', 
-          format: 'a4', 
-          orientation: 'portrait' 
-        },
-        pagebreak: { 
-          mode: ['avoid-all', 'css', 'legacy'],
-          before: '.page-break-before',
-          after: '.page-break-after',
-          avoid: ['.test-result', '.summary-card']
+        // Opzioni per html2pdf
+        const opt = {
+          margin: [10, 10, 10, 10] as [number, number, number, number],
+          filename: `evaluation-report-${new Date().toISOString().split('T')[0]}.pdf`,
+          image: { type: 'jpeg' as const, quality: 0.98 },
+          html2canvas: { 
+            scale: 2, 
+            useCORS: true,
+            logging: false,
+            letterRendering: true
+          },
+          jsPDF: { 
+            unit: 'mm', 
+            format: 'a4', 
+            orientation: 'portrait' as const
+          },
+          pagebreak: { 
+            mode: ['avoid-all', 'css', 'legacy'],
+            before: '.page-break-before',
+            after: '.page-break-after',
+            avoid: ['.test-result', '.summary-card']
+          }
         }
-      }
       
       // Genera e scarica il PDF
       html2pdf().set(opt).from(element).save()

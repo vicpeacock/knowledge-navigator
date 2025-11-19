@@ -28,6 +28,7 @@ interface Notification {
     snippet?: string
     email_id?: string
     session_id?: string
+    auto_session_id?: string
     session_link?: string
     has_session?: boolean
     // Calendar-specific
