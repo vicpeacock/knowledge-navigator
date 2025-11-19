@@ -1625,15 +1625,27 @@ def _routing_router(state: LangGraphChatState) -> str:
 
 
 def build_langgraph_app() -> StateGraph:
+    """Build and compile the LangGraph application with all nodes and edges"""
+    logger = logging.getLogger(__name__)
+    logger.info("🔨 Building LangGraph application...")
+    
     graph = StateGraph(LangGraphChatState)
+    
+    # Add all nodes
+    logger.info("   Adding nodes...")
     graph.add_node("event_handler", event_handler_node)
     graph.add_node("orchestrator", orchestrator_node)
     graph.add_node("tool_loop", tool_loop_node)
     graph.add_node("knowledge_agent", knowledge_agent_node)
     graph.add_node("notification_collector", notification_collector_node)
     graph.add_node("response_formatter", response_formatter_node)
-
+    
+    # Set entry point
+    logger.info("   Setting entry point: event_handler")
     graph.set_entry_point("event_handler")
+    
+    # Add edges
+    logger.info("   Adding edges...")
     graph.add_edge("event_handler", "orchestrator")
     graph.add_conditional_edges(
         "orchestrator",
@@ -1646,6 +1658,10 @@ def build_langgraph_app() -> StateGraph:
     graph.add_edge("knowledge_agent", "notification_collector")
     graph.add_edge("notification_collector", "response_formatter")
     graph.add_edge("response_formatter", END)
+    
+    logger.info("✅ LangGraph application built successfully")
+    logger.info("   Graph structure: event_handler -> orchestrator -> tool_loop -> knowledge_agent -> notification_collector -> response_formatter -> END")
+    
     return graph.compile()
 
 
