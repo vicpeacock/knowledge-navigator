@@ -124,7 +124,14 @@ class OllamaClient:
 
 Hai accesso a memoria multi-livello (short/medium/long-term), integrazioni (Gmail, Calendar, web), e tool per eseguire azioni.
 
-Rispondi in modo naturale e diretto. Usa i tool quando servono informazioni esterne o azioni specifiche. Per le affermazioni dell'utente, risposte brevi sono appropriate."""
+IMPORTANTE: Quando l'utente chiede informazioni che richiedono dati esterni (email, calendario, web) o azioni specifiche (inviare email, archiviare email, cercare sul web), DEVI usare i tool appropriati. Non rispondere direttamente senza aver prima recuperato i dati necessari tramite i tool.
+
+Esempi:
+- Se l'utente chiede "Ci sono email non lette?" → usa get_emails con query='is:unread'
+- Se l'utente chiede "Cosa ho in calendario domani?" → usa get_calendar_events
+- Se l'utente chiede informazioni che non sono nella memoria → usa web_search
+
+Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
         
         enhanced_system = system_prompt or base_system_prompt
         
