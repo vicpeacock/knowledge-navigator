@@ -274,7 +274,7 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
         }
       }
 
-      if (fallback) {
+      if (fallback && fallback.timestamp) {
         // Check if the fallback event is still recent enough to be shown
         const fallbackTime = new Date(fallback.timestamp).getTime()
         const fallbackAge = Number.isFinite(fallbackTime) ? now - fallbackTime : Number.POSITIVE_INFINITY
