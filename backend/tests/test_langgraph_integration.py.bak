@@ -1,6 +1,5 @@
 """
 Complete integration test for LangGraph - tests the full flow from request to response
-FIXED VERSION
 """
 import pytest
 import asyncio
@@ -107,19 +106,11 @@ async def test_run_langgraph_chat_complete_flow(
     
     # Verify agent activity was logged
     assert len(chat_response.agent_activity) > 0
-    # agent_activity contains AgentActivityEvent objects (Pydantic models), not dicts
-    agent_ids = []
-    for e in chat_response.agent_activity:
-        if hasattr(e, 'agent_id'):
-            agent_ids.append(e.agent_id)
-        elif isinstance(e, dict):
-            agent_ids.append(e.get("agent_id"))
-        else:
-            agent_ids.append(str(e))
+    agent_ids = [e.get("agent_id") for e in chat_response.agent_activity]
     expected_agents = ["event_handler", "orchestrator", "tool_loop", "knowledge_agent", "notification_collector", "response_formatter"]
     
     for agent_id in expected_agents:
-        assert agent_id in agent_ids, f"Agent {agent_id} did not log activity. Found: {agent_ids}"
+        assert agent_id in agent_ids, f"Agent {agent_id} did not log activity"
 
 
 @pytest.mark.asyncio
