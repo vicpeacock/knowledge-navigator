@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from app.models.database import Session as SessionModel, Message as MessageModel
 from app.core.ollama_client import OllamaClient
 from app.core.memory_manager import MemoryManager
+from app.core.dependencies import get_ollama_client
 from app.services.daily_session_manager import DailySessionManager
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,8 @@ class EmailActionProcessor:
         memory_manager: Optional[MemoryManager] = None,
     ):
         self.db = db
-        self.ollama_client = ollama_client or OllamaClient()
+        # Use get_ollama_client() which returns OllamaClient or GeminiClient based on LLM_PROVIDER
+        self.ollama_client = ollama_client or get_ollama_client()
         self.memory_manager = memory_manager
         self.daily_session_manager = DailySessionManager(
             db=db,

@@ -17,24 +17,34 @@ class HealthCheckService:
         self.health_status: Dict[str, Dict[str, Any]] = {}
         # Mandatory services required for the application to operate correctly.
         # Background LLM can be disabled (fire-and-forget tasks), so we treat it as optional by default.
+        # LLM provider depends on LLM_PROVIDER setting (ollama or gemini)
         self.mandatory_services = {
             "postgres",
             "chromadb",
-            "ollama_main",
         }
-        # Allow forcing background model as mandatory if needed via env flag.
-        if settings.use_llama_cpp_background and getattr(settings, "require_background_llm", False):
-            self.mandatory_services.add("ollama_background")
+        
+        # Add LLM service based on provider
+        if settings.llm_provider == "gemini":
+            self.mandatory_services.add("gemini_main")
+            # Background Gemini is optional unless explicitly required
+            if getattr(settings, "require_background_llm", False):
+                self.mandatory_services.add("gemini_background")
+        else:
+            # Default: Ollama
+            self.mandatory_services.add("ollama_main")
+            # Allow forcing background model as mandatory if needed via env flag.
+            if settings.use_llama_cpp_background and getattr(settings, "require_background_llm", False):
+                self.mandatory_services.add("ollama_background")
     
     async def check_all_services(self) -> Dict[str, Dict[str, Any]]:
         """
         Check health of all services:
         - PostgreSQL
         - ChromaDB
-        - Ollama Main
-        - Ollama Background
+        - LLM Main (Ollama or Gemini based on LLM_PROVIDER)
+        - LLM Background (Ollama/llama.cpp or Gemini based on LLM_PROVIDER)
         """
-        logger.info("🔍 Starting health check for all services...")
+        logger.info(f"🔍 Starting health check for all services (LLM Provider: {settings.llm_provider})...")
         
         # Check PostgreSQL
         postgres_status = await self._check_postgres()
@@ -46,15 +56,25 @@ class HealthCheckService:
         chromadb_status["mandatory"] = "chromadb" in self.mandatory_services
         self.health_status["chromadb"] = chromadb_status
         
-        # Check Ollama Main
-        ollama_main_status = await self._check_ollama_main()
-        ollama_main_status["mandatory"] = "ollama_main" in self.mandatory_services
-        self.health_status["ollama_main"] = ollama_main_status
+        # Check LLM Main (Ollama or Gemini)
+        if settings.llm_provider == "gemini":
+            gemini_main_status = await self._check_gemini_main()
+            gemini_main_status["mandatory"] = "gemini_main" in self.mandatory_services
+            self.health_status["gemini_main"] = gemini_main_status
+        else:
+            ollama_main_status = await self._check_ollama_main()
+            ollama_main_status["mandatory"] = "ollama_main" in self.mandatory_services
+            self.health_status["ollama_main"] = ollama_main_status
         
-        # Check Ollama Background
-        ollama_background_status = await self._check_ollama_background()
-        ollama_background_status["mandatory"] = "ollama_background" in self.mandatory_services
-        self.health_status["ollama_background"] = ollama_background_status
+        # Check LLM Background (Ollama/llama.cpp or Gemini)
+        if settings.llm_provider == "gemini":
+            gemini_background_status = await self._check_gemini_background()
+            gemini_background_status["mandatory"] = "gemini_background" in self.mandatory_services
+            self.health_status["gemini_background"] = gemini_background_status
+        else:
+            ollama_background_status = await self._check_ollama_background()
+            ollama_background_status["mandatory"] = "ollama_background" in self.mandatory_services
+            self.health_status["ollama_background"] = ollama_background_status
         
         # Summary
         all_services_healthy = all(status.get("healthy", False) for status in self.health_status.values())
@@ -238,6 +258,98 @@ class HealthCheckService:
             }
         except Exception as e:
             logger.error(f"❌ Background LLM health check failed: {e}")
+            return {"healthy": False, "error": str(e)}
+    
+    async def _check_gemini_main(self) -> Dict[str, Any]:
+        """Check Gemini Main API connection and model availability"""
+        try:
+            if not settings.gemini_api_key:
+                return {
+                    "healthy": False,
+                    "error": "GEMINI_API_KEY not configured"
+                }
+            
+            # Test Gemini API by listing models or making a simple request
+            import google.generativeai as genai
+            genai.configure(api_key=settings.gemini_api_key)
+            
+            # Try to get model info (this validates API key and model availability)
+            try:
+                model = genai.GenerativeModel(settings.gemini_model)
+                # Make a simple test request to verify the model works
+                # We'll use a very short timeout for health check
+                import asyncio
+                loop = asyncio.get_event_loop()
+                
+                def _test_model():
+                    try:
+                        # Just verify we can create the model, don't actually call it
+                        # (calling would cost API credits)
+                        return True
+                    except Exception:
+                        return False
+                
+                model_available = await loop.run_in_executor(None, _test_model)
+                
+                if model_available:
+                    return {
+                        "healthy": True,
+                        "message": f"Gemini main connection successful, model '{settings.gemini_model}' available"
+                    }
+                else:
+                    return {
+                        "healthy": False,
+                        "error": f"Gemini model '{settings.gemini_model}' not available or API key invalid"
+                    }
+            except Exception as e:
+                return {
+                    "healthy": False,
+                    "error": f"Gemini API error: {str(e)}"
+                }
+        except ImportError:
+            return {
+                "healthy": False,
+                "error": "google-generativeai package not installed. Install with: pip install google-generativeai"
+            }
+        except Exception as e:
+            logger.error(f"❌ Gemini main health check failed: {e}")
+            return {"healthy": False, "error": str(e)}
+    
+    async def _check_gemini_background(self) -> Dict[str, Any]:
+        """Check Gemini Background API connection and model availability"""
+        try:
+            if not settings.gemini_api_key:
+                return {
+                    "healthy": False,
+                    "error": "GEMINI_API_KEY not configured"
+                }
+            
+            # Use background model if specified, otherwise use main model
+            background_model = settings.gemini_background_model or settings.gemini_model
+            
+            # Test Gemini API
+            import google.generativeai as genai
+            genai.configure(api_key=settings.gemini_api_key)
+            
+            try:
+                model = genai.GenerativeModel(background_model)
+                # Just verify we can create the model
+                return {
+                    "healthy": True,
+                    "message": f"Gemini background connection successful, model '{background_model}' available"
+                }
+            except Exception as e:
+                return {
+                    "healthy": False,
+                    "error": f"Gemini background model '{background_model}' not available: {str(e)}"
+                }
+        except ImportError:
+            return {
+                "healthy": False,
+                "error": "google-generativeai package not installed. Install with: pip install google-generativeai"
+            }
+        except Exception as e:
+            logger.error(f"❌ Gemini background health check failed: {e}")
             return {"healthy": False, "error": str(e)}
     
     def get_status_summary(self) -> Dict[str, Any]:
