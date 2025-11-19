@@ -37,17 +37,29 @@ class TestNotificationServiceDelete:
         """Test successful deletion of notification"""
         tenant_id = mock_notification.tenant_id
         
-        # Mock execute to return notification
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_notification
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        # Mock execute: first call returns notification (for existence check), second call returns delete result
+        mock_result_check = MagicMock()
+        mock_result_check.scalar_one_or_none.return_value = mock_notification
+        
+        mock_result_delete = MagicMock()
+        mock_result_delete.rowcount = 1  # One row deleted
+        
+        async def mock_execute_side_effect(query):
+            # First call: check existence (SELECT query)
+            # Check if it's a SELECT query by looking for 'select' in the string representation
+            query_str = str(query).lower()
+            if 'select' in query_str and 'notification' in query_str:
+                return mock_result_check
+            # Second call: delete statement (DELETE query)
+            return mock_result_delete
+        
+        mock_db.execute = AsyncMock(side_effect=mock_execute_side_effect)
         
         service = NotificationService(mock_db)
         result = await service.delete_notification(mock_notification.id, tenant_id=tenant_id)
         
         assert result is True
-        mock_db.execute.assert_called_once()
-        mock_db.delete.assert_called_once_with(mock_notification)
+        assert mock_db.execute.call_count == 2  # One for check, one for delete
         mock_db.commit.assert_called_once()
     
     async def test_delete_notification_not_found(self, mock_db):
@@ -88,16 +100,28 @@ class TestNotificationServiceDelete:
     
     async def test_delete_notification_without_tenant_filter(self, mock_db, mock_notification):
         """Test deletion without tenant filter (admin scenario)"""
-        # Mock execute to return notification
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_notification
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        # Mock execute: first call returns notification (for existence check), second call returns delete result
+        mock_result_check = MagicMock()
+        mock_result_check.scalar_one_or_none.return_value = mock_notification
+        
+        mock_result_delete = MagicMock()
+        mock_result_delete.rowcount = 1  # One row deleted
+        
+        async def mock_execute_side_effect(query):
+            # First call: check existence (SELECT query)
+            # Check if it's a SELECT query by looking for 'select' in the string representation
+            query_str = str(query).lower()
+            if 'select' in query_str and 'notification' in query_str:
+                return mock_result_check
+            # Second call: delete statement (DELETE query)
+            return mock_result_delete
+        
+        mock_db.execute = AsyncMock(side_effect=mock_execute_side_effect)
         
         service = NotificationService(mock_db)
         result = await service.delete_notification(mock_notification.id, tenant_id=None)
         
         assert result is True
-        mock_db.execute.assert_called_once()
-        mock_db.delete.assert_called_once_with(mock_notification)
+        assert mock_db.execute.call_count == 2  # One for check, one for delete
         mock_db.commit.assert_called_once()
 

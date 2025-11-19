@@ -43,6 +43,7 @@ from app.core.dependencies import get_task_queue
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
 
 _AGENT_LABELS: Dict[str, str] = {
     "event_handler": "Event Handler",
@@ -1102,8 +1103,6 @@ async def chat(
     
     # Add file content to retrieved memory with clear labeling
     if file_content:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.info(f"Retrieved {len(file_content)} file contents for session {session_id}")
         
         for i, content in enumerate(file_content):
@@ -1115,8 +1114,6 @@ async def chat(
             else:
                 logger.warning(f"File content {i+1} is empty or None")
     else:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.warning(f"No file content retrieved for session {session_id}")
     
     if request.use_memory:
@@ -1165,7 +1162,6 @@ async def chat(
     await db.commit()
     
     # LangGraph branch
-    logger = logging.getLogger(__name__)
     logger.error(f"🔍🔍🔍 Checking LangGraph flag: use_langgraph_prototype={settings.use_langgraph_prototype}")
     import sys
     print(f"[SESSIONS] LangGraph flag: {settings.use_langgraph_prototype}", file=sys.stderr)
@@ -1366,9 +1362,7 @@ L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool g
     response_data = None  # Initialize to avoid undefined variable
     tool_calls = []  # Initialize to avoid UnboundLocalError when force_web_search is used
     
-    import logging
     import os
-    logger = logging.getLogger(__name__)
     
     while tool_iteration < max_tool_iterations:
         logger.info(f"Tool calling iteration {tool_iteration}, prompt length: {len(current_prompt)}")
@@ -1680,8 +1674,6 @@ Analizza i risultati dei tool sopra e rispondi all'utente in modo naturale e dir
     
     # Ensure response_text is never empty
     if not response_text or not response_text.strip():
-        import logging
-        logger = logging.getLogger(__name__)
         # Check if native Ollama tools were called
         native_tools_called = [t for t in tools_used if t in ["web_search", "web_fetch"]]
         if native_tools_called:
