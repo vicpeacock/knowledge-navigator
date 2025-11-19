@@ -6,15 +6,20 @@ echo "Starting Docker MCP Gateway as a background service..."
 # Kill any existing MCP Gateway processes
 pkill -f "docker mcp gateway run" 2>/dev/null
 
-# Load environment variables from backend/.env if it exists
-if [ -f "backend/.env" ]; then
-    echo "Loading environment variables from backend/.env..."
+# Load environment variables from .env (project root) or backend/.env (legacy)
+ENV_FILE=".env"
+if [ ! -f "$ENV_FILE" ] && [ -f "backend/.env" ]; then
+    ENV_FILE="backend/.env"
+fi
+
+if [ -f "$ENV_FILE" ]; then
+    echo "Loading environment variables from $ENV_FILE..."
     # Load GOOGLE_MAPS_API_KEY
-    export $(grep -v '^#' backend/.env | grep GOOGLE_MAPS_API_KEY | xargs)
+    export $(grep -v '^#' "$ENV_FILE" | grep GOOGLE_MAPS_API_KEY | xargs)
     # Load MCP_GATEWAY_AUTH_TOKEN (if present)
-    if grep -q "MCP_GATEWAY_AUTH_TOKEN" backend/.env; then
-        export $(grep -v '^#' backend/.env | grep MCP_GATEWAY_AUTH_TOKEN | xargs)
-        echo "MCP_GATEWAY_AUTH_TOKEN loaded from backend/.env"
+    if grep -q "MCP_GATEWAY_AUTH_TOKEN" "$ENV_FILE"; then
+        export $(grep -v '^#' "$ENV_FILE" | grep MCP_GATEWAY_AUTH_TOKEN | xargs)
+        echo "MCP_GATEWAY_AUTH_TOKEN loaded from $ENV_FILE"
     fi
 fi
 
@@ -65,20 +70,31 @@ GENERATED_TOKEN=$(tail -100 mcp-gateway.log | grep "Use Bearer token:" | tail -1
 
 if [ -n "$GENERATED_TOKEN" ]; then
     echo "✅ Token generato dal gateway: ${GENERATED_TOKEN:0:30}..."
-    echo "   Aggiornando backend/.env..."
     
-    # Remove old MCP_GATEWAY_AUTH_TOKEN line if exists
-    if [ -f "backend/.env" ]; then
-        sed -i '' '/^MCP_GATEWAY_AUTH_TOKEN=/d' backend/.env
+    # Determine which .env file to update (prefer project root .env)
+    TARGET_ENV_FILE=".env"
+    if [ ! -f "$TARGET_ENV_FILE" ] && [ -f "backend/.env" ]; then
+        TARGET_ENV_FILE="backend/.env"
     fi
     
-    # Add new token to backend/.env
-    echo "MCP_GATEWAY_AUTH_TOKEN=$GENERATED_TOKEN" >> backend/.env
-    echo "✅ Token aggiornato nel backend/.env"
+    echo "   Aggiornando $TARGET_ENV_FILE..."
+    
+    # Remove old MCP_GATEWAY_AUTH_TOKEN line if exists
+    if [ -f "$TARGET_ENV_FILE" ]; then
+        # Use appropriate sed command based on OS
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' '/^MCP_GATEWAY_AUTH_TOKEN=/d' "$TARGET_ENV_FILE"
+        else
+            sed -i '/^MCP_GATEWAY_AUTH_TOKEN=/d' "$TARGET_ENV_FILE"
+        fi
+    fi
+    
+    # Add new token to .env file
+    echo "MCP_GATEWAY_AUTH_TOKEN=$GENERATED_TOKEN" >> "$TARGET_ENV_FILE"
+    echo "✅ Token aggiornato nel $TARGET_ENV_FILE"
     echo ""
     echo "⚠️  IMPORTANTE: Il backend deve essere riavviato per usare il nuovo token!"
-    echo "   Esegui: ./restart_backend.sh (se disponibile) oppure:"
-    echo "   cd backend && pkill -f uvicorn && sleep 2 && nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > backend.log 2>&1 &"
+    echo "   Esegui: ./scripts/restart_backend.sh oppure riavvia manualmente il backend"
 else
     echo "⚠️  Impossibile estrarre il token dai log. Controlla manualmente mcp-gateway.log"
     echo "   Cerca la riga: 'Use Bearer token: Authorization: Bearer <token>'"
