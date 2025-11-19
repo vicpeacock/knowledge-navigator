@@ -1,6 +1,5 @@
 """
 Integration test for chat endpoint - verifies that responses are never empty
-FIXED VERSION with proper dependency overrides
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -8,15 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 from app.main import app
-from app.api.sessions import get_db, get_current_user, get_tenant_id
-from app.core.dependencies import (
-    get_ollama_client,
-    get_planner_client,
-    get_memory_manager,
-    get_agent_activity_stream,
-    get_background_task_manager,
-    get_daily_session_manager,
-)
+
+
+@pytest.fixture
+def client():
+    """Create test client with authentication bypass"""
+    from app.main import app
+    # Override dependencies to bypass authentication
+    app.dependency_overrides = {}
+    return TestClient(app)
 
 
 @pytest.fixture
@@ -40,20 +39,30 @@ def mock_tenant_id():
     return uuid4()
 
 
-@pytest.fixture
-def client():
-    """Create test client"""
-    # Clear any existing overrides
-    app.dependency_overrides.clear()
-    return TestClient(app)
-
-
 @pytest.mark.asyncio
 class TestChatEndpoint:
     """Test chat endpoint to ensure responses are never empty"""
     
+    @patch('app.api.sessions.get_db')
+    @patch('app.api.sessions.get_current_user')
+    @patch('app.api.sessions.get_tenant_id')
+    @patch('app.api.sessions.get_ollama_client')
+    @patch('app.api.sessions.get_planner_client')
+    @patch('app.api.sessions.get_memory_manager')
+    @patch('app.api.sessions.get_agent_activity_stream')
+    @patch('app.api.sessions.get_background_task_manager')
+    @patch('app.core.dependencies.get_daily_session_manager')
     async def test_chat_never_returns_empty_response(
         self,
+        mock_get_daily_session_manager,
+        mock_background_task_manager,
+        mock_agent_activity_stream,
+        mock_memory_manager,
+        mock_planner_client,
+        mock_ollama_client,
+        mock_get_tenant_id,
+        mock_get_current_user,
+        mock_get_db,
         client,
         mock_session_id,
         mock_user,
@@ -62,6 +71,9 @@ class TestChatEndpoint:
         """Test that chat endpoint never returns an empty response"""
         # Setup mocks
         mock_db = AsyncMock()
+        mock_get_db.return_value = mock_db
+        mock_get_current_user.return_value = mock_user
+        mock_get_tenant_id.return_value = mock_tenant_id
         
         # Mock session
         from app.models.database import Session as SessionModel
@@ -81,9 +93,11 @@ class TestChatEndpoint:
         # Mock Ollama client
         mock_ollama = AsyncMock()
         mock_ollama.generate_with_context = AsyncMock(return_value="Test response from Ollama")
+        mock_ollama_client.return_value = mock_ollama
         
         # Mock planner client
         mock_planner = AsyncMock()
+        mock_planner_client.return_value = mock_planner
         
         # Mock memory manager
         mock_memory = AsyncMock()
@@ -91,28 +105,21 @@ class TestChatEndpoint:
         mock_memory.retrieve_medium_term_memory = AsyncMock(return_value=[])
         mock_memory.retrieve_long_term_memory = AsyncMock(return_value=[])
         mock_memory.retrieve_file_content = AsyncMock(return_value=[])
+        mock_memory_manager.return_value = mock_memory
         
         # Mock agent activity stream
         mock_stream = MagicMock()
         mock_stream.publish = MagicMock()
+        mock_agent_activity_stream.return_value = mock_stream
         
         # Mock background task manager
         mock_bg_tasks = MagicMock()
+        mock_background_task_manager.return_value = mock_bg_tasks
         
         # Mock daily session manager
         mock_daily_mgr = AsyncMock()
         mock_daily_mgr.check_day_transition = AsyncMock(return_value=(False, None))
-        
-        # Override dependencies
-        app.dependency_overrides[get_db] = lambda: mock_db
-        app.dependency_overrides[get_current_user] = lambda: mock_user
-        app.dependency_overrides[get_tenant_id] = lambda: mock_tenant_id
-        app.dependency_overrides[get_ollama_client] = lambda: mock_ollama
-        app.dependency_overrides[get_planner_client] = lambda: mock_planner
-        app.dependency_overrides[get_memory_manager] = lambda: mock_memory
-        app.dependency_overrides[get_agent_activity_stream] = lambda: mock_stream
-        app.dependency_overrides[get_background_task_manager] = lambda: mock_bg_tasks
-        app.dependency_overrides[get_daily_session_manager] = lambda db: mock_daily_mgr
+        mock_get_daily_session_manager.return_value = mock_daily_mgr
         
         # Mock LangGraph
         with patch('app.api.sessions.run_langgraph_chat') as mock_langgraph:
@@ -132,26 +139,40 @@ class TestChatEndpoint:
                 "assistant_message_saved": False,
             }
             
-            try:
-                # Make request
-                response = client.post(
-                    f"/api/sessions/{mock_session_id}/chat",
-                    json={"message": "Test message", "session_id": str(mock_session_id)},
-                    headers={"Authorization": "Bearer test_token"}
-                )
-                
-                # Assertions
-                assert response.status_code == 200
-                data = response.json()
-                assert "response" in data
-                assert data["response"] is not None
-                assert len(data["response"].strip()) > 0, "Response should never be empty"
-            finally:
-                # Clean up dependency overrides
-                app.dependency_overrides.clear()
+            # Make request
+            response = client.post(
+                f"/api/sessions/{mock_session_id}/chat",
+                json={"message": "Test message"},
+                headers={"Authorization": "Bearer test_token"}
+            )
+            
+            # Assertions
+            assert response.status_code == 200
+            data = response.json()
+            assert "response" in data
+            assert data["response"] is not None
+            assert len(data["response"].strip()) > 0, "Response should never be empty"
     
+    @patch('app.api.sessions.get_db')
+    @patch('app.api.sessions.get_current_user')
+    @patch('app.api.sessions.get_tenant_id')
+    @patch('app.api.sessions.get_ollama_client')
+    @patch('app.api.sessions.get_planner_client')
+    @patch('app.api.sessions.get_memory_manager')
+    @patch('app.api.sessions.get_agent_activity_stream')
+    @patch('app.api.sessions.get_background_task_manager')
+    @patch('app.core.dependencies.get_daily_session_manager')
     async def test_chat_handles_empty_response_from_langgraph(
         self,
+        mock_get_daily_session_manager,
+        mock_background_task_manager,
+        mock_agent_activity_stream,
+        mock_memory_manager,
+        mock_planner_client,
+        mock_ollama_client,
+        mock_get_tenant_id,
+        mock_get_current_user,
+        mock_get_db,
         client,
         mock_session_id,
         mock_user,
@@ -160,6 +181,9 @@ class TestChatEndpoint:
         """Test that chat endpoint handles empty response from LangGraph gracefully"""
         # Setup mocks (same as above)
         mock_db = AsyncMock()
+        mock_get_db.return_value = mock_db
+        mock_get_current_user.return_value = mock_user
+        mock_get_tenant_id.return_value = mock_tenant_id
         
         from app.models.database import Session as SessionModel
         mock_session = MagicMock(spec=SessionModel)
@@ -175,27 +199,22 @@ class TestChatEndpoint:
         mock_db.execute = AsyncMock(return_value=mock_result)
         
         mock_ollama = AsyncMock()
+        mock_ollama_client.return_value = mock_ollama
         mock_planner = AsyncMock()
+        mock_planner_client.return_value = mock_planner
         mock_memory = AsyncMock()
         mock_memory.get_short_term_memory = AsyncMock(return_value=None)
         mock_memory.retrieve_medium_term_memory = AsyncMock(return_value=[])
         mock_memory.retrieve_long_term_memory = AsyncMock(return_value=[])
         mock_memory.retrieve_file_content = AsyncMock(return_value=[])
+        mock_memory_manager.return_value = mock_memory
         mock_stream = MagicMock()
+        mock_agent_activity_stream.return_value = mock_stream
         mock_bg_tasks = MagicMock()
+        mock_background_task_manager.return_value = mock_bg_tasks
         mock_daily_mgr = AsyncMock()
         mock_daily_mgr.check_day_transition = AsyncMock(return_value=(False, None))
-        
-        # Override dependencies
-        app.dependency_overrides[get_db] = lambda: mock_db
-        app.dependency_overrides[get_current_user] = lambda: mock_user
-        app.dependency_overrides[get_tenant_id] = lambda: mock_tenant_id
-        app.dependency_overrides[get_ollama_client] = lambda: mock_ollama
-        app.dependency_overrides[get_planner_client] = lambda: mock_planner
-        app.dependency_overrides[get_memory_manager] = lambda: mock_memory
-        app.dependency_overrides[get_agent_activity_stream] = lambda: mock_stream
-        app.dependency_overrides[get_background_task_manager] = lambda: mock_bg_tasks
-        app.dependency_overrides[get_daily_session_manager] = lambda db: mock_daily_mgr
+        mock_get_daily_session_manager.return_value = mock_daily_mgr
         
         # Mock LangGraph returning empty response
         with patch('app.api.sessions.run_langgraph_chat') as mock_langgraph:
@@ -215,14 +234,14 @@ class TestChatEndpoint:
                 "assistant_message_saved": False,
             }
             
+            # Make request
+            response = client.post(
+                f"/api/sessions/{mock_session_id}/chat",
+                json={"message": "Test message"},
+                headers={"Authorization": "Bearer test_token"}
+            )
+            
             try:
-                # Make request
-                response = client.post(
-                    f"/api/sessions/{mock_session_id}/chat",
-                    json={"message": "Test message", "session_id": str(mock_session_id)},
-                    headers={"Authorization": "Bearer test_token"}
-                )
-                
                 # Assertions - should still return a non-empty response due to fallback
                 assert response.status_code == 200
                 data = response.json()
