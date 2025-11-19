@@ -1776,19 +1776,43 @@ async def run_langgraph_chat(
         agent_ids = [e.get("agent_id") if isinstance(e, dict) else getattr(e, "agent_id", "unknown") for e in agent_activity]
         logger.info("   Agents that logged activity: %s", set(agent_ids))
     
-    # Verify chat_response exists
+    # Verify chat_response exists - if not, create it with fallback
     if "chat_response" not in final_state or final_state["chat_response"] is None:
         logger.error("❌ CRITICAL: chat_response is missing from final_state!")
         logger.error("   Final state keys: %s", list(final_state.keys()))
-        raise ValueError("chat_response is missing from final_state after LangGraph execution")
+        logger.error("   Creating fallback chat_response...")
+        
+        # Create fallback response
+        from app.models.schemas import ChatResponse
+        response_text = final_state.get("response", "")
+        if not response_text or not response_text.strip():
+            response_text = "Mi dispiace, non sono riuscito a generare una risposta. Potresti riprovare?"
+        
+        final_state["chat_response"] = ChatResponse(
+            response=response_text,
+            session_id=session_id,
+            memory_used=final_state.get("memory_used", {}),
+            tools_used=final_state.get("tools_used", []),
+            tool_details=[],
+            notifications_count=len(final_state.get("notifications", [])),
+            high_urgency_notifications=final_state.get("high_urgency_notifications", []),
+            agent_activity=final_state.get("agent_activity", []),
+        )
+        logger.warning("⚠️  Created fallback chat_response")
     
     chat_response = final_state["chat_response"]
     
-    # Verify response is not empty
+    # Verify response is not empty - if it is, update it
     if not chat_response.response or not chat_response.response.strip():
         logger.error("❌ CRITICAL: chat_response.response is empty!")
         logger.error("   Response length: %d", len(chat_response.response) if chat_response.response else 0)
-        raise ValueError("chat_response.response is empty after LangGraph execution")
+        logger.error("   Updating with fallback message...")
+        
+        chat_response = chat_response.model_copy(
+            update={"response": "Mi dispiace, non sono riuscito a generare una risposta. Potresti riprovare?"}
+        )
+        final_state["chat_response"] = chat_response
+        logger.warning("⚠️  Updated chat_response with fallback message")
 
     plan_metadata: Optional[Dict[str, Any]] = None
     if final_state.get("plan_dirty"):
