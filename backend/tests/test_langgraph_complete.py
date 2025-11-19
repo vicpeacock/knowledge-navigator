@@ -65,7 +65,7 @@ def mock_agent_activity_stream():
 def base_state(mock_db, mock_ollama, mock_memory_manager, mock_agent_activity_stream):
     """Create base state for testing"""
     session_id = uuid4()
-    request = ChatRequest(message="Test message", use_memory=True)
+    request = ChatRequest(message="Test message", use_memory=True, session_id=session_id)
     
     state: LangGraphChatState = {
         "event": {"role": "user", "content": "Test message"},

@@ -22,7 +22,7 @@ from app.services.task_queue import TaskQueue
 def minimal_state():
     """Create minimal state for testing"""
     session_id = uuid4()
-    request = ChatRequest(message="Ciao, come stai?", use_memory=False)
+    request = ChatRequest(message="Ciao, come stai?", use_memory=False, session_id=session_id)
     
     mock_db = AsyncMock()
     mock_ollama = AsyncMock(spec=OllamaClient)
