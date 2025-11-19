@@ -250,10 +250,10 @@ def log_agent_activity(
     session_id = state.get("session_id")
     logger = logging.getLogger(__name__)
     if manager and session_id:
-        logger.error("📡📡📡 Publishing agent activity: %s (%s) for session %s - CRITICAL LOG", agent_id, status, session_id)
+        logger.info("📡 Publishing agent activity: %s (%s) for session %s", agent_id, status, session_id)
         manager.publish(session_id, entry)
     else:
-        logger.error("⚠️⚠️⚠️  Cannot publish agent activity: manager=%s, session_id=%s - CRITICAL LOG", manager is not None, session_id is not None)
+        logger.warning("⚠️  Cannot publish agent activity: manager=%s, session_id=%s", manager is not None, session_id is not None)
 
 
 def _ensure_notification_center(state: LangGraphChatState) -> NotificationCenter:
