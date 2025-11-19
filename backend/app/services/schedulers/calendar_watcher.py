@@ -95,6 +95,17 @@ class CalendarWatcher:
                 credentials,
                 integration_id=str(integration.id)
             )
+        except ValueError as e:
+            # Decryption error - credentials may be corrupted or key changed
+            error_msg = str(e)
+            if "decrypting credentials" in error_msg.lower():
+                logger.error(
+                    f"Error decrypting credentials for integration {integration.id}: {error_msg}. "
+                    f"User needs to reconnect Calendar integration."
+                )
+            else:
+                logger.error(f"Error setting up Calendar for integration {integration.id}: {error_msg}")
+            return events_created
         except IntegrationAuthError as e:
             logger.warning(f"Integration {integration.id} auth failed: {e}")
             return events_created
