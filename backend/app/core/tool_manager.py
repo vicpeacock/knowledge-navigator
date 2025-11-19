@@ -37,7 +37,7 @@ class ToolManager:
         return [
             {
                 "name": "get_calendar_events",
-                "description": "Recupera eventi dal calendario Google.",
+                "description": "Recupera eventi dal calendario Google. Usa questo tool quando l'utente chiede informazioni su eventi, appuntamenti, meeting, impegni, o vuole vedere il calendario. Esempi di quando usarlo: 'eventi domani', 'cosa ho in calendario', 'meeting questa settimana', 'appuntamenti', 'impegni prossimi'.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -58,13 +58,13 @@ class ToolManager:
             },
             {
                 "name": "get_emails",
-                "description": "Recupera email da Gmail. Usa query Gmail standard (es: 'is:unread' per email non lette, 'from:example@gmail.com' per email da un mittente).",
+                "description": "Recupera email da Gmail. Usa questo tool quando l'utente chiede di leggere, vedere, controllare, o recuperare email. Esempi: 'leggi le email', 'email non lette', 'ci sono email nuove', 'mostrami le email', 'email di oggi'. Se l'utente chiede 'email non lette' o 'email nuove', usa query='is:unread'. Se chiede tutte le email senza specificare 'non lette', usa query vuota o None.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Query Gmail. Lasciare vuoto per recuperare tutte le email. Usa 'is:unread' per email non lette."
+                            "description": "Query Gmail standard. Lasciare vuoto per recuperare tutte le email. Usa 'is:unread' per email non lette, 'from:example@gmail.com' per email da un mittente specifico."
                         },
                         "max_results": {
                             "type": "integer",
@@ -81,7 +81,7 @@ class ToolManager:
             },
             {
                 "name": "summarize_emails",
-                "description": "Riassume automaticamente le email non lette usando AI.",
+                "description": "Riassume automaticamente le email non lette usando AI. Usa questo tool quando l'utente chiede un riassunto delle email o vuole una panoramica delle email non lette.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -95,7 +95,7 @@ class ToolManager:
             },
             {
                 "name": "archive_email",
-                "description": "Archivia un'email rimuovendola dalla Posta in arrivo.",
+                "description": "Archivia un'email rimuovendola dalla Posta in arrivo. Usa questo tool quando l'utente chiede di archiviare, rimuovere dalla posta in arrivo, o nascondere un'email specifica.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -109,7 +109,7 @@ class ToolManager:
             },
             {
                 "name": "send_email",
-                "description": "Invia un'email tramite Gmail.",
+                "description": "Invia un'email tramite Gmail. Usa questo tool quando l'utente chiede di inviare, mandare, o spedire un'email a qualcuno.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -135,7 +135,7 @@ class ToolManager:
             },
             {
                 "name": "reply_to_email",
-                "description": "Risponde a un'email esistente tramite Gmail.",
+                "description": "Risponde a un'email esistente tramite Gmail. Usa questo tool quando l'utente chiede di rispondere, replicare, o rispondere a un'email specifica.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -157,7 +157,7 @@ class ToolManager:
             },
             {
                 "name": "web_search",
-                "description": "Esegue una ricerca sul web usando l'API di ricerca web di Ollama. Richiede OLLAMA_API_KEY configurata.",
+                "description": "Esegue una ricerca sul web usando l'API di ricerca web di Ollama. Usa questo tool quando l'utente chiede informazioni che non sono nella memoria o nel contesto della sessione, o quando chiede di cercare qualcosa sul web. Richiede OLLAMA_API_KEY configurata.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -171,7 +171,7 @@ class ToolManager:
             },
             {
                 "name": "web_fetch",
-                "description": "Recupera il contenuto di una pagina web specifica usando l'API di Ollama. Richiede OLLAMA_API_KEY configurata.",
+                "description": "Recupera il contenuto di una pagina web specifica usando l'API di Ollama. Usa questo tool quando l'utente fornisce un URL e chiede di leggere, recuperare, o analizzare il contenuto di quella pagina. Richiede OLLAMA_API_KEY configurata.",
                 "parameters": {
                     "type": "object",
                     "properties": {

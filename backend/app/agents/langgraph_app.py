@@ -498,15 +498,23 @@ async def analyze_message_for_plan(
 ) -> Dict[str, Any]:
     tool_catalog = build_tool_catalog(available_tools)
     analysis_prompt = (
-        "Analizza la richiesta dell'utente e valuta se servono tool per rispondere.\n"
+        "Analizza la richiesta dell'utente e valuta se servono tool per rispondere.\n\n"
         f"Tool disponibili:\n{tool_catalog if tool_catalog else '- Nessun tool disponibile'}\n\n"
+        "IMPORTANTE: Devi creare un piano (needs_plan=true) quando:\n"
+        "- L'utente chiede informazioni che richiedono dati esterni (email, calendario, web)\n"
+        "- L'utente chiede di eseguire azioni (inviare email, archiviare email, cercare sul web)\n"
+        "- La risposta richiede più di un semplice messaggio di testo\n\n"
+        "Non creare un piano (needs_plan=false) solo per:\n"
+        "- Saluti semplici\n"
+        "- Domande di conversazione generale che non richiedono dati esterni\n"
+        "- Affermazioni dell'utente che non richiedono azioni\n\n"
         "Rispondi con JSON:\n"
         "{\n"
         "  \"needs_plan\": true|false,\n"
-        "  \"reason\": \"spiega perché\",\n"
+        "  \"reason\": \"spiega perché serve o non serve un piano\",\n"
         "  \"steps\": [\n"
         "     {\n"
-        "        \"description\": \"testo\",\n"
+        "        \"description\": \"descrizione dello step\",\n"
         "        \"action\": \"tool|respond|wait_user\",\n"
         "        \"tool\": \"nome_tool_o_null\",\n"
         "        \"inputs\": { ... }\n"
@@ -516,7 +524,15 @@ async def analyze_message_for_plan(
     )
 
     system_prompt = (
-        "Sei un pianificatore. Valuta se la richiesta richiede tool esterni. Se sì, crea un piano con steps. Se no, needs_plan=false."
+        "Sei un pianificatore strategico. Analizza la richiesta dell'utente e determina se serve un piano con tool esterni.\n\n"
+        "Crea un piano (needs_plan=true) quando la richiesta richiede:\n"
+        "- Recuperare dati da integrazioni (email, calendario, web)\n"
+        "- Eseguire azioni specifiche (inviare email, archiviare, cercare)\n"
+        "- Informazioni che non sono disponibili nel contesto corrente\n\n"
+        "Non creare un piano (needs_plan=false) per:\n"
+        "- Conversazioni semplici senza bisogno di dati esterni\n"
+        "- Saluti o affermazioni che non richiedono azioni\n\n"
+        "Se crei un piano, includi tutti gli step necessari con i tool appropriati."
     )
 
     try:
