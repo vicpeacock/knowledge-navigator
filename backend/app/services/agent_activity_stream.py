@@ -87,16 +87,18 @@ class AgentActivityStream:
         status = event.get('status', 'unknown') if isinstance(event, dict) else getattr(event, 'status', 'unknown')
         
         if not subscribers:
-            logger.error(f"⚠️⚠️⚠️  No subscribers for session {session_id}. Event will not be delivered: {agent_id} ({status}). Active sessions: {all_sessions} - CRITICAL LOG")
+            logger.warning(f"⚠️  No subscribers for session {session_id}. Event will not be delivered: {agent_id} ({status}). Active sessions: {all_sessions}")
             return
         
-        logger.error(f"📡📡📡 Publishing event to {len(subscribers)} subscriber(s) for session {session_id}: {agent_id} ({status}) - CRITICAL LOG")
+        logger.info(f"📡 Publishing event to {len(subscribers)} subscriber(s) for session {session_id}: {agent_id} ({status})")
 
         # Process subscribers outside the lock to avoid blocking
+        events_sent = 0
         for subscriber in subscribers:
             queue = subscriber.queue
             try:
                 queue.put_nowait(serialised)
+                events_sent += 1
             except asyncio.QueueFull:
                 # Drop the oldest pending event to make room for the newest one.
                 try:
@@ -105,9 +107,16 @@ class AgentActivityStream:
                     pass
                 try:
                     queue.put_nowait(serialised)
+                    events_sent += 1
                 except asyncio.QueueFull:
                     # Give up if queue is still full.
+                    logger.warning(f"⚠️  Queue full for subscriber, dropping event: {agent_id} ({status})")
                     continue
+        
+        if events_sent > 0:
+            logger.debug(f"✅ Successfully sent event to {events_sent}/{len(subscribers)} subscribers: {agent_id} ({status})")
+        else:
+            logger.warning(f"⚠️  Failed to send event to any subscriber: {agent_id} ({status})")
 
     def snapshot(self, session_id: UUID) -> List[Dict[str, Any]]:
         """Return the current history snapshot for the session."""
