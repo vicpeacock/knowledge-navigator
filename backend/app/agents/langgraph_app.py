@@ -1588,6 +1588,11 @@ async def response_formatter_node(state: LangGraphChatState) -> LangGraphChatSta
                 else:
                     response_text = "Ho ricevuto il tuo messaggio. Come posso aiutarti?"
             
+            # Final check - response_text must never be empty
+            if not response_text or not response_text.strip():
+                logger.error("❌ CRITICAL: response_text is still empty after fallback!")
+                response_text = "Mi dispiace, non sono riuscito a generare una risposta. Potresti riprovare?"
+            
             state["chat_response"] = ChatResponse(
                 response=response_text,
                 session_id=state["session_id"],
@@ -1598,11 +1603,39 @@ async def response_formatter_node(state: LangGraphChatState) -> LangGraphChatSta
                 high_urgency_notifications=high_priority_notifications,
                 agent_activity=state.get("agent_activity", []),
             )
+            logger.info(f"✅ Response Formatter created chat_response with {len(response_text)} characters")
         else:
-            state["chat_response"] = state["chat_response"].model_copy(
-                update={"agent_activity": state.get("agent_activity", [])}
+            # Update existing chat_response with latest agent_activity
+            existing_response = state["chat_response"].response
+            if not existing_response or not existing_response.strip():
+                logger.warning("⚠️  Existing chat_response has empty response, updating with fallback")
+                state["chat_response"] = state["chat_response"].model_copy(
+                    update={
+                        "response": "Ho ricevuto il tuo messaggio. Come posso aiutarti?",
+                        "agent_activity": state.get("agent_activity", [])
+                    }
+                )
+            else:
+                state["chat_response"] = state["chat_response"].model_copy(
+                    update={"agent_activity": state.get("agent_activity", [])}
+                )
+        
+        # Final verification before returning
+        if not state["chat_response"] or not state["chat_response"].response or not state["chat_response"].response.strip():
+            logger.error("❌ CRITICAL: chat_response is still empty after response_formatter_node!")
+            state["chat_response"] = ChatResponse(
+                response="Mi dispiace, non sono riuscito a generare una risposta. Potresti riprovare?",
+                session_id=state["session_id"],
+                memory_used=state.get("memory_used", {}),
+                tools_used=state.get("tools_used", []),
+                tool_details=[],
+                notifications_count=0,
+                high_urgency_notifications=[],
+                agent_activity=state.get("agent_activity", []),
             )
+        
         log_agent_activity(state, agent_id="response_formatter", status="completed")
+        logger.info(f"✅ Response Formatter completed. Final response length: {len(state['chat_response'].response)}")
         return state
     except Exception as exc:
         log_agent_activity(
@@ -1727,12 +1760,12 @@ async def run_langgraph_chat(
     logger.info("   Initial state keys: %s", list(state.keys()))
     logger.info("   Event: %s", state.get("event", {}).get("content", "N/A")[:100])
     
-    logger.error("🔍🔍🔍 About to invoke LangGraph app.ainvoke() - CRITICAL LOG")
+    logger.info("🔍 About to invoke LangGraph app.ainvoke()")
     try:
         final_state = await app.ainvoke(state)
-        logger.error("✅✅✅ LangGraph app.ainvoke() completed successfully - CRITICAL LOG")
+        logger.info("✅ LangGraph app.ainvoke() completed successfully")
     except Exception as exc:
-        logger.error("❌❌❌ LangGraph app.ainvoke() FAILED: %s", exc, exc_info=True)
+        logger.error("❌ LangGraph app.ainvoke() FAILED: %s", exc, exc_info=True)
         raise
     
     # Log final state
@@ -1743,7 +1776,19 @@ async def run_langgraph_chat(
         agent_ids = [e.get("agent_id") if isinstance(e, dict) else getattr(e, "agent_id", "unknown") for e in agent_activity]
         logger.info("   Agents that logged activity: %s", set(agent_ids))
     
+    # Verify chat_response exists
+    if "chat_response" not in final_state or final_state["chat_response"] is None:
+        logger.error("❌ CRITICAL: chat_response is missing from final_state!")
+        logger.error("   Final state keys: %s", list(final_state.keys()))
+        raise ValueError("chat_response is missing from final_state after LangGraph execution")
+    
     chat_response = final_state["chat_response"]
+    
+    # Verify response is not empty
+    if not chat_response.response or not chat_response.response.strip():
+        logger.error("❌ CRITICAL: chat_response.response is empty!")
+        logger.error("   Response length: %d", len(chat_response.response) if chat_response.response else 0)
+        raise ValueError("chat_response.response is empty after LangGraph execution")
 
     plan_metadata: Optional[Dict[str, Any]] = None
     if final_state.get("plan_dirty"):
