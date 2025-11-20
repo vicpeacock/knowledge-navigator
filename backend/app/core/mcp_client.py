@@ -19,7 +19,7 @@ class MCPClient:
     Creates a new session for each operation to avoid async context issues
     """
     
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None, use_auth_token: bool = True):
         self.base_url = base_url or settings.mcp_gateway_url
         # Remove /mcp suffix if present (streamable_http will add it)
         if self.base_url.endswith("/mcp"):
@@ -30,13 +30,26 @@ class MCPClient:
         # 1. Not use authentication (if gateway allows it)
         # 2. Read the token from gateway logs/endpoint after startup
         # 3. Configure gateway to use a fixed token
+        # 
+        # IMPORTANT: Some MCP servers (like Google Workspace MCP) use OAuth 2.1 per-user auth
+        # and don't accept the MCP Gateway token. Set use_auth_token=False for those servers.
         self.headers: Dict[str, str] = {}
-        if settings.mcp_gateway_auth_token:
-            # MCP Gateway advertises Bearer auth
-            self.headers["Authorization"] = f"Bearer {settings.mcp_gateway_auth_token}"
-            logger.debug(f"MCP Gateway auth token configured (length: {len(settings.mcp_gateway_auth_token)})")
+        if use_auth_token and settings.mcp_gateway_auth_token:
+            # Only use MCP Gateway token if explicitly enabled and URL matches MCP Gateway
+            # Check if this is the MCP Gateway (not Google Workspace MCP or other servers)
+            is_mcp_gateway = (
+                self.base_url == settings.mcp_gateway_url or
+                "8080" in self.base_url or  # MCP Gateway default port
+                "mcp-gateway" in self.base_url.lower()
+            )
+            if is_mcp_gateway:
+                # MCP Gateway advertises Bearer auth
+                self.headers["Authorization"] = f"Bearer {settings.mcp_gateway_auth_token}"
+                logger.debug(f"MCP Gateway auth token configured (length: {len(settings.mcp_gateway_auth_token)})")
+            else:
+                logger.debug(f"Not using MCP Gateway token for {self.base_url} (different server)")
         else:
-            logger.debug("No MCP Gateway auth token configured - attempting connection without authentication")
+            logger.debug("No MCP Gateway auth token configured or use_auth_token=False - attempting connection without authentication")
     
     async def list_tools(self) -> List[Dict[str, Any]]:
         """List available MCP tools"""
