@@ -85,9 +85,18 @@ async def connect_mcp_server(
     try:
         logger.info(f"Connecting to MCP server: {request.server_url}")
         # Create temporary client to test connection
+        # For Google Workspace MCP and other OAuth 2.1 servers, don't use MCP Gateway token
+        # They handle authentication per-user via OAuth 2.1
+        is_oauth_server = (
+            "workspace" in request.server_url.lower() or
+            "8003" in request.server_url or  # Google Workspace MCP port
+            "google" in request.server_url.lower()
+        )
+        use_auth_token = not is_oauth_server  # Don't use token for OAuth 2.1 servers
+        
         try:
-            test_client = MCPClient(base_url=request.server_url)
-            logger.info(f"Created MCP client with base_url: {test_client.base_url}")
+            test_client = MCPClient(base_url=request.server_url, use_auth_token=use_auth_token)
+            logger.info(f"Created MCP client with base_url: {test_client.base_url}, use_auth_token={use_auth_token}")
             
             # Try to list tools
             logger.info("Calling list_tools()...")
