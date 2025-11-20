@@ -1,0 +1,54 @@
+# Dockerfile per Google Workspace MCP Server
+# Costruisce l'immagine dal repository GitHub
+FROM python:3.11-slim AS builder
+
+# Installa dipendenze di sistema necessarie per build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installa uv
+RUN pip install --no-cache-dir uv
+
+# Crea directory di lavoro
+WORKDIR /app
+
+# Clona il repository Google Workspace MCP
+RUN git clone https://github.com/taylorwilsdon/google_workspace_mcp.git .
+
+# Installa dipendenze
+RUN uv sync
+
+# Stage finale - immagine runtime minimale
+FROM python:3.11-slim
+
+# Installa solo runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installa uv
+RUN pip install --no-cache-dir uv
+
+# Copia codice applicazione dallo stage builder
+WORKDIR /app
+COPY --from=builder /app /app
+
+# Variabili ambiente
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    WORKSPACE_MCP_PORT=8000
+
+# Esponi porta (default 8000, configurabile via WORKSPACE_MCP_PORT)
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:${WORKSPACE_MCP_PORT}/health || exit 1
+
+# Comando di avvio
+# --transport streamable-http è necessario per HTTP mode e supporto OAuth 2.1 multi-user
+CMD ["uv", "run", "main.py", "--transport", "streamable-http"]
+

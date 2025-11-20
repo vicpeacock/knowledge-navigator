@@ -3,7 +3,7 @@
 version: '3.8'
 
 services:
-  # Usa PostgreSQL e ChromaDB esistenti dal docker-compose.yml principale
+  # Usa PostgreSQL, ChromaDB e Google Workspace MCP esistenti dal docker-compose.yml principale
   # (assumiamo che siano già in esecuzione)
 
   backend-cloud-test:

@@ -34,6 +34,31 @@ services:
       timeout: 5s
       retries: 5
 
+  google-workspace-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.workspace-mcp
+    container_name: knowledge-navigator-workspace-mcp
+    ports:
+      - "8002:8000"  # Porta esterna 8002 per evitare conflitti con backend (8000) e ChromaDB (8001)
+    environment:
+      # OAuth credentials (da .env) - Credenziali dell'applicazione (condivise)
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      - GOOGLE_OAUTH_REDIRECT_URI=http://localhost:8002/oauth2callback
+      # Server configuration
+      - WORKSPACE_MCP_PORT=8000  # Porta interna del container
+      - WORKSPACE_MCP_BASE_URI=http://localhost:8002
+      # Enable OAuth 2.1 for multi-user support (ogni utente autentica con il proprio account Google)
+      - MCP_ENABLE_OAUTH21=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
   # ollama-background: Rimosso - ora usiamo llama.cpp nativo per il background agent
   # Vedi scripts/start_llama_background.sh per avviare llama-server nativamente
 
