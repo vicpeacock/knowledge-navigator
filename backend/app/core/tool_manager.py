@@ -383,6 +383,10 @@ class ToolManager:
                     logger.error(f"❌ Error fetching tools from MCP integration {integration.id}: {e}", exc_info=True)
             
             logger.info(f"✅ Returning {len(mcp_tools)} MCP tools total")
+            if mcp_tools:
+                sample_tool = mcp_tools[0]
+                logger.info(f"   Sample tool keys: {list(sample_tool.keys())}")
+                logger.info(f"   Sample tool: name={sample_tool.get('name')}, mcp_integration_id={sample_tool.get('mcp_integration_id')}, mcp_server_name={sample_tool.get('mcp_server_name')}")
             return mcp_tools
         except Exception as e:
             import logging
