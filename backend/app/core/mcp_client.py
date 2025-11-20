@@ -101,10 +101,29 @@ class MCPClient:
                 logger.warning(f"Extracted error from ExceptionGroup: {error_message}")
             
             # Also check for TaskGroup exceptions (from asyncio)
-            if hasattr(e, '__cause__') and e.__cause__:
-                real_error = e.__cause__
+            # TaskGroup exceptions can be nested, so we need to dig deeper
+            current_error = e
+            depth = 0
+            while depth < 5:  # Limit depth to avoid infinite loops
+                if hasattr(current_error, '__cause__') and current_error.__cause__:
+                    current_error = current_error.__cause__
+                    depth += 1
+                elif hasattr(current_error, 'exceptions') and len(current_error.exceptions) > 0:
+                    current_error = current_error.exceptions[0]
+                    depth += 1
+                else:
+                    break
+            
+            if current_error != e:
+                real_error = current_error
                 error_message = str(real_error)
-                logger.warning(f"Extracted error from __cause__: {error_message}")
+                logger.warning(f"Extracted error from nested exception (depth {depth}): {error_message}")
+            
+            # Log full error details for debugging
+            logger.error(f"❌ Error listing tools from {self.base_url}: {error_message}", exc_info=True)
+            logger.error(f"   Error type: {type(real_error).__name__}")
+            logger.error(f"   Headers sent: {list(self.headers.keys())}")
+            logger.error(f"   Use auth token: {bool(self.headers.get('Authorization'))}")
             
             # Check for HTTP errors (401, 403, etc.)
             if hasattr(real_error, 'response') or '401' in error_message or 'unauthorized' in error_message.lower():
@@ -114,10 +133,9 @@ class MCPClient:
                 logger.error(f"   Token configured: {bool(settings.mcp_gateway_auth_token)}")
                 if settings.mcp_gateway_auth_token:
                     logger.error(f"   Token preview: {settings.mcp_gateway_auth_token[:20]}...")
-            else:
-                logger.error(f"❌ Error listing tools: {error_message}", exc_info=True)
             
-            raise real_error
+            # Raise with a more informative message
+            raise ValueError(f"Error connecting to MCP server at {self.base_url}: {error_message}") from real_error
         finally:
             # Properly close all context managers in the same task
             await exit_stack.aclose()

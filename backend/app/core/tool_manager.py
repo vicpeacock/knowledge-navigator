@@ -928,8 +928,16 @@ class ToolManager:
             integration_key = str(integration.id)
             if integration_key not in self._mcp_clients_cache:
                 if server_url:
-                    logger.info(f"   Creating new MCP client with URL: {server_url}")
-                    self._mcp_clients_cache[integration_key] = MCPClient(base_url=server_url)
+                    # Check if this is an OAuth 2.1 server (like Google Workspace MCP)
+                    # that doesn't use MCP Gateway token
+                    is_oauth_server = (
+                        "workspace" in server_url.lower() or
+                        "8003" in server_url or  # Google Workspace MCP port
+                        "google" in server_url.lower()
+                    )
+                    use_auth_token = not is_oauth_server
+                    logger.info(f"   Creating new MCP client with URL: {server_url}, use_auth_token={use_auth_token}")
+                    self._mcp_clients_cache[integration_key] = MCPClient(base_url=server_url, use_auth_token=use_auth_token)
                 else:
                     logger.warning(f"   No server_url in integration, using default from settings")
                     self._mcp_clients_cache[integration_key] = MCPClient()
