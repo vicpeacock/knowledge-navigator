@@ -253,6 +253,12 @@ class ToolManager:
             result = await self.db.execute(query)
             integrations = result.scalars().all()
             
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"🔍 Found {len(integrations)} MCP integrations for tenant {self.tenant_id}")
+            for integration in integrations:
+                logger.info(f"   - Integration {integration.id}: enabled={integration.enabled}, user_id={integration.user_id}, server_url={integration.session_metadata.get('server_url', '') if integration.session_metadata else ''}")
+            
             mcp_tools = []
             
             for integration in integrations:
@@ -291,7 +297,9 @@ class ToolManager:
                 
                 # Fetch all tools from the server
                 try:
+                    logger.info(f"🔍 Fetching tools from MCP integration {integration.id} (server: {client.base_url})")
                     all_tools = await client.list_tools()
+                    logger.info(f"✅ Retrieved {len(all_tools)} tools from MCP integration {integration.id}")
                     
                     # Get integration name for display
                     session_metadata = integration.session_metadata or {}
@@ -372,10 +380,9 @@ class ToolManager:
                                 mcp_tools.append(mcp_tool)
                 except Exception as e:
                     # Log error but continue with other integrations
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f"Error fetching tools from MCP integration {integration.id}: {e}")
+                    logger.error(f"❌ Error fetching tools from MCP integration {integration.id}: {e}", exc_info=True)
             
+            logger.info(f"✅ Returning {len(mcp_tools)} MCP tools total")
             return mcp_tools
         except Exception as e:
             import logging
