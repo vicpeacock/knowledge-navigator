@@ -242,13 +242,13 @@ class ToolManager:
         
         try:
             # Get all enabled MCP integrations for this tenant
-            # MCP integrations are global (user_id = NULL) so all users can see them
+            # MCP integrations can be global (user_id = NULL) or per-user
+            # For now, include all enabled MCP integrations (both global and per-user)
             query = (
                 select(Integration)
                 .where(Integration.service_type == "mcp_server")
                 .where(Integration.enabled == True)
                 .where(Integration.tenant_id == self.tenant_id)
-                .where(Integration.user_id.is_(None))  # Only global MCP integrations
             )
             result = await self.db.execute(query)
             integrations = result.scalars().all()
@@ -279,16 +279,15 @@ class ToolManager:
                     # User doesn't have preferences for this integration - include all tools (default)
                 
                 # Get or create MCP client for this integration
+                # Use the same logic as _get_mcp_client_for_integration to handle Docker/localhost conversion
                 integration_key = str(integration.id)
                 if integration_key not in self._mcp_clients_cache:
-                    session_metadata = integration.session_metadata or {}
-                    server_url = session_metadata.get("server_url", "")
-                    if server_url:
-                        self._mcp_clients_cache[integration_key] = MCPClient(base_url=server_url)
-                    else:
-                        self._mcp_clients_cache[integration_key] = MCPClient()
-                
-                client = self._mcp_clients_cache[integration_key]
+                    # Import here to avoid circular imports
+                    from app.api.integrations.mcp import _get_mcp_client_for_integration
+                    client = _get_mcp_client_for_integration(integration)
+                    self._mcp_clients_cache[integration_key] = client
+                else:
+                    client = self._mcp_clients_cache[integration_key]
                 
                 # Fetch all tools from the server
                 try:
