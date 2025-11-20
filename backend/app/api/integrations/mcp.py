@@ -59,8 +59,18 @@ def _get_mcp_client_for_integration(integration: IntegrationModel) -> MCPClient:
     
     logger.info(f"✅ Final MCP URL: {server_url}")
     
+    # Check if this is an OAuth 2.1 server (like Google Workspace MCP)
+    # that doesn't use MCP Gateway token
+    is_oauth_server = (
+        "workspace" in server_url.lower() or
+        "8003" in server_url or  # Google Workspace MCP port
+        "google" in server_url.lower()
+    )
+    use_auth_token = not is_oauth_server
+    
     # Create client with custom URL - pass it to constructor to ensure headers are set correctly
-    client = MCPClient(base_url=server_url)
+    client = MCPClient(base_url=server_url, use_auth_token=use_auth_token)
+    logger.info(f"Created MCP client with use_auth_token={use_auth_token} for {server_url}")
     return client
 
 

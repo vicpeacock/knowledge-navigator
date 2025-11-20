@@ -115,6 +115,11 @@ class Settings(BaseSettings):
     google_redirect_uri_calendar: str = "http://localhost:8000/api/integrations/calendars/oauth/callback"
     google_redirect_uri_email: str = "http://localhost:8000/api/integrations/emails/oauth/callback"
     
+    # Google OAuth2 (for Google Workspace MCP Server)
+    # These are the application credentials (shared) - each user authenticates separately with their own Google account
+    google_oauth_client_id: Optional[str] = None
+    google_oauth_client_secret: Optional[str] = None
+    
     # Google Maps API Key (for MCP Gateway)
     google_maps_api_key: Optional[str] = None
     
