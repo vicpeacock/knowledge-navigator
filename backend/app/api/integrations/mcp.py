@@ -31,6 +31,21 @@ def _get_mcp_client_for_integration(integration: IntegrationModel) -> MCPClient:
     
     if not server_url:
         server_url = settings.mcp_gateway_url  # Default
+    else:
+        # If we're running in Docker (detected by settings.mcp_gateway_url containing host.docker.internal)
+        # and the saved server_url uses localhost, convert it to host.docker.internal
+        if "host.docker.internal" in settings.mcp_gateway_url and "localhost" in server_url:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"🔄 Converting localhost URL to Docker host URL: {server_url} -> {settings.mcp_gateway_url}")
+            server_url = settings.mcp_gateway_url
+        # Also handle the reverse: if settings uses localhost but saved URL uses host.docker.internal,
+        # convert back to localhost (for local backend)
+        elif "localhost" in settings.mcp_gateway_url and "host.docker.internal" in server_url:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"🔄 Converting Docker host URL to localhost: {server_url} -> {settings.mcp_gateway_url}")
+            server_url = settings.mcp_gateway_url
     
     # Create client with custom URL - pass it to constructor to ensure headers are set correctly
     client = MCPClient(base_url=server_url)
