@@ -19,11 +19,39 @@ class MCPClient:
     Creates a new session for each operation to avoid async context issues
     """
     
-    def __init__(self, base_url: Optional[str] = None, use_auth_token: bool = True):
-        self.base_url = base_url or settings.mcp_gateway_url
-        # Remove /mcp suffix if present (streamable_http will add it)
-        if self.base_url.endswith("/mcp"):
-            self.base_url = self.base_url[:-4]
+    def __init__(self, base_url: Optional[str] = None, use_auth_token: bool = True, oauth_token: Optional[str] = None):
+        # Log the input URL for debugging
+        logger.debug(f"MCPClient.__init__ called with base_url={repr(base_url)}, use_auth_token={use_auth_token}, oauth_token={'present' if oauth_token else 'None'}")
+        
+        # Use provided URL or fallback to default
+        raw_url = base_url or settings.mcp_gateway_url
+        logger.debug(f"   Raw URL (after fallback): {repr(raw_url)}")
+        
+        # Clean up URL: remove trailing slashes and /mcp suffix
+        if raw_url:
+            self.base_url = raw_url.strip()
+            # Remove trailing slash
+            if self.base_url.endswith("/"):
+                self.base_url = self.base_url[:-1]
+            # Remove /mcp suffix if present (streamable_http will add it)
+            if self.base_url.endswith("/mcp"):
+                self.base_url = self.base_url[:-4]
+        else:
+            self.base_url = raw_url
+        
+        logger.debug(f"   Cleaned base_url: {repr(self.base_url)}")
+        
+        # Validate URL format
+        if not self.base_url:
+            error_msg = f"MCP server URL cannot be empty. Provided: {repr(base_url)}, Default: {repr(settings.mcp_gateway_url)}"
+            logger.error(f"❌ {error_msg}")
+            raise ValueError(error_msg)
+        if not (self.base_url.startswith("http://") or self.base_url.startswith("https://")):
+            error_msg = f"Invalid MCP server URL: {self.base_url}. URL must start with http:// or https://"
+            logger.error(f"❌ {error_msg}")
+            raise ValueError(error_msg)
+        
+        logger.info(f"✅ MCPClient initialized with base_url: {self.base_url}")
 
         # Prepare optional auth headers for MCP Gateway
         # NOTE: If MCP Gateway generates a new token on each startup, we need to either:
@@ -34,7 +62,13 @@ class MCPClient:
         # IMPORTANT: Some MCP servers (like Google Workspace MCP) use OAuth 2.1 per-user auth
         # and don't accept the MCP Gateway token. Set use_auth_token=False for those servers.
         self.headers: Dict[str, str] = {}
-        if use_auth_token and settings.mcp_gateway_auth_token:
+        
+        # Priority 1: OAuth token (for Google Workspace MCP and other OAuth 2.1 servers)
+        if oauth_token:
+            self.headers["Authorization"] = f"Bearer {oauth_token}"
+            logger.debug(f"OAuth token configured (length: {len(oauth_token)})")
+        # Priority 2: MCP Gateway token (for MCP Gateway)
+        elif use_auth_token and settings.mcp_gateway_auth_token:
             # Only use MCP Gateway token if explicitly enabled and URL matches MCP Gateway
             # Check if this is the MCP Gateway (not Google Workspace MCP or other servers)
             is_mcp_gateway = (
@@ -119,20 +153,33 @@ class MCPClient:
                 error_message = str(real_error)
                 logger.warning(f"Extracted error from nested exception (depth {depth}): {error_message}")
             
-            # Log full error details for debugging
-            logger.error(f"❌ Error listing tools from {self.base_url}: {error_message}", exc_info=True)
-            logger.error(f"   Error type: {type(real_error).__name__}")
-            logger.error(f"   Headers sent: {list(self.headers.keys())}")
-            logger.error(f"   Use auth token: {bool(self.headers.get('Authorization'))}")
+            # Check if this is an expected OAuth 2.1 server error (Session terminated)
+            is_oauth_server = (
+                "workspace" in self.base_url.lower() or
+                "8003" in self.base_url or
+                "google" in self.base_url.lower()
+            )
+            is_session_terminated = "session terminated" in error_message.lower()
             
-            # Check for HTTP errors (401, 403, etc.)
-            if hasattr(real_error, 'response') or '401' in error_message or 'unauthorized' in error_message.lower():
-                logger.error(f"❌ MCP Gateway authentication error: {error_message}")
-                logger.error(f"   Base URL: {self.base_url}")
-                logger.error(f"   Headers present: {list(self.headers.keys())}")
-                logger.error(f"   Token configured: {bool(settings.mcp_gateway_auth_token)}")
-                if settings.mcp_gateway_auth_token:
-                    logger.error(f"   Token preview: {settings.mcp_gateway_auth_token[:20]}...")
+            if is_oauth_server and is_session_terminated:
+                # This is expected for OAuth 2.1 servers before user authentication
+                logger.info(f"ℹ️  OAuth 2.1 server requires user authentication (expected): {self.base_url}")
+                logger.debug(f"   Error: {error_message}")
+            else:
+                # Log full error details for debugging (real errors)
+                logger.error(f"❌ Error listing tools from {self.base_url}: {error_message}", exc_info=True)
+                logger.error(f"   Error type: {type(real_error).__name__}")
+                logger.error(f"   Headers sent: {list(self.headers.keys())}")
+                logger.error(f"   Use auth token: {bool(self.headers.get('Authorization'))}")
+                
+                # Check for HTTP errors (401, 403, etc.)
+                if hasattr(real_error, 'response') or '401' in error_message or 'unauthorized' in error_message.lower():
+                    logger.error(f"❌ MCP Gateway authentication error: {error_message}")
+                    logger.error(f"   Base URL: {self.base_url}")
+                    logger.error(f"   Headers present: {list(self.headers.keys())}")
+                    logger.error(f"   Token configured: {bool(settings.mcp_gateway_auth_token)}")
+                    if settings.mcp_gateway_auth_token:
+                        logger.error(f"   Token preview: {settings.mcp_gateway_auth_token[:20]}...")
             
             # Raise with a more informative message
             raise ValueError(f"Error connecting to MCP server at {self.base_url}: {error_message}") from real_error

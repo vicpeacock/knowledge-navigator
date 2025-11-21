@@ -17,6 +17,7 @@ interface MCPIntegration extends Integration {
   name: string
   server_url: string
   selected_tools: string[]
+  oauth_required?: boolean
 }
 
 export default function IntegrationsPage() {
@@ -27,7 +28,7 @@ export default function IntegrationsPage() {
   const [connectingCalendar, setConnectingCalendar] = useState(false)
   const [connectingEmail, setConnectingEmail] = useState(false)
   const [connectingMCP, setConnectingMCP] = useState(false)
-  const [mcpServerUrl, setMcpServerUrl] = useState('http://host.docker.internal:8080')
+  const [mcpServerUrl, setMcpServerUrl] = useState('http://localhost:8003')
   const [mcpServerName, setMcpServerName] = useState('MCP Server')
   const [gmailNeedsReconnect, setGmailNeedsReconnect] = useState(false)
   const [gmailStatusMessage, setGmailStatusMessage] = useState<string | null>(null)
@@ -785,6 +786,28 @@ export default function IntegrationsPage() {
                       </div>
 
                       <div className="flex gap-2">
+                      {integration.oauth_required && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const response = await integrationsApi.mcp.authorize(integration.id)
+                              // Redirect to OAuth authorization URL
+                              if (response.data.authorization_url) {
+                                window.location.href = response.data.authorization_url
+                              } else {
+                                addStatusMessage('error', 'No authorization URL received')
+                              }
+                            } catch (error: any) {
+                              console.error('OAuth authorization failed:', error.response?.data?.detail || error.message)
+                              addStatusMessage('error', `OAuth authorization failed: ${error.response?.data?.detail || error.message}`)
+                            }
+                          }}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                        >
+                          <ExternalLink size={16} />
+                          Authorize OAuth
+                        </button>
+                      )}
                       <button
                         onClick={async () => {
                           try {
@@ -857,7 +880,7 @@ export default function IntegrationsPage() {
                       type="text"
                       value={mcpServerUrl}
                       onChange={(e) => setMcpServerUrl(e.target.value)}
-                      placeholder="http://host.docker.internal:8080 or http://localhost:8080"
+                      placeholder="http://localhost:8003 (Google Workspace MCP) or http://localhost:8080 (MCP Gateway)"
                       className="w-full p-2 border rounded-md bg-gray-50 dark:bg-gray-700"
                     />
                   </div>

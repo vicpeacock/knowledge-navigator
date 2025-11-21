@@ -262,46 +262,91 @@ class ToolManager:
             mcp_tools = []
             
             for integration in integrations:
-                # Get per-user tool preferences (only if not including all)
-                selected_tools = []
-                if not include_all and current_user:
-                    user_metadata = current_user.user_metadata or {}
-                    mcp_preferences = user_metadata.get("mcp_tools_preferences", {})
-                    selected_tools = mcp_preferences.get(str(integration.id), [])
-                
-                # If current_user is None, include all tools (no user preferences to respect)
-                # If include_all is True, include all tools
-                # If current_user is provided but no preferences set, include all tools (default behavior)
-                # Only skip if current_user is provided AND has preferences AND selected_tools is empty
-                if not include_all and current_user is not None and not selected_tools:
-                    # Check if user has any preferences set at all for this integration
-                    user_metadata = current_user.user_metadata or {}
-                    mcp_preferences = user_metadata.get("mcp_tools_preferences", {})
-                    # If user has preferences dict but this integration is not in it, include all tools
-                    # If user has preferences dict and this integration is in it but empty, skip (user explicitly deselected all)
-                    if str(integration.id) in mcp_preferences:
-                        # User has preferences for this integration but selected_tools is empty - skip
-                        continue
-                    # User doesn't have preferences for this integration - include all tools (default)
-                
-                # Get or create MCP client for this integration
-                # Use the same logic as _get_mcp_client_for_integration to handle Docker/localhost conversion
-                integration_key = str(integration.id)
-                if integration_key not in self._mcp_clients_cache:
-                    # Import here to avoid circular imports
-                    from app.api.integrations.mcp import _get_mcp_client_for_integration
-                    client = _get_mcp_client_for_integration(integration)
-                    self._mcp_clients_cache[integration_key] = client
-                else:
-                    client = self._mcp_clients_cache[integration_key]
-                
-                # Fetch all tools from the server
                 try:
-                    logger.info(f"🔍 Fetching tools from MCP integration {integration.id} (server: {client.base_url})")
-                    all_tools = await client.list_tools()
-                    logger.info(f"✅ Retrieved {len(all_tools)} tools from MCP integration {integration.id}")
+                    # Get per-user tool preferences (only if not including all)
+                    selected_tools = []
+                    if not include_all and current_user:
+                        user_metadata = current_user.user_metadata or {}
+                        mcp_preferences = user_metadata.get("mcp_tools_preferences", {})
+                        selected_tools = mcp_preferences.get(str(integration.id), [])
                     
-                    # Get integration name for display
+                    # If current_user is None, include all tools (no user preferences to respect)
+                    # If include_all is True, include all tools
+                    # If current_user is provided but no preferences set, include all tools (default behavior)
+                    # Only skip if current_user is provided AND has preferences AND selected_tools is empty
+                    if not include_all and current_user is not None and not selected_tools:
+                        # Check if user has any preferences set at all for this integration
+                        user_metadata = current_user.user_metadata or {}
+                        mcp_preferences = user_metadata.get("mcp_tools_preferences", {})
+                        # If user has preferences dict but this integration is not in it, include all tools
+                        # If user has preferences dict and this integration is in it but empty, skip (user explicitly deselected all)
+                        if str(integration.id) in mcp_preferences:
+                            # User has preferences for this integration but selected_tools is empty - skip
+                            continue
+                        # User doesn't have preferences for this integration - include all tools (default)
+                    
+                    # Get or create MCP client for this integration
+                    # Use the same logic as _get_mcp_client_for_integration to handle Docker/localhost conversion
+                    # IMPORTANT: Pass current_user to retrieve OAuth tokens for OAuth 2.1 servers
+                    integration_key = str(integration.id)
+                    # Cache key includes user_id to ensure OAuth tokens are user-specific
+                    cache_key = f"{integration_key}_{current_user.id if current_user else 'none'}"
+                    if cache_key not in self._mcp_clients_cache:
+                        # Import here to avoid circular imports
+                        from app.api.integrations.mcp import _get_mcp_client_for_integration
+                        client = _get_mcp_client_for_integration(integration, current_user=current_user)
+                        self._mcp_clients_cache[cache_key] = client
+                    else:
+                        client = self._mcp_clients_cache[cache_key]
+                    
+                    # Fetch all tools from the server
+                    # For OAuth 2.1 servers (like Google Workspace MCP), tools may not be available
+                    # until user authenticates directly with the MCP server when using a tool.
+                    # The server handles OAuth internally - we don't pass tokens to it.
+                    session_metadata = integration.session_metadata or {}
+                    server_url = session_metadata.get("server_url", "") or ""
+                    oauth_required = session_metadata.get("oauth_required", False)
+                    is_oauth_server = (
+                        oauth_required or
+                        "workspace" in server_url.lower() or
+                        "8003" in server_url or
+                        "google" in server_url.lower()
+                    )
+                    
+                    # Initialize all_tools to empty list
+                    all_tools = []
+                    
+                    try:
+                        logger.info(f"🔍 Fetching tools from MCP integration {integration.id} (server: {client.base_url})")
+                        logger.info(f"   Is OAuth 2.1 server: {is_oauth_server}, OAuth required: {oauth_required}, Server URL: {server_url}")
+                        
+                        all_tools = await client.list_tools()
+                        logger.info(f"✅ Retrieved {len(all_tools)} tools from MCP integration {integration.id}")
+                    except Exception as tools_error:
+                        error_msg = str(tools_error).lower()
+                        logger.info(f"⚠️  Error fetching tools: {error_msg[:100]}")
+                        logger.info(f"   Is OAuth server: {is_oauth_server}, Checking if this is expected...")
+                        
+                        # For OAuth 2.1 servers, "Session terminated" is EXPECTED behavior
+                        # The server requires user to authenticate when using tools for the first time
+                        # We don't pass OAuth tokens to the server - it handles auth internally
+                        if is_oauth_server and ("session terminated" in error_msg or "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg):
+                            logger.info(f"✅ OAuth 2.1 server requires user authentication (expected behavior)")
+                            logger.info(f"   Server handles OAuth internally - user will authenticate when using a tool for the first time")
+                            
+                            # For Google Workspace MCP, provide a list of known tools based on OAuth scopes
+                            # These tools will be available after user authenticates when using them
+                            if "workspace" in server_url.lower() or "8003" in server_url or "google" in server_url.lower():
+                                logger.info(f"   Providing known Google Workspace tools based on OAuth scopes")
+                                all_tools = _get_known_google_workspace_tools()
+                            else:
+                                all_tools = []  # Empty for other OAuth servers
+                        else:
+                            # Re-raise if it's a different error or not an OAuth server
+                            logger.error(f"❌ Error fetching tools from MCP integration {integration.id}: {tools_error}", exc_info=True)
+                            raise
+                    
+                    # Get integration name for display (outside try-except so it always runs)
                     session_metadata = integration.session_metadata or {}
                     integration_name = session_metadata.get("name") or session_metadata.get("server_url") or "Unknown MCP Server"
                     
@@ -311,7 +356,29 @@ class ToolManager:
                         tool_lower = tool_name.lower()
                         
                         # Pattern matching for known MCP servers (order matters - more specific first)
-                        if "wikipedia" in tool_lower or "wiki" in tool_lower:
+                        # Google Workspace MCP tools (check first before generic "google")
+                        if "gmail" in tool_lower:
+                            return "Gmail"
+                        elif "calendar" in tool_lower:
+                            return "Calendar"
+                        elif "drive" in tool_lower:
+                            return "Drive"
+                        elif "docs" in tool_lower and "sheets" not in tool_lower:
+                            return "Docs"
+                        elif "sheets" in tool_lower:
+                            return "Sheets"
+                        elif "forms" in tool_lower:
+                            return "Forms"
+                        elif "slides" in tool_lower:
+                            return "Slides"
+                        elif "chat" in tool_lower:
+                            return "Chat"
+                        elif "tasks" in tool_lower:
+                            return "Tasks"
+                        elif "customsearch" in tool_lower or "custom_search" in tool_lower:
+                            return "Custom Search"
+                        # Other MCP servers
+                        elif "wikipedia" in tool_lower or "wiki" in tool_lower:
                             return "Wikipedia"
                         elif "playwright" in tool_lower or "browser" in tool_lower or "navigate" in tool_lower or "screenshot" in tool_lower:
                             return "Playwright"
@@ -322,13 +389,14 @@ class ToolManager:
                               "download_semantic" in tool_lower or "search_biorxiv" in tool_lower or "search_crossref" in tool_lower or
                               "search_iacr" in tool_lower or "search_medrxiv" in tool_lower or "search_semantic" in tool_lower):
                             return "Paper Search"
-                        elif "google" in tool_lower or "maps" in tool_lower or "geocod" in tool_lower or "places" in tool_lower:
+                        elif "maps" in tool_lower or "geocod" in tool_lower or "places" in tool_lower:
                             return "Google Maps"
                         else:
                             # Default: use integration name or "Unknown"
                             return integration_name
                     
                     # Filter to only selected tools (if not including all) and convert to our format
+                    # This runs whether all_tools is empty (OAuth server) or has tools (regular server)
                     for tool_info in all_tools:
                         if isinstance(tool_info, dict):
                             tool_name = tool_info.get("name", "")
@@ -478,21 +546,21 @@ class ToolManager:
                     # User has preferences - explicitly filter out web_search and web_fetch if not enabled
                     enabled_set = set(enabled_tools)
                     if "web_search" in final_tool_names and "web_search" not in enabled_set:
-                        logger.error(f"🚨🚨🚨 CRITICAL: web_search found in final list but NOT in enabled_tools! Removing it.")
+                        logger.warning(f"⚠️  web_search found in final list but NOT in enabled_tools! Removing it.")
                         tools = [t for t in tools if t.get("name") != "web_search"]
                         final_tool_names = [t.get("name") for t in tools]
                     if "web_fetch" in final_tool_names and "web_fetch" not in enabled_set:
-                        logger.error(f"🚨🚨🚨 CRITICAL: web_fetch found in final list but NOT in enabled_tools! Removing it.")
+                        logger.warning(f"⚠️  web_fetch found in final list but NOT in enabled_tools! Removing it.")
                         tools = [t for t in tools if t.get("name") != "web_fetch"]
                         final_tool_names = [t.get("name") for t in tools]
             except Exception as e:
                 logger.warning(f"⚠️  Error in final web_search check: {e}", exc_info=True)
         
         if "web_search" in final_tool_names:
-            logger.error(f"🚨🚨🚨 CRITICAL: web_search is in final tools list! Tools being passed: {final_tool_names[:10]}")
-            logger.error(f"🚨 This should NOT happen if user has disabled web_search!")
+            logger.warning(f"⚠️  web_search is in final tools list! Tools being passed: {final_tool_names[:10]}")
+            logger.warning(f"⚠️  This should NOT happen if user has disabled web_search!")
         else:
-            logger.info(f"✅ web_search NOT in final tools list. Tools being passed: {final_tool_names[:10]}")
+            logger.debug(f"✅ web_search NOT in final tools list. Tools being passed: {final_tool_names[:10]}")
         
         # Force INFO level logging to ensure it's written
         import sys
@@ -896,6 +964,11 @@ class ToolManager:
         import logging
         logger = logging.getLogger(__name__)
         
+        # Ensure select is available (imported globally, but make sure it's in scope)
+        from sqlalchemy import select as sql_select
+        # Use sql_select to avoid any potential shadowing issues
+        select = sql_select
+        
         # Extract actual tool name (remove "mcp_" prefix)
         actual_tool_name = tool_name.replace("mcp_", "", 1)
         logger.info(f"🔧 Executing MCP tool: '{tool_name}' -> actual name: '{actual_tool_name}'")
@@ -925,26 +998,41 @@ class ToolManager:
             logger.info(f"     Looking for tool: '{actual_tool_name}'")
             
             # Get MCP client and list all available tools from this integration
-            integration_key = str(integration.id)
-            if integration_key not in self._mcp_clients_cache:
-                if server_url:
-                    # Check if this is an OAuth 2.1 server (like Google Workspace MCP)
-                    # that doesn't use MCP Gateway token
-                    is_oauth_server = (
-                        "workspace" in server_url.lower() or
-                        "8003" in server_url or  # Google Workspace MCP port
-                        "google" in server_url.lower()
-                    )
-                    use_auth_token = not is_oauth_server
-                    logger.info(f"   Creating new MCP client with URL: {server_url}, use_auth_token={use_auth_token}")
-                    self._mcp_clients_cache[integration_key] = MCPClient(base_url=server_url, use_auth_token=use_auth_token)
-                else:
-                    logger.warning(f"   No server_url in integration, using default from settings")
-                    self._mcp_clients_cache[integration_key] = MCPClient()
+            # For OAuth 2.1 servers, we need to pass OAuth tokens per user
+            # Use a cache key that includes user_id for user-specific OAuth tokens
+            from app.api.integrations.mcp import _get_mcp_client_for_integration
+            from app.models.database import User as UserModel
+            # Note: select is already imported globally at the top of the file
             
-            client = self._mcp_clients_cache[integration_key]
+            # Get current_user for OAuth - use passed current_user if available, otherwise get from session
+            current_user_for_oauth = current_user
+            if not current_user_for_oauth and session_id:
+                try:
+                    session_result = await db.execute(
+                        select(SessionModel).where(SessionModel.id == session_id)
+                    )
+                    session = session_result.scalar_one_or_none()
+                    if session and session.user_id:
+                        user_result = await db.execute(
+                            select(UserModel).where(UserModel.id == session.user_id)
+                        )
+                        current_user_for_oauth = user_result.scalar_one_or_none()
+                except Exception as e:
+                    logger.warning(f"   Could not get user from session: {e}")
+            
+            # Get MCP client with user context for OAuth
+            # IMPORTANT: Pass current_user_for_oauth to retrieve OAuth tokens from database
+            logger.info(f"   Getting MCP client for integration {integration.id} with user context")
+            logger.info(f"   Current user for OAuth: {current_user_for_oauth.id if current_user_for_oauth else 'None'}")
+            client = _get_mcp_client_for_integration(integration, current_user=current_user_for_oauth)
             
             # List all tools from this integration to check if the tool exists
+            # For OAuth 2.1 servers, tools may not be available until user authenticates
+            # If listing fails, we'll still try to call the tool (server will handle OAuth)
+            session_metadata = integration.session_metadata or {}
+            oauth_required = session_metadata.get("oauth_required", False)
+            tool_found = False
+            
             try:
                 all_tools = await client.list_tools()
                 tool_names = [t.get("name", "") if isinstance(t, dict) else getattr(t, "name", "") for t in all_tools]
@@ -952,78 +1040,222 @@ class ToolManager:
                 logger.info(f"     Tool names: {tool_names[:10]}{'...' if len(tool_names) > 10 else ''}")
                 
                 if actual_tool_name in tool_names:
-                    logger.info(f"   ✅ Tool '{actual_tool_name}' found in integration {integration.id}")
-                    logger.info(f"   Using MCP client with base_url: {client.base_url}")
-                    
-                    try:
-                        # Call the MCP tool
-                        logger.info(f"   Calling tool '{actual_tool_name}' on MCP server")
-                        result = await client.call_tool(actual_tool_name, parameters, stream=False)
-                        logger.info(f"   ✅ Tool call successful")
-                        
-                        # For browser tools, try to close the browser session after use to prevent orphaned containers
-                        # This is a best-effort cleanup - if it fails, it's not critical
-                        if actual_tool_name in ["browser_navigate", "browser_snapshot", "browser_click", "browser_evaluate", "browser_fill_form"]:
-                            try:
-                                # Try to close the browser session (if supported by the MCP server)
-                                # Note: This might not work if the MCP server doesn't support it or if the session is already closed
-                                await asyncio.sleep(0.2)  # Small delay to ensure the previous operation is complete
-                                await client.call_tool("browser_close", {})
-                                logger.info(f"   🧹 Browser session closed after {actual_tool_name}")
-                            except Exception as close_error:
-                                # Log warning if browser_close fails - this can lead to orphaned containers
-                                logger.warning(f"   ⚠️  Could not close browser session after {actual_tool_name}: {close_error}. Container may remain running.")
-                                # Try alternative cleanup: check if there's a browser_close_all or similar tool
-                                try:
-                                    # Some MCP servers might have a different cleanup method
-                                    await client.call_tool("browser_close_all", {})
-                                    logger.info(f"   🧹 Browser session closed via browser_close_all")
-                                except Exception:
-                                    pass  # Ignore if this also fails
-                        
-                        tool_result = {
-                            "success": True,
-                            "result": result,
-                            "tool": actual_tool_name,
-                        }
-                        
-                        # Auto-index browser content if enabled
-                        if auto_index and session_id and actual_tool_name in ["browser_navigate", "browser_snapshot"]:
-                            try:
-                                from app.services.web_indexer import WebIndexer
-                                from app.core.dependencies import get_memory_manager
-                                
-                                memory_manager = get_memory_manager()
-                                web_indexer = WebIndexer(memory_manager)
-                                
-                                url = parameters.get("url", "")
-                                if actual_tool_name == "browser_snapshot" and isinstance(result, dict):
-                                    snapshot_content = result.get("result", result).get("content", "")
-                                    if snapshot_content:
-                                        await web_indexer.index_browser_snapshot(
-                                            db=db,
-                                            url=url or "unknown",
-                                            snapshot=str(snapshot_content),
-                                            session_id=session_id,
-                                        )
-                                        logger.info(f"Auto-indexed browser snapshot for URL: {url}")
-                                elif actual_tool_name == "browser_navigate":
-                                    # For navigate, we might want to index after snapshot is taken
-                                    # But navigate itself doesn't return content, so we skip for now
-                                    pass
-                            except Exception as e:
-                                logger.warning(f"Failed to auto-index browser content: {e}", exc_info=True)
-                        
-                        return tool_result
-                    except Exception as e:
-                        logger.error(f"   ❌ Error calling MCP tool {actual_tool_name}: {e}", exc_info=True)
-                        return {"error": f"Error calling MCP tool: {str(e)}"}
+                    tool_found = True
+            except Exception as list_error:
+                error_msg = str(list_error).lower()
+                # For OAuth 2.1 servers, it's expected that tools can't be listed without authentication
+                if oauth_required and ("session terminated" in error_msg or "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg):
+                    logger.info(f"   ⚠️  Cannot list tools without OAuth authentication (expected for OAuth 2.1 servers)")
+                    logger.info(f"   Will attempt to call tool anyway - server will handle OAuth if needed")
+                    # For OAuth servers, we'll try to call the tool anyway
+                    # The server will redirect to OAuth if authentication is required
+                    tool_found = True  # Assume tool exists, let server handle authentication
                 else:
-                    logger.info(f"   ⚠️ Tool '{actual_tool_name}' NOT found in integration {integration.id}")
-            except Exception as e:
-                logger.error(f"   ❌ Error listing tools from integration {integration.id}: {e}", exc_info=True)
+                    # Re-raise if it's a different error
+                    logger.error(f"❌ Error listing tools from MCP integration {integration.id}: {list_error}", exc_info=True)
+                    raise
+            except Exception as list_error:
+                logger.error(f"   ❌ Error listing tools from integration {integration.id}: {list_error}", exc_info=True)
                 # Continue to next integration
                 continue
+            
+            if tool_found:
+                logger.info(f"   ✅ Tool '{actual_tool_name}' found in integration {integration.id}")
+                logger.info(f"   Using MCP client with base_url: {client.base_url}")
+                
+                try:
+                    # Call the MCP tool with timeout to prevent blocking
+                    logger.info(f"   Calling tool '{actual_tool_name}' on MCP server")
+                    try:
+                        result = await asyncio.wait_for(
+                            client.call_tool(actual_tool_name, parameters, stream=False),
+                            timeout=60.0  # 60 seconds timeout for MCP tool calls
+                        )
+                        logger.info(f"   ✅ Tool call successful")
+                    except asyncio.TimeoutError:
+                        logger.error(f"   ❌ Tool call timed out after 60 seconds")
+                        return {
+                            "error": f"Tool call to '{actual_tool_name}' timed out after 60 seconds. The MCP server may be unresponsive.",
+                            "tool": actual_tool_name,
+                            "timeout": True
+                        }
+                    
+                    # For browser tools, try to close the browser session after use to prevent orphaned containers
+                    # This is a best-effort cleanup - if it fails, it's not critical
+                    if actual_tool_name in ["browser_navigate", "browser_snapshot", "browser_click", "browser_evaluate", "browser_fill_form"]:
+                        try:
+                            # Try to close the browser session (if supported by the MCP server)
+                            # Note: This might not work if the MCP server doesn't support it or if the session is already closed
+                            await asyncio.sleep(0.2)  # Small delay to ensure the previous operation is complete
+                            await client.call_tool("browser_close", {})
+                            logger.info(f"   🧹 Browser session closed after {actual_tool_name}")
+                        except Exception as close_error:
+                            # Log warning if browser_close fails - this can lead to orphaned containers
+                            logger.warning(f"   ⚠️  Could not close browser session after {actual_tool_name}: {close_error}. Container may remain running.")
+                            # Try alternative cleanup: check if there's a browser_close_all or similar tool
+                            try:
+                                # Some MCP servers might have a different cleanup method
+                                await client.call_tool("browser_close_all", {})
+                                logger.info(f"   🧹 Browser session closed via browser_close_all")
+                            except Exception:
+                                pass  # Ignore if this also fails
+                    
+                    tool_result = {
+                        "success": True,
+                        "result": result,
+                        "tool": actual_tool_name,
+                    }
+                    
+                    # Auto-index browser content if enabled
+                    if auto_index and session_id and actual_tool_name in ["browser_navigate", "browser_snapshot"]:
+                        try:
+                            from app.services.web_indexer import WebIndexer
+                            from app.core.dependencies import get_memory_manager
+                            
+                            memory_manager = get_memory_manager()
+                            web_indexer = WebIndexer(memory_manager)
+                            
+                            url = parameters.get("url", "")
+                            if actual_tool_name == "browser_snapshot" and isinstance(result, dict):
+                                snapshot_content = result.get("result", result).get("content", "")
+                                if snapshot_content:
+                                    await web_indexer.index_browser_snapshot(
+                                        db=db,
+                                        url=url or "unknown",
+                                        snapshot=str(snapshot_content),
+                                        session_id=session_id,
+                                    )
+                                    logger.info(f"Auto-indexed browser snapshot for URL: {url}")
+                            elif actual_tool_name == "browser_navigate":
+                                # For navigate, we might want to index after snapshot is taken
+                                # But navigate itself doesn't return content, so we skip for now
+                                pass
+                        except Exception as e:
+                            logger.warning(f"Failed to auto-index browser content: {e}", exc_info=True)
+                    
+                    return tool_result
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    logger.error(f"   ❌ Error calling MCP tool {actual_tool_name}: {e}", exc_info=True)
+                    
+                    # Check if this is an OAuth 2.1 server that requires authentication
+                    session_metadata = integration.session_metadata or {}
+                    server_url = session_metadata.get("server_url", "") or ""
+                    oauth_required = session_metadata.get("oauth_required", False)
+                    is_oauth_server = (
+                        oauth_required or
+                        "workspace" in server_url.lower() or
+                        "8003" in server_url or
+                        "google" in server_url.lower()
+                    )
+                    
+                    # Check if OAuth token was passed and if we should try to refresh it
+                    oauth_token_passed = False
+                    should_try_refresh = False
+                    if is_oauth_server and current_user_for_oauth:
+                        oauth_credentials = session_metadata.get("oauth_credentials", {})
+                        user_id_str = str(current_user_for_oauth.id)
+                        if user_id_str in oauth_credentials:
+                            oauth_token_passed = True
+                            # If we got 401 and have a refresh token, try to refresh
+                            if "401" in error_msg or "unauthorized" in error_msg or "invalid_token" in error_msg:
+                                try:
+                                    from app.api.integrations.mcp import _decrypt_credentials, _encrypt_credentials
+                                    from app.core.config import settings
+                                    from sqlalchemy.orm.attributes import flag_modified
+                                    
+                                    encrypted_creds = oauth_credentials[user_id_str]
+                                    credentials = _decrypt_credentials(encrypted_creds, settings.credentials_encryption_key)
+                                    refresh_token = credentials.get("refresh_token")
+                                    
+                                    if refresh_token:
+                                        should_try_refresh = True
+                                        logger.info(f"   🔄 Attempting to refresh OAuth token for user {current_user_for_oauth.id}")
+                                        
+                                        try:
+                                            async with httpx.AsyncClient() as http_client:
+                                                token_uri = credentials.get("token_uri", "https://oauth2.googleapis.com/token")
+                                                client_id = credentials.get("client_id", settings.google_oauth_client_id)
+                                                client_secret = credentials.get("client_secret", settings.google_oauth_client_secret)
+                                                
+                                                refresh_response = await http_client.post(
+                                                    token_uri,
+                                                    data={
+                                                        "client_id": client_id,
+                                                        "client_secret": client_secret,
+                                                        "refresh_token": refresh_token,
+                                                        "grant_type": "refresh_token",
+                                                    },
+                                                )
+                                                
+                                                if refresh_response.status_code == 200:
+                                                    token_data = refresh_response.json()
+                                                    new_access_token = token_data.get("access_token")
+                                                    if new_access_token:
+                                                        # Update credentials with new access token
+                                                        credentials["token"] = new_access_token
+                                                        # Save updated credentials back to database
+                                                        encrypted_updated = _encrypt_credentials(credentials, settings.credentials_encryption_key)
+                                                        session_metadata["oauth_credentials"][user_id_str] = encrypted_updated
+                                                        integration.session_metadata = session_metadata
+                                                        flag_modified(integration, "session_metadata")
+                                                        await db.commit()
+                                                        
+                                                        logger.info(f"   ✅ Token refreshed successfully, retrying tool call...")
+                                                        
+                                                        # Retry the tool call with new token
+                                                        from app.api.integrations.mcp import _get_mcp_client_for_integration
+                                                        refreshed_client = _get_mcp_client_for_integration(integration, current_user=current_user_for_oauth)
+                                                        result = await asyncio.wait_for(
+                                                            refreshed_client.call_tool(actual_tool_name, parameters, stream=False),
+                                                            timeout=60.0
+                                                        )
+                                                        logger.info(f"   ✅ Tool call successful after token refresh")
+                                                        return result
+                                                    else:
+                                                        logger.warning(f"   ⚠️  Token refresh response missing access_token")
+                                                else:
+                                                    logger.warning(f"   ⚠️  Token refresh failed: {refresh_response.status_code} - {refresh_response.text[:200]}")
+                                        except Exception as refresh_error:
+                                            logger.warning(f"   ⚠️  Error refreshing token: {refresh_error}", exc_info=True)
+                                except Exception as decrypt_error:
+                                    logger.warning(f"   ⚠️  Error decrypting credentials for token refresh: {decrypt_error}", exc_info=True)
+                    
+                    # For OAuth 2.1 servers, provide a user-friendly message
+                    if is_oauth_server and ("session terminated" in error_msg or "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg or "invalid_token" in error_msg):
+                        # If we tried to refresh but it failed or wasn't attempted
+                        if oauth_token_passed:
+                            if should_try_refresh:
+                                # Refresh was attempted but failed - token is invalid or refresh token expired
+                                logger.warning(f"   ⚠️  OAuth token refresh failed - user needs to re-authenticate")
+                                return {
+                                    "error": "OAuth token expired and refresh failed. Please go to the Integrations page and click 'Authorize OAuth' again to re-authenticate with your Google account.",
+                                    "oauth_required": True,
+                                    "token_expired": True,
+                                    "refresh_failed": True,
+                                    "integration_id": str(integration.id)
+                                }
+                            else:
+                                # Token was passed but refresh wasn't attempted (no refresh_token)
+                                logger.warning(f"   ⚠️  OAuth token expired but no refresh token available - user needs to re-authenticate")
+                                return {
+                                    "error": "OAuth token expired. Please go to the Integrations page and click 'Authorize OAuth' again to refresh your authentication.",
+                                    "oauth_required": True,
+                                    "token_expired": True,
+                                    "integration_id": str(integration.id)
+                                }
+                        else:
+                            # No OAuth token was passed at all
+                            logger.info(f"   ⚠️  OAuth authentication required for Google Workspace MCP tool")
+                            return {
+                                "error": "OAuth authentication required. Please go to the Integrations page and click 'Authorize OAuth' for the Google Workspace MCP server to authenticate with your Google account.",
+                                "oauth_required": True,
+                                "integration_id": str(integration.id)
+                            }
+                    else:
+                        return {"error": f"Error calling MCP tool: {str(e)}"}
+            else:
+                logger.info(f"   ⚠️ Tool '{actual_tool_name}' NOT found in integration {integration.id}")
         
         logger.error(f"❌ MCP tool '{actual_tool_name}' not found in any enabled integration")
         return {"error": f"MCP tool '{actual_tool_name}' not found in any enabled integration"}
@@ -1847,4 +2079,402 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
         return {
             "error": "Il tool send_whatsapp_message non è più disponibile. L'integrazione WhatsApp verrà reintrodotta con le Business API."
         }
+
+
+def _get_known_google_workspace_tools() -> List[Dict[str, Any]]:
+    """
+    Returns a list of known Google Workspace MCP tools.
+    The Google Workspace MCP Server provides 83 tools covering Gmail, Drive, Docs, Sheets, 
+    Calendar, Forms, Slides, Chat, Tasks, and Custom Search.
+    Tools will be available after user authenticates when using them for the first time.
+    
+    Note: This is a partial list based on common tools. The actual server may have more tools.
+    For the complete list, tools will be discovered when the user authenticates and uses them.
+    """
+    # Base schema for common parameters
+    def make_tool(name: str, description: str, properties: Dict[str, Any], required: List[str] = None) -> Dict[str, Any]:
+        return {
+            "name": name,
+            "description": description,
+            "inputSchema": {
+                "type": "object",
+                "properties": properties,
+                "required": required or []
+            }
+        }
+    
+    tools = []
+    
+    # Gmail Tools (expanded)
+    tools.extend([
+        make_tool("gmail_list_messages", "List Gmail messages. Search, filter, or retrieve email messages.", {
+            "query": {"type": "string", "description": "Gmail search query"},
+            "max_results": {"type": "integer", "description": "Max results", "default": 10}
+        }),
+        make_tool("gmail_get_message", "Get details of a Gmail message by ID.", {
+            "message_id": {"type": "string", "description": "Gmail message ID"}
+        }, ["message_id"]),
+        make_tool("gmail_send_message", "Send an email via Gmail.", {
+            "to": {"type": "string", "description": "Recipient email"},
+            "subject": {"type": "string", "description": "Email subject"},
+            "body": {"type": "string", "description": "Email body"},
+            "cc": {"type": "string", "description": "CC addresses"},
+            "bcc": {"type": "string", "description": "BCC addresses"}
+        }, ["to", "subject", "body"]),
+        make_tool("gmail_list_labels", "List Gmail labels.", {}),
+        make_tool("gmail_create_label", "Create a Gmail label.", {
+            "name": {"type": "string", "description": "Label name"}
+        }, ["name"]),
+        make_tool("gmail_modify_message", "Modify a Gmail message (add/remove labels, archive, etc.).", {
+            "message_id": {"type": "string", "description": "Message ID"},
+            "add_labels": {"type": "array", "items": {"type": "string"}},
+            "remove_labels": {"type": "array", "items": {"type": "string"}}
+        }, ["message_id"]),
+        make_tool("gmail_reply_to_message", "Reply to a Gmail message.", {
+            "message_id": {"type": "string"},
+            "reply_text": {"type": "string"}
+        }, ["message_id", "reply_text"]),
+        make_tool("gmail_forward_message", "Forward a Gmail message.", {
+            "message_id": {"type": "string"},
+            "to": {"type": "string"},
+            "message": {"type": "string"}
+        }, ["message_id", "to"]),
+        make_tool("gmail_delete_message", "Delete a Gmail message.", {
+            "message_id": {"type": "string"}
+        }, ["message_id"]),
+        make_tool("gmail_archive_message", "Archive a Gmail message.", {
+            "message_id": {"type": "string"}
+        }, ["message_id"]),
+        make_tool("gmail_mark_as_read", "Mark a Gmail message as read.", {
+            "message_id": {"type": "string"}
+        }, ["message_id"]),
+        make_tool("gmail_mark_as_unread", "Mark a Gmail message as unread.", {
+            "message_id": {"type": "string"}
+        }, ["message_id"]),
+    ])
+    
+    # Google Calendar Tools
+    tools.extend([
+        make_tool("calendar_list_calendars", "List accessible Google Calendars.", {}),
+        make_tool("calendar_list_events", "List calendar events.", {
+            "calendar_id": {"type": "string", "description": "Calendar ID", "default": "primary"},
+            "time_min": {"type": "string", "description": "Start time (RFC3339)"},
+            "time_max": {"type": "string", "description": "End time (RFC3339)"},
+            "max_results": {"type": "integer", "default": 10}
+        }),
+        make_tool("calendar_get_event", "Get a specific calendar event.", {
+            "calendar_id": {"type": "string", "default": "primary"},
+            "event_id": {"type": "string", "description": "Event ID"}
+        }, ["event_id"]),
+        make_tool("calendar_create_event", "Create a calendar event.", {
+            "calendar_id": {"type": "string", "default": "primary"},
+            "summary": {"type": "string", "description": "Event title"},
+            "description": {"type": "string"},
+            "start": {"type": "string", "description": "Start time (RFC3339)"},
+            "end": {"type": "string", "description": "End time (RFC3339)"},
+            "attendees": {"type": "array", "items": {"type": "string"}}
+        }, ["summary", "start", "end"]),
+        make_tool("calendar_update_event", "Update a calendar event.", {
+            "calendar_id": {"type": "string", "default": "primary"},
+            "event_id": {"type": "string"},
+            "summary": {"type": "string"},
+            "description": {"type": "string"},
+            "start": {"type": "string"},
+            "end": {"type": "string"}
+        }, ["event_id"]),
+        make_tool("calendar_delete_event", "Delete a calendar event.", {
+            "calendar_id": {"type": "string", "default": "primary"},
+            "event_id": {"type": "string"}
+        }, ["event_id"]),
+    ])
+    
+    # Google Drive Tools (expanded)
+    tools.extend([
+        make_tool("drive_list_files", "List files in Google Drive.", {
+            "query": {"type": "string", "description": "Search query"},
+            "max_results": {"type": "integer", "default": 10}
+        }),
+        make_tool("drive_get_file", "Get file details from Google Drive.", {
+            "file_id": {"type": "string"}
+        }, ["file_id"]),
+        make_tool("drive_create_file", "Create a new file in Google Drive.", {
+            "name": {"type": "string"},
+            "mime_type": {"type": "string"},
+            "parents": {"type": "array", "items": {"type": "string"}}
+        }, ["name", "mime_type"]),
+        make_tool("drive_update_file", "Update a Google Drive file.", {
+            "file_id": {"type": "string"},
+            "name": {"type": "string"},
+            "content": {"type": "string"}
+        }, ["file_id"]),
+        make_tool("drive_delete_file", "Delete a Google Drive file.", {
+            "file_id": {"type": "string"}
+        }, ["file_id"]),
+        make_tool("drive_upload_file", "Upload a file to Google Drive.", {
+            "name": {"type": "string"},
+            "content": {"type": "string"},
+            "mime_type": {"type": "string"},
+            "parents": {"type": "array", "items": {"type": "string"}}
+        }, ["name", "content"]),
+        make_tool("drive_copy_file", "Copy a file in Google Drive.", {
+            "file_id": {"type": "string"},
+            "name": {"type": "string"},
+            "parents": {"type": "array", "items": {"type": "string"}}
+        }, ["file_id"]),
+        make_tool("drive_move_file", "Move a file to a different folder in Google Drive.", {
+            "file_id": {"type": "string"},
+            "add_parents": {"type": "array", "items": {"type": "string"}},
+            "remove_parents": {"type": "array", "items": {"type": "string"}}
+        }, ["file_id"]),
+        make_tool("drive_share_file", "Share a Google Drive file with users.", {
+            "file_id": {"type": "string"},
+            "role": {"type": "string", "enum": ["reader", "writer", "commenter"]},
+            "type": {"type": "string", "enum": ["user", "group", "domain", "anyone"]},
+            "email": {"type": "string"}
+        }, ["file_id", "role", "type"]),
+        make_tool("drive_list_folders", "List folders in Google Drive.", {
+            "query": {"type": "string"},
+            "max_results": {"type": "integer", "default": 10}
+        }),
+        make_tool("drive_create_folder", "Create a folder in Google Drive.", {
+            "name": {"type": "string"},
+            "parents": {"type": "array", "items": {"type": "string"}}
+        }, ["name"]),
+    ])
+    
+    # Google Docs Tools (expanded)
+    tools.extend([
+        make_tool("docs_get_document", "Get content of a Google Docs document.", {
+            "document_id": {"type": "string"}
+        }, ["document_id"]),
+        make_tool("docs_create_document", "Create a new Google Docs document.", {
+            "title": {"type": "string"}
+        }, ["title"]),
+        make_tool("docs_update_document", "Update a Google Docs document.", {
+            "document_id": {"type": "string"},
+            "content": {"type": "string"}
+        }, ["document_id", "content"]),
+        make_tool("docs_insert_text", "Insert text into a Google Docs document.", {
+            "document_id": {"type": "string"},
+            "text": {"type": "string"},
+            "index": {"type": "integer"}
+        }, ["document_id", "text"]),
+        make_tool("docs_delete_text", "Delete text from a Google Docs document.", {
+            "document_id": {"type": "string"},
+            "start_index": {"type": "integer"},
+            "end_index": {"type": "integer"}
+        }, ["document_id", "start_index", "end_index"]),
+        make_tool("docs_format_text", "Format text in a Google Docs document.", {
+            "document_id": {"type": "string"},
+            "start_index": {"type": "integer"},
+            "end_index": {"type": "integer"},
+            "bold": {"type": "boolean"},
+            "italic": {"type": "boolean"},
+            "underline": {"type": "boolean"}
+        }, ["document_id", "start_index", "end_index"]),
+        make_tool("docs_insert_table", "Insert a table into a Google Docs document.", {
+            "document_id": {"type": "string"},
+            "rows": {"type": "integer"},
+            "columns": {"type": "integer"},
+            "index": {"type": "integer"}
+        }, ["document_id", "rows", "columns"]),
+        make_tool("docs_insert_image", "Insert an image into a Google Docs document.", {
+            "document_id": {"type": "string"},
+            "image_url": {"type": "string"},
+            "index": {"type": "integer"}
+        }, ["document_id", "image_url"]),
+    ])
+    
+    # Google Sheets Tools (expanded)
+    tools.extend([
+        make_tool("sheets_get_spreadsheet", "Get content of a Google Sheets spreadsheet.", {
+            "spreadsheet_id": {"type": "string"}
+        }, ["spreadsheet_id"]),
+        make_tool("sheets_create_spreadsheet", "Create a new Google Sheets spreadsheet.", {
+            "title": {"type": "string"}
+        }, ["title"]),
+        make_tool("sheets_read_range", "Read a range of cells from Google Sheets.", {
+            "spreadsheet_id": {"type": "string"},
+            "range": {"type": "string", "description": "A1 notation (e.g., 'Sheet1!A1:B10')"}
+        }, ["spreadsheet_id", "range"]),
+        make_tool("sheets_write_range", "Write data to a range of cells in Google Sheets.", {
+            "spreadsheet_id": {"type": "string"},
+            "range": {"type": "string"},
+            "values": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
+        }, ["spreadsheet_id", "range", "values"]),
+        make_tool("sheets_clear_range", "Clear a range of cells in Google Sheets.", {
+            "spreadsheet_id": {"type": "string"},
+            "range": {"type": "string"}
+        }, ["spreadsheet_id", "range"]),
+        make_tool("sheets_append_range", "Append data to a range in Google Sheets.", {
+            "spreadsheet_id": {"type": "string"},
+            "range": {"type": "string"},
+            "values": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
+        }, ["spreadsheet_id", "range", "values"]),
+        make_tool("sheets_format_range", "Format a range of cells in Google Sheets.", {
+            "spreadsheet_id": {"type": "string"},
+            "range": {"type": "string"},
+            "format": {"type": "object"}
+        }, ["spreadsheet_id", "range"]),
+        make_tool("sheets_create_sheet", "Create a new sheet in a spreadsheet.", {
+            "spreadsheet_id": {"type": "string"},
+            "title": {"type": "string"}
+        }, ["spreadsheet_id", "title"]),
+        make_tool("sheets_delete_sheet", "Delete a sheet from a spreadsheet.", {
+            "spreadsheet_id": {"type": "string"},
+            "sheet_id": {"type": "integer"}
+        }, ["spreadsheet_id", "sheet_id"]),
+    ])
+    
+    # Google Forms Tools (expanded)
+    tools.extend([
+        make_tool("forms_create_form", "Create a new Google Form.", {
+            "title": {"type": "string"}
+        }, ["title"]),
+        make_tool("forms_get_form", "Get details of a Google Form.", {
+            "form_id": {"type": "string"}
+        }, ["form_id"]),
+        make_tool("forms_add_item", "Add an item (question) to a Google Form.", {
+            "form_id": {"type": "string"},
+            "item": {"type": "object"}
+        }, ["form_id", "item"]),
+        make_tool("forms_update_item", "Update an item in a Google Form.", {
+            "form_id": {"type": "string"},
+            "item_id": {"type": "string"},
+            "item": {"type": "object"}
+        }, ["form_id", "item_id"]),
+        make_tool("forms_delete_item", "Delete an item from a Google Form.", {
+            "form_id": {"type": "string"},
+            "item_id": {"type": "string"}
+        }, ["form_id", "item_id"]),
+        make_tool("forms_list_responses", "List responses to a Google Form.", {
+            "form_id": {"type": "string"}
+        }, ["form_id"]),
+        make_tool("forms_get_response", "Get a specific response to a Google Form.", {
+            "form_id": {"type": "string"},
+            "response_id": {"type": "string"}
+        }, ["form_id", "response_id"]),
+    ])
+    
+    # Google Slides Tools (expanded)
+    tools.extend([
+        make_tool("slides_create_presentation", "Create a new Google Slides presentation.", {
+            "title": {"type": "string"}
+        }, ["title"]),
+        make_tool("slides_get_presentation", "Get details of a Google Slides presentation.", {
+            "presentation_id": {"type": "string"}
+        }, ["presentation_id"]),
+        make_tool("slides_create_slide", "Create a new slide in a presentation.", {
+            "presentation_id": {"type": "string"},
+            "page_id": {"type": "string"}
+        }, ["presentation_id"]),
+        make_tool("slides_delete_slide", "Delete a slide from a presentation.", {
+            "presentation_id": {"type": "string"},
+            "page_id": {"type": "string"}
+        }, ["presentation_id", "page_id"]),
+        make_tool("slides_insert_text", "Insert text into a slide.", {
+            "presentation_id": {"type": "string"},
+            "page_id": {"type": "string"},
+            "text": {"type": "string"},
+            "x": {"type": "number"},
+            "y": {"type": "number"}
+        }, ["presentation_id", "page_id", "text"]),
+        make_tool("slides_insert_image", "Insert an image into a slide.", {
+            "presentation_id": {"type": "string"},
+            "page_id": {"type": "string"},
+            "image_url": {"type": "string"},
+            "x": {"type": "number"},
+            "y": {"type": "number"}
+        }, ["presentation_id", "page_id", "image_url"]),
+        make_tool("slides_update_slide", "Update a slide in a presentation.", {
+            "presentation_id": {"type": "string"},
+            "page_id": {"type": "string"},
+            "updates": {"type": "array", "items": {"type": "object"}}
+        }, ["presentation_id", "page_id"]),
+    ])
+    
+    # Google Chat Tools (expanded)
+    tools.extend([
+        make_tool("chat_list_spaces", "List Google Chat spaces.", {}),
+        make_tool("chat_get_space", "Get details of a Google Chat space.", {
+            "space": {"type": "string"}
+        }, ["space"]),
+        make_tool("chat_list_messages", "List messages in a Google Chat space.", {
+            "space": {"type": "string"},
+            "max_results": {"type": "integer", "default": 10}
+        }, ["space"]),
+        make_tool("chat_get_message", "Get a specific message from Google Chat.", {
+            "space": {"type": "string"},
+            "message_id": {"type": "string"}
+        }, ["space", "message_id"]),
+        make_tool("chat_send_message", "Send a message to a Google Chat space.", {
+            "space": {"type": "string"},
+            "text": {"type": "string"},
+            "thread_key": {"type": "string"}
+        }, ["space", "text"]),
+        make_tool("chat_update_message", "Update a message in Google Chat.", {
+            "space": {"type": "string"},
+            "message_id": {"type": "string"},
+            "text": {"type": "string"}
+        }, ["space", "message_id", "text"]),
+        make_tool("chat_delete_message", "Delete a message from Google Chat.", {
+            "space": {"type": "string"},
+            "message_id": {"type": "string"}
+        }, ["space", "message_id"]),
+    ])
+    
+    # Google Tasks Tools (expanded)
+    tools.extend([
+        make_tool("tasks_list_tasklists", "List Google Tasks task lists.", {}),
+        make_tool("tasks_create_tasklist", "Create a new task list.", {
+            "title": {"type": "string"}
+        }, ["title"]),
+        make_tool("tasks_get_tasklist", "Get details of a task list.", {
+            "tasklist_id": {"type": "string"}
+        }, ["tasklist_id"]),
+        make_tool("tasks_list_tasks", "List tasks in a task list.", {
+            "tasklist_id": {"type": "string", "default": "@default"},
+            "max_results": {"type": "integer", "default": 10},
+            "show_completed": {"type": "boolean", "default": False}
+        }),
+        make_tool("tasks_get_task", "Get details of a specific task.", {
+            "tasklist_id": {"type": "string", "default": "@default"},
+            "task_id": {"type": "string"}
+        }, ["task_id"]),
+        make_tool("tasks_create_task", "Create a new task.", {
+            "tasklist_id": {"type": "string", "default": "@default"},
+            "title": {"type": "string"},
+            "notes": {"type": "string"},
+            "due": {"type": "string", "description": "Due date (RFC3339)"},
+            "parent": {"type": "string", "description": "Parent task ID"}
+        }, ["title"]),
+        make_tool("tasks_update_task", "Update a task.", {
+            "tasklist_id": {"type": "string", "default": "@default"},
+            "task_id": {"type": "string"},
+            "title": {"type": "string"},
+            "notes": {"type": "string"},
+            "status": {"type": "string", "enum": ["needsAction", "completed"]},
+            "due": {"type": "string"}
+        }, ["task_id"]),
+        make_tool("tasks_delete_task", "Delete a task.", {
+            "tasklist_id": {"type": "string", "default": "@default"},
+            "task_id": {"type": "string"}
+        }, ["task_id"]),
+        make_tool("tasks_move_task", "Move a task to a different position or task list.", {
+            "tasklist_id": {"type": "string", "default": "@default"},
+            "task_id": {"type": "string"},
+            "previous": {"type": "string", "description": "Previous task ID"},
+            "parent": {"type": "string"}
+        }, ["task_id"]),
+    ])
+    
+    # Google Custom Search Tools
+    tools.extend([
+        make_tool("customsearch_search", "Perform a web search using Google Custom Search.", {
+            "query": {"type": "string"},
+            "num": {"type": "integer", "default": 10}
+        }, ["query"]),
+    ])
+    
+    return tools
 

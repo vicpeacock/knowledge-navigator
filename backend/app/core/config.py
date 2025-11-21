@@ -135,6 +135,7 @@ class Settings(BaseSettings):
     
     # Frontend URL (for email links)
     frontend_url: str = "http://localhost:3003"
+    base_url: str = "http://localhost:8000"  # Backend base URL for OAuth redirects
     
     # Encryption for credentials
     credentials_encryption_key: str = "your-32-byte-encryption-key-change-me"

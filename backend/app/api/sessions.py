@@ -1012,13 +1012,17 @@ async def chat(
     current_user: User = Depends(get_current_user),
 ):
     """Send a message and get AI response (for current user)"""
-    logger.info(f"📨📨📨 CHAT REQUEST RECEIVED: session_id={session_id}, message='{request.message[:100]}', user={current_user.email}")
+    # Log immediately at the start of the function
+    import sys
+    print(f"[CHAT ENDPOINT] ===== CHAT REQUEST RECEIVED =====", file=sys.stderr)
+    print(f"[CHAT ENDPOINT] session_id={session_id}, message_length={len(request.message) if request else 'None'}, user={current_user.email if current_user else 'None'}", file=sys.stderr)
+    logger.info(f"📨📨📨 CHAT REQUEST RECEIVED: session_id={session_id}, message='{request.message[:100] if request and request.message else 'None'}', user={current_user.email if current_user else 'None'}")
     import sys
     print(f"[SESSIONS] CHAT REQUEST: session_id={session_id}, message='{request.message[:100]}', user={current_user.email}", file=sys.stderr)
     
     # Check active SSE connections for this session
     active_sessions = agent_activity_stream.get_active_sessions()
-    logger.error(f"🔍🔍🔍 Active SSE sessions before chat: {len(active_sessions)} - {active_sessions}")
+    logger.debug(f"🔍 Active SSE sessions before chat: {len(active_sessions)} - {active_sessions}")
     print(f"[SESSIONS] Active SSE sessions: {len(active_sessions)} - {active_sessions}", file=sys.stderr)
     if session_id not in active_sessions:
         logger.warning(f"⚠️⚠️⚠️  Session {session_id} has NO active SSE connection! Telemetry events will not be delivered.")
@@ -1194,18 +1198,18 @@ async def chat(
     await db.commit()
     
     # LangGraph branch
-    logger.error(f"🔍🔍🔍 Checking LangGraph flag: use_langgraph_prototype={settings.use_langgraph_prototype}")
+    logger.debug(f"🔍 Checking LangGraph flag: use_langgraph_prototype={settings.use_langgraph_prototype}")
     import sys
     print(f"[SESSIONS] LangGraph flag: {settings.use_langgraph_prototype}", file=sys.stderr)
     
     if settings.use_langgraph_prototype:
-        logger.error("✅✅✅ Using LangGraph pipeline")
+        logger.debug("✅ Using LangGraph pipeline")
         print(f"[SESSIONS] Using LangGraph pipeline", file=sys.stderr)
         existing_metadata = dict(session.session_metadata or {})
         pending_plan = existing_metadata.get("pending_plan")
 
         try:
-            logger.error("🚀🚀🚀 Calling run_langgraph_chat...")
+            logger.debug("🚀 Calling run_langgraph_chat...")
             print(f"[SESSIONS] Calling run_langgraph_chat", file=sys.stderr)
             langgraph_result = await run_langgraph_chat(
                 db=db,
@@ -1222,7 +1226,7 @@ async def chat(
                 pending_plan=pending_plan,
                 current_user=current_user,
             )
-            logger.error("✅✅✅ LangGraph completed successfully")
+            logger.debug("✅ LangGraph completed successfully")
             print(f"[SESSIONS] LangGraph completed successfully", file=sys.stderr)
         except Exception as e:
             logger.error(f"❌❌❌ LangGraph failed with error: {e}", exc_info=True)
@@ -1230,14 +1234,14 @@ async def chat(
             raise  # Re-raise to see the error
 
         # Debug: Log the result structure
-        logger.error(f"🔍 LangGraph result type: {type(langgraph_result)}")
-        logger.error(f"🔍 LangGraph result keys: {list(langgraph_result.keys()) if isinstance(langgraph_result, dict) else 'N/A'}")
+        logger.debug(f"🔍 LangGraph result type: {type(langgraph_result)}")
+        logger.debug(f"🔍 LangGraph result keys: {list(langgraph_result.keys()) if isinstance(langgraph_result, dict) else 'N/A'}")
         
         chat_response = langgraph_result["chat_response"]
-        logger.error(f"🔍 Chat response type: {type(chat_response)}")
-        logger.error(f"🔍 Chat response content: {chat_response.response[:100] if chat_response and chat_response.response else 'NONE'}")
-        logger.error(f"🔍 Chat response full length: {len(chat_response.response) if chat_response and chat_response.response else 0}")
-        logger.error(f"🔍 Assistant message saved flag: {langgraph_result.get('assistant_message_saved', False)}")
+        logger.debug(f"🔍 Chat response type: {type(chat_response)}")
+        logger.debug(f"🔍 Chat response content: {chat_response.response[:100] if chat_response and chat_response.response else 'NONE'}")
+        logger.debug(f"🔍 Chat response full length: {len(chat_response.response) if chat_response and chat_response.response else 0}")
+        logger.debug(f"🔍 Assistant message saved flag: {langgraph_result.get('assistant_message_saved', False)}")
         
         new_plan_metadata = langgraph_result.get("plan_metadata")
 
@@ -1994,23 +1998,23 @@ async def stream_agent_activity(
         raise HTTPException(status_code=404, detail="Session not found")
 
     async def event_generator():
-        logger.error(f"✅✅✅ Starting SSE stream for session {session_id} - CRITICAL LOG")
+        logger.info(f"✅ Starting SSE stream for session {session_id}")
         import sys
         print(f"[SSE] Starting stream for session {session_id}", file=sys.stderr)
         
         snapshot_payload = agent_activity_stream.snapshot_sse_payload(session_id)
         snapshot_events = agent_activity_stream.snapshot(session_id)
         if snapshot_payload:
-            logger.error(f"📸📸📸 Sending snapshot with {len(snapshot_events)} events - CRITICAL LOG")
+            logger.info(f"📸 Sending snapshot with {len(snapshot_events)} events")
             print(f"[SSE] Sending snapshot with {len(snapshot_events)} events", file=sys.stderr)
             yield snapshot_payload
         else:
-            logger.error(f"📸📸📸 No snapshot available (history empty) - CRITICAL LOG")
+            logger.info(f"📸 No snapshot available (history empty)")
             print(f"[SSE] No snapshot available (history empty)", file=sys.stderr)
 
         queue = await agent_activity_stream.register(session_id)
         active_sessions = agent_activity_stream.get_active_sessions()
-        logger.error(f"📡📡📡 Registered subscriber for session {session_id}, active sessions: {len(active_sessions)} - {active_sessions} - CRITICAL LOG")
+        logger.info(f"📡 Registered subscriber for session {session_id}, active sessions: {len(active_sessions)} - {active_sessions}")
         print(f"[SSE] Registered subscriber, active sessions: {len(active_sessions)} - {active_sessions}", file=sys.stderr)
         try:
             while True:
@@ -2022,7 +2026,7 @@ async def stream_agent_activity(
                     # event is a dict (serialized), not a Pydantic model
                     agent_id = event.get('agent_id', 'unknown') if isinstance(event, dict) else getattr(event, 'agent_id', 'unknown')
                     status = event.get('status', 'unknown') if isinstance(event, dict) else getattr(event, 'status', 'unknown')
-                    logger.error(f"📨📨📨 Sending event to session {session_id}: {agent_id} ({status})")
+                    logger.info(f"📨 Sending event to session {session_id}: {agent_id} ({status})")
                     import sys
                     print(f"[SSE] Sending event: {agent_id} ({status}) to session {session_id}", file=sys.stderr)
                     yield agent_activity_stream.as_sse_payload(event)
