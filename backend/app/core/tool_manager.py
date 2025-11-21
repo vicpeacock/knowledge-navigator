@@ -300,31 +300,43 @@ class ToolManager:
                     session_metadata = integration.session_metadata or {}
                     server_url = session_metadata.get("server_url", "") or ""
                     oauth_required = session_metadata.get("oauth_required", False)
-                    is_oauth_server = (
-                        oauth_required or
-                        "workspace" in server_url.lower() or
-                        "8003" in server_url or
-                        "google" in server_url.lower()
-                    )
+                    from app.core.oauth_utils import is_oauth_server
+                    is_oauth = is_oauth_server(server_url, oauth_required)
                     
                     # Initialize all_tools to empty list
                     all_tools = []
                     
                     try:
                         logger.info(f"🔍 Fetching tools from MCP integration {integration.id} (server: {client.base_url})")
-                        logger.info(f"   Is OAuth 2.1 server: {is_oauth_server}, OAuth required: {oauth_required}, Server URL: {server_url}")
+                        logger.info(f"   Is OAuth 2.1 server: {is_oauth}, OAuth required: {oauth_required}, Server URL: {server_url}")
                         
-                        all_tools = await client.list_tools()
+                        # Add timeout to prevent blocking if MCP server is unresponsive
+                        all_tools = await asyncio.wait_for(
+                            client.list_tools(),
+                            timeout=5.0  # 5 second timeout per integration
+                        )
                         logger.info(f"✅ Retrieved {len(all_tools)} tools from MCP integration {integration.id}")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"⏱️  Timeout fetching tools from MCP integration {integration.id} (server may be slow or unresponsive)")
+                        # For OAuth servers, timeout might be expected if server requires authentication
+                        if is_oauth:
+                            logger.info(f"   OAuth 2.1 server timeout - providing known tools")
+                            if "workspace" in server_url.lower() or "8003" in server_url or "google" in server_url.lower():
+                                all_tools = _get_known_google_workspace_tools()
+                            else:
+                                all_tools = []
+                        else:
+                            all_tools = []  # Empty for non-OAuth servers on timeout
                     except Exception as tools_error:
                         error_msg = str(tools_error).lower()
                         logger.info(f"⚠️  Error fetching tools: {error_msg[:100]}")
-                        logger.info(f"   Is OAuth server: {is_oauth_server}, Checking if this is expected...")
+                        logger.info(f"   Is OAuth server: {is_oauth}, Checking if this is expected...")
                         
                         # For OAuth 2.1 servers, "Session terminated" is EXPECTED behavior
                         # The server requires user to authenticate when using tools for the first time
                         # We don't pass OAuth tokens to the server - it handles auth internally
-                        if is_oauth_server and ("session terminated" in error_msg or "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg):
+                        from app.core.oauth_utils import is_oauth_error
+                        if is_oauth and is_oauth_error(error_msg):
                             logger.info(f"✅ OAuth 2.1 server requires user authentication (expected behavior)")
                             logger.info(f"   Server handles OAuth internally - user will authenticate when using a tool for the first time")
                             
@@ -958,10 +970,8 @@ class ToolManager:
         import logging
         logger = logging.getLogger(__name__)
         
-        # Ensure select is available (imported globally, but make sure it's in scope)
-        from sqlalchemy import select as sql_select
-        # Use sql_select to avoid any potential shadowing issues
-        select = sql_select
+        # select is already imported globally at the top of the file
+        # No need to redefine it here
         
         # Extract actual tool name (remove "mcp_" prefix)
         actual_tool_name = tool_name.replace("mcp_", "", 1)
@@ -993,10 +1003,9 @@ class ToolManager:
             
             # Get MCP client and list all available tools from this integration
             # For OAuth 2.1 servers, we need to pass OAuth tokens per user
-            # Use a cache key that includes user_id for user-specific OAuth tokens
             from app.api.integrations.mcp import _get_mcp_client_for_integration
             from app.models.database import User as UserModel
-            # Note: select is already imported globally at the top of the file
+            # select is already imported globally at the top of the file
             
             # Get current_user for OAuth - get from session if session_id is provided
             current_user_for_oauth = None
