@@ -66,10 +66,16 @@ class MemoryManager:
         if collection_name in self._collections_cache:
             return self._collections_cache[collection_name]
         
-        # Create or get collection
+        # Create or get collection with optimized HNSW index parameters
+        # Increased ef_construction and M to prevent "Cannot return the results in a contigious 2D array" errors
         collection = self.chroma_client.get_or_create_collection(
             name=collection_name,
-            metadata={"hnsw:space": "cosine", "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "default"},
+            metadata={
+                "hnsw:space": "cosine",
+                "hnsw:ef_construction": "400",  # Increased from default 200 for better index quality
+                "hnsw:M": "32",  # Increased from default 16 for larger collections
+                "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "default"
+            },
         )
         
         # Cache it
@@ -345,7 +351,13 @@ class MemoryManager:
             
             return results.get("documents", [[]])[0] if results else []
         except Exception as e:
-            logger.error(f"Error in retrieve_long_term_memory: {e}", exc_info=True)
+            error_str = str(e).lower()
+            # ChromaDB HNSW index errors are often recoverable - log as warning
+            if "contigious" in error_str or "ef or m is too small" in error_str or "hnsw" in error_str:
+                logger.warning(f"⚠️  ChromaDB index configuration issue (may need index rebuild): {e}")
+                logger.debug(f"   This is usually caused by ChromaDB HNSW index parameters. Consider rebuilding the collection.")
+            else:
+                logger.error(f"Error in retrieve_long_term_memory: {e}", exc_info=True)
             return []
 
     async def should_store_in_long_term(

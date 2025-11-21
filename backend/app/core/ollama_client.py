@@ -231,15 +231,15 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
             
             # CRITICAL CHECK: Verify web_search is NOT in the list
             if "web_search" in tool_names:
-                logger.error(f"🚨🚨🚨 CRITICAL ERROR: web_search is STILL in tools passed to Ollama after filtering!")
-                logger.error(f"   All tools: {tool_names}")
+                logger.warning(f"⚠️  web_search is STILL in tools passed to Ollama after filtering! Removing it.")
+                logger.warning(f"   All tools: {tool_names}")
                 import sys
-                print(f"[OLLAMA_CLIENT] ERROR: web_search in tools list after filtering: {tool_names}", file=sys.stderr)
+                print(f"[OLLAMA_CLIENT] WARNING: web_search in tools list after filtering: {tool_names}", file=sys.stderr)
                 # Remove it as a last resort
-                ollama_tools = [t for t in ollama_tools if t.get("function", {}).get("name") != "web_search"]
+                ollama_tools = [t for t in ollama_tools if t.get("function", {}).get("name") not in ["web_search", "web_fetch"]]
                 payload["tools"] = ollama_tools
                 tool_names = [t.get("function", {}).get("name", "unknown") for t in ollama_tools]
-                logger.error(f"   Removed web_search as last resort. New tool count: {len(ollama_tools)}")
+                logger.warning(f"   Removed web_search/web_fetch as last resort. New tool count: {len(ollama_tools)}")
             else:
                 logger.info(f"✅ Verified: web_search NOT in tools passed to Ollama")
         

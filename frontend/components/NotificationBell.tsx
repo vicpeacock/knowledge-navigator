@@ -134,12 +134,12 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
         
         // Fallback to polling
         fetchNotifications()
-        fallbackInterval = setInterval(fetchNotifications, 5000)
+        fallbackInterval = setInterval(fetchNotifications, 30000) // Poll every 30s when SSE fails
       }
     } catch (error) {
       console.warn('SSE not supported, using polling:', error)
       fetchNotifications()
-      fallbackInterval = setInterval(fetchNotifications, 5000)
+      fallbackInterval = setInterval(fetchNotifications, 30000) // Poll every 30s when SSE not supported
     }
 
     return () => {
@@ -152,7 +152,7 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
   useEffect(() => {
     if (sessionId && !isOpen) {
       fetchNotifications()
-      const interval = setInterval(fetchNotifications, 10000) // Poll every 10s when closed
+      const interval = setInterval(fetchNotifications, 30000) // Poll every 30s when closed
       return () => clearInterval(interval)
     } else if (sessionId && isOpen) {
       // Fetch once when popup opens (SSE will take over)

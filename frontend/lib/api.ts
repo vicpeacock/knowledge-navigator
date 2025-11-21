@@ -338,6 +338,8 @@ export const integrationsApi = {
       api.put(`/api/integrations/mcp/integrations/${integrationId}`, { name }),
     test: (integrationId: string) => api.post(`/api/integrations/mcp/${integrationId}/test`, { timeout: 45000 }),
     debug: (integrationId: string) => api.get(`/api/integrations/mcp/${integrationId}/debug`),
+    authorize: (integrationId: string) =>
+      api.get(`/api/integrations/mcp/${integrationId}/oauth/authorize`),
   },
   email: {
         authorize: (integrationId?: string) => {

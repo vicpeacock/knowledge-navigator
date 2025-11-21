@@ -120,7 +120,7 @@ class AgentActivityStream:
             print(f"[TELEMETRY] No subscribers for session {session_id}, active sessions: {all_sessions}", file=sys.stderr)
             return
         
-        logger.error(f"📡📡📡 Publishing event to {len(subscribers)} subscriber(s) for session {session_id}: {agent_id} ({status})")
+        logger.info(f"📡 Publishing event to {len(subscribers)} subscriber(s) for session {session_id}: {agent_id} ({status})")
         import sys
         print(f"[TELEMETRY] Publishing event to {len(subscribers)} subscriber(s): {agent_id} ({status})", file=sys.stderr)
 
@@ -146,11 +146,11 @@ class AgentActivityStream:
                     continue
         
         if events_sent > 0:
-            logger.error(f"✅✅✅ Successfully sent event to {events_sent}/{len(subscribers)} subscribers: {agent_id} ({status})")
+            logger.info(f"✅ Successfully sent event to {events_sent}/{len(subscribers)} subscribers: {agent_id} ({status})")
             import sys
             print(f"[TELEMETRY] Successfully queued event: {agent_id} ({status}) to {events_sent} subscriber(s)", file=sys.stderr)
         else:
-            logger.error(f"⚠️⚠️⚠️  Failed to send event to any subscriber: {agent_id} ({status})")
+            logger.warning(f"⚠️  Failed to send event to any subscriber: {agent_id} ({status})")
             import sys
             print(f"[TELEMETRY] FAILED to queue event: {agent_id} ({status})", file=sys.stderr)
 

@@ -318,16 +318,22 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 tool_desc = tool.get("description", "")
                 tool_params = tool.get("parameters", {})
                 
-                # Convert parameters to Gemini schema format
-                gemini_schema = self._convert_parameters_to_gemini_schema(tool_params)
-                
-                gemini_tools.append({
-                    "function_declarations": [{
-                        "name": tool_name,
-                        "description": tool_desc,
-                        "parameters": gemini_schema
-                    }]
-                })
+                try:
+                    # Convert parameters to Gemini schema format
+                    gemini_schema = self._convert_parameters_to_gemini_schema(tool_params)
+                    
+                    gemini_tools.append({
+                        "function_declarations": [{
+                            "name": tool_name,
+                            "description": tool_desc,
+                            "parameters": gemini_schema
+                        }]
+                    })
+                except Exception as e:
+                    logger.error(f"❌ Error converting tool {tool_name} to Gemini schema: {e}", exc_info=True)
+                    logger.error(f"   Tool params: {tool_params}")
+                    # Skip this tool but continue with others
+                    continue
             
             if gemini_tools:
                 logger.info(f"Passing {len(gemini_tools)} tools to Gemini (filtered from {len(tools)} original tools)")
@@ -368,14 +374,27 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 
                 if gemini_tools:
                     model_config["tools"] = gemini_tools
+                    logger.info(f"🔧 Configured {len(gemini_tools)} tools for Gemini model")
                 
-                if model_config:
-                    model = genai.GenerativeModel(self.model_name, **model_config)
-                else:
-                    model = self._get_model()
-                
-                # Start chat with history
-                chat = model.start_chat(history=history)
+                try:
+                    if model_config:
+                        model = genai.GenerativeModel(self.model_name, **model_config)
+                        logger.info(f"✅ Created Gemini model with {len(gemini_tools) if gemini_tools else 0} tools")
+                    else:
+                        model = self._get_model()
+                    
+                    # Start chat with history
+                    chat = model.start_chat(history=history)
+                except Exception as e:
+                    logger.error(f"❌ Error creating Gemini model or starting chat: {e}", exc_info=True)
+                    logger.error(f"   Model name: {self.model_name}")
+                    logger.error(f"   Model config keys: {list(model_config.keys()) if model_config else 'None'}")
+                    if gemini_tools:
+                        logger.error(f"   Number of tools: {len(gemini_tools)}")
+                        # Log first tool for debugging
+                        if len(gemini_tools) > 0:
+                            logger.error(f"   First tool: {gemini_tools[0]}")
+                    raise
                 
                 # Send last message
                 last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
@@ -477,6 +496,15 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 duration = time.time() - start_time
                 observe_histogram("llm_request_duration_seconds", duration, labels={"model": self.model_name, "provider": "gemini", "error": "true"})
                 increment_counter("llm_requests_errors_total", labels={"model": self.model_name, "provider": "gemini", "error_type": type(e).__name__})
+                
+                # Check for rate limit errors (429)
+                error_str = str(e).lower()
+                if "429" in error_str or "quota" in error_str or "rate limit" in error_str:
+                    logger.warning(f"⚠️  Gemini API rate limit exceeded (429). Consider switching to Ollama or waiting for quota reset.")
+                    logger.warning(f"   Error: {e}")
+                    logger.warning(f"   Free tier limit: 10 requests/minute. Email analysis may exceed this limit.")
+                    # Don't raise - let the caller handle it, but log clearly
+                
                 logger.error(f"Error calling Gemini API: {e}", exc_info=True)
                 raise
     
@@ -506,10 +534,55 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
             elif prop_type == "object":
                 gemini_type = "OBJECT"
             
-            gemini_properties[prop_name] = {
+            gemini_prop = {
                 "type": gemini_type,
                 "description": prop_desc
             }
+            
+            # For arrays, preserve the items schema (required by Gemini)
+            if prop_type == "array":
+                if "items" in prop_schema:
+                    items_schema = prop_schema["items"]
+                    items_type = items_schema.get("type", "string")
+                    
+                    # Map items type to Gemini type
+                    if items_type == "array":
+                        # Nested array - preserve items recursively
+                        # For nested arrays, we need to create an ARRAY type with its own items
+                        nested_items_schema = {}
+                        if "items" in items_schema:
+                            nested_items_type = items_schema["items"].get("type", "string")
+                            nested_gemini_type = "STRING"
+                            if nested_items_type == "integer" or nested_items_type == "number":
+                                nested_gemini_type = "NUMBER"
+                            elif nested_items_type == "boolean":
+                                nested_gemini_type = "BOOLEAN"
+                            elif nested_items_type == "object":
+                                nested_gemini_type = "OBJECT"
+                            nested_items_schema = {"type": nested_gemini_type}
+                        else:
+                            # Nested array without items - default to STRING
+                            nested_items_schema = {"type": "STRING"}
+                        # Create ARRAY with nested items
+                        gemini_prop["items"] = {
+                            "type": "ARRAY",
+                            "items": nested_items_schema
+                        }
+                    else:
+                        # Simple array (not nested)
+                        gemini_items_type = "STRING"
+                        if items_type == "integer" or items_type == "number":
+                            gemini_items_type = "NUMBER"
+                        elif items_type == "boolean":
+                            gemini_items_type = "BOOLEAN"
+                        elif items_type == "object":
+                            gemini_items_type = "OBJECT"
+                        gemini_prop["items"] = {"type": gemini_items_type}
+                else:
+                    # Array without items specified - default to STRING array (required by Gemini)
+                    gemini_prop["items"] = {"type": "STRING"}
+            
+            gemini_properties[prop_name] = gemini_prop
             
             if prop_name in required:
                 gemini_required.append(prop_name)

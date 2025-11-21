@@ -4,6 +4,7 @@ MCP Integration API - Manage MCP server connections and tool selection
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
+from sqlalchemy.orm.attributes import flag_modified
 from uuid import UUID
 from typing import List, Dict, Any, Optional
 import json
@@ -15,11 +16,47 @@ from app.core.mcp_client import MCPClient
 from app.core.config import settings
 from app.core.tenant_context import get_tenant_id
 from app.core.user_context import get_current_user
+from fastapi.responses import RedirectResponse
+from cryptography.fernet import Fernet
+import base64
+import binascii
+import json
 
 router = APIRouter()
 
 
-def _get_mcp_client_for_integration(integration: IntegrationModel) -> MCPClient:
+def _encrypt_credentials(credentials: Dict[str, Any], key: str) -> str:
+    """Encrypt credentials for storage"""
+    try:
+        if not key:
+            raise ValueError("Encryption key is required")
+        # Ensure key is 32 bytes for Fernet
+        key_bytes = key.encode()[:32].ljust(32, b'0')
+        key_b64 = base64.urlsafe_b64encode(key_bytes)
+        f = Fernet(key_b64)
+        credentials_json = json.dumps(credentials)
+        encrypted = f.encrypt(credentials_json.encode())
+        return encrypted.decode()
+    except Exception as e:
+        raise ValueError(f"Error encrypting credentials: {str(e)}")
+
+
+def _decrypt_credentials(encrypted: str, key: str) -> Dict[str, Any]:
+    """Decrypt credentials from storage"""
+    try:
+        if not key:
+            raise ValueError("Encryption key is required")
+        # Ensure key is 32 bytes for Fernet
+        key_bytes = key.encode()[:32].ljust(32, b'0')
+        key_b64 = base64.urlsafe_b64encode(key_bytes)
+        f = Fernet(key_b64)
+        decrypted = f.decrypt(encrypted.encode())
+        return json.loads(decrypted.decode())
+    except Exception as e:
+        raise ValueError(f"Error decrypting credentials: {str(e)}")
+
+
+def _get_mcp_client_for_integration(integration: IntegrationModel, current_user: Optional[User] = None) -> MCPClient:
     """Create MCP client for a specific integration"""
     import logging
     import os
@@ -68,9 +105,56 @@ def _get_mcp_client_for_integration(integration: IntegrationModel) -> MCPClient:
     )
     use_auth_token = not is_oauth_server
     
-    # Create client with custom URL - pass it to constructor to ensure headers are set correctly
-    client = MCPClient(base_url=server_url, use_auth_token=use_auth_token)
-    logger.info(f"Created MCP client with use_auth_token={use_auth_token} for {server_url}")
+    # For OAuth 2.1 servers (like Google Workspace MCP), retrieve and pass OAuth tokens
+    # The server expects OAuth tokens in the Authorization header for non-interactive tool calls
+    oauth_token: Optional[str] = None
+    if is_oauth_server and current_user:
+        try:
+            session_metadata = integration.session_metadata or {}
+            oauth_credentials = session_metadata.get("oauth_credentials", {})
+            user_id_str = str(current_user.id)
+            
+            if user_id_str in oauth_credentials:
+                encrypted_creds = oauth_credentials[user_id_str]
+                try:
+                    credentials = _decrypt_credentials(encrypted_creds, settings.credentials_encryption_key)
+                    # Get access token from credentials
+                    access_token = credentials.get("token")
+                    refresh_token = credentials.get("refresh_token")
+                    token_uri = credentials.get("token_uri", "https://oauth2.googleapis.com/token")
+                    client_id = credentials.get("client_id", settings.google_oauth_client_id)
+                    client_secret = credentials.get("client_secret", settings.google_oauth_client_secret)
+                    
+                    if access_token:
+                        # Use the access token as-is
+                        # If it's expired, the tool call will fail with 401 and tool_manager will handle refresh
+                        oauth_token = access_token
+                        logger.info(f"✅ Retrieved OAuth access token for user {current_user.id}")
+                        logger.debug(f"   Token preview: {access_token[:20]}...")
+                        logger.debug(f"   Has refresh_token: {bool(refresh_token)}")
+                    else:
+                        logger.warning(f"⚠️  OAuth credentials found but no access token")
+                        if refresh_token:
+                            logger.info(f"   Has refresh_token - token will be refreshed automatically if needed")
+                        else:
+                            logger.warning(f"   No refresh_token available - user will need to re-authenticate")
+                except Exception as decrypt_error:
+                    logger.warning(f"⚠️  Could not decrypt OAuth credentials: {decrypt_error}")
+            else:
+                logger.info(f"ℹ️  No OAuth credentials found for user {current_user.id} in integration {integration.id}")
+                logger.info(f"   Available OAuth users: {list(oauth_credentials.keys())}")
+        except Exception as oauth_error:
+            logger.warning(f"⚠️  Error retrieving OAuth token: {oauth_error}")
+    
+    # Create client with OAuth token if available (for OAuth 2.1 servers)
+    # or without token (for MCP Gateway or when no OAuth credentials available)
+    client = MCPClient(base_url=server_url, use_auth_token=use_auth_token, oauth_token=oauth_token)
+    if oauth_token:
+        logger.info(f"Created MCP client with OAuth token for {server_url}")
+    else:
+        logger.info(f"Created MCP client with use_auth_token={use_auth_token} for {server_url}")
+        if is_oauth_server:
+            logger.warning(f"   ⚠️  OAuth 2.1 server but no OAuth token available - user may need to authenticate")
     return client
 
 
@@ -93,41 +177,147 @@ async def connect_mcp_server(
     logger = logging.getLogger(__name__)
     
     try:
-        logger.info(f"Connecting to MCP server: {request.server_url}")
+        # Validate and log the server URL
+        server_url = request.server_url.strip() if request.server_url else None
+        logger.info(f"📡 Connecting to MCP server:")
+        logger.info(f"   Raw URL from request: {repr(request.server_url)}")
+        logger.info(f"   Cleaned URL: {repr(server_url)}")
+        
+        if not server_url:
+            raise HTTPException(
+                status_code=400,
+                detail="Server URL non può essere vuoto. Inserisci un URL valido (es: http://localhost:8003)"
+            )
+        
+        if not (server_url.startswith("http://") or server_url.startswith("https://")):
+            raise HTTPException(
+                status_code=400,
+                detail=f"URL non valido: {server_url}. L'URL deve iniziare con http:// o https://"
+            )
+        
         # Create temporary client to test connection
         # For Google Workspace MCP and other OAuth 2.1 servers, don't use MCP Gateway token
         # They handle authentication per-user via OAuth 2.1
         is_oauth_server = (
-            "workspace" in request.server_url.lower() or
-            "8003" in request.server_url or  # Google Workspace MCP port
-            "google" in request.server_url.lower()
+            "workspace" in server_url.lower() or
+            "8003" in server_url or  # Google Workspace MCP port
+            "google" in server_url.lower()
         )
         use_auth_token = not is_oauth_server  # Don't use token for OAuth 2.1 servers
         
+        logger.info(f"   Detected OAuth server: {is_oauth_server}")
+        logger.info(f"   Use auth token: {use_auth_token}")
+        
+        tools = []
+        oauth_required = False
+        
         try:
-            test_client = MCPClient(base_url=request.server_url, use_auth_token=use_auth_token)
-            logger.info(f"Created MCP client with base_url: {test_client.base_url}, use_auth_token={use_auth_token}")
+            test_client = MCPClient(base_url=server_url, use_auth_token=use_auth_token)
+            logger.info(f"✅ Created MCP client with base_url: {test_client.base_url}, use_auth_token={use_auth_token}")
             
             # Try to list tools
+            # For OAuth 2.1 servers, list_tools() might fail without user authentication
+            # In that case, we'll still create the integration but mark it as requiring OAuth
             logger.info("Calling list_tools()...")
-            tools = await test_client.list_tools()
-            logger.info(f"list_tools() returned: type={type(tools)}, length={len(tools) if isinstance(tools, list) else 'N/A'}")
-            if isinstance(tools, list) and len(tools) > 0:
-                logger.info(f"First tool sample: {str(tools[0])[:200]}")
-            else:
-                logger.warning(f"list_tools() returned empty or invalid result: {tools}")
+            oauth_required = False
+            
+            try:
+                tools = await test_client.list_tools()
+                logger.info(f"list_tools() returned: type={type(tools)}, length={len(tools) if isinstance(tools, list) else 'N/A'}")
+                if isinstance(tools, list) and len(tools) > 0:
+                    logger.info(f"First tool sample: {str(tools[0])[:200]}")
+                else:
+                    logger.warning(f"list_tools() returned empty or invalid result: {tools}")
+            except Exception as list_error:
+                # For OAuth 2.1 servers (like Google Workspace MCP), listing tools requires user authentication
+                # This is expected - tools will be discovered when user uses them for the first time
+                error_msg = str(list_error).lower()
+                # Check if it's an OAuth/authentication error
+                if "session terminated" in error_msg or "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg:
+                    logger.warning(f"⚠️  Server requires OAuth authentication to list tools: {list_error}")
+                    logger.info("   This is expected for OAuth 2.1 servers like Google Workspace MCP")
+                    logger.info("   Integration will be created, but tools will be discovered when user authenticates")
+                    oauth_required = True
+                    tools = []  # Empty tools list - will be populated after OAuth
+                else:
+                    # Re-raise if it's a different error
+                    logger.error(f"❌ Unexpected error listing tools: {list_error}", exc_info=True)
+                    raise
             
             await test_client.close()
         except Exception as client_error:
-            logger.error(f"Error in MCP client: {client_error}", exc_info=True)
-            raise
+            # Extract the real error from ExceptionGroup/TaskGroup if present
+            real_error = client_error
+            error_message = str(client_error).lower()
+            
+            # Check if it's an ExceptionGroup (Python 3.11+)
+            if hasattr(client_error, 'exceptions') and len(client_error.exceptions) > 0:
+                real_error = client_error.exceptions[0]
+                error_message = str(real_error).lower()
+                logger.warning(f"Extracted error from ExceptionGroup: {error_message}")
+            
+            # Dig deeper into nested exceptions to find the root cause
+            current_error = client_error
+            depth = 0
+            while depth < 5:
+                if hasattr(current_error, '__cause__') and current_error.__cause__:
+                    current_error = current_error.__cause__
+                    error_message = str(current_error).lower()
+                    depth += 1
+                elif hasattr(current_error, 'exceptions') and len(current_error.exceptions) > 0:
+                    current_error = current_error.exceptions[0]
+                    error_message = str(current_error).lower()
+                    depth += 1
+                else:
+                    break
+            
+            if current_error != client_error:
+                real_error = current_error
+                error_message = str(real_error).lower()
+                logger.warning(f"Extracted error from nested exception (depth {depth}): {error_message}")
+            
+            logger.error(f"Error in MCP client: {error_message}", exc_info=True)
+            logger.error(f"   Error type: {type(real_error).__name__}")
+            logger.error(f"   Server URL: {server_url}")
+            
+            # Check if this is an OAuth 2.1 server that requires authentication
+            is_oauth_server = (
+                "workspace" in server_url.lower() or
+                "8003" in server_url or
+                "google" in server_url.lower()
+            )
+            
+            # Check if it's an OAuth/authentication error
+            if is_oauth_server and ("session terminated" in error_message or "401" in error_message or "unauthorized" in error_message or "authentication" in error_message):
+                logger.warning(f"⚠️  OAuth authentication required (expected for OAuth 2.1 servers)")
+                logger.info(f"   Server is reachable, but tools require user authentication")
+                # Create integration anyway, marking it as requiring OAuth
+                oauth_required = True
+                tools = []  # Empty tools list - will be populated after OAuth
+            else:
+                # Provide a more user-friendly error message for other errors
+                if "connection" in error_message or "connect" in error_message:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Impossibile connettersi al server MCP all'indirizzo {server_url}. Verifica che il server sia in esecuzione e raggiungibile."
+                    )
+                elif "401" in error_message or "unauthorized" in error_message:
+                    raise HTTPException(
+                        status_code=401,
+                        detail=f"Autenticazione fallita per il server MCP. Verifica le credenziali OAuth."
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Errore durante la connessione al server MCP: {str(real_error)[:200]}"
+                    )
         
-        # Ensure tools is a list
+        # Ensure tools is a list (might be empty if OAuth is required)
         if not isinstance(tools, list):
             logger.warning(f"Tools is not a list, got: {type(tools)}, value: {str(tools)[:500]}")
             tools = []
         
-        logger.info(f"Final tools count: {len(tools)}")
+        logger.info(f"Final tools count: {len(tools)}, OAuth required: {oauth_required}")
         
         # Store integration (use SQLAlchemy model, not Pydantic schema)
         integration = IntegrationModel(
@@ -137,10 +327,11 @@ async def connect_mcp_server(
             enabled=True,
             tenant_id=tenant_id,
             session_metadata={
-                "server_url": request.server_url,
+                "server_url": server_url,  # Use cleaned URL
                 "name": request.name,
                 "selected_tools": [],  # User will select tools separately
                 "available_tools": [tool.get("name", "") for tool in tools if isinstance(tool, dict) and "name" in tool],
+                "oauth_required": oauth_required,  # Mark if OAuth is required
             },
         )
         db.add(integration)
@@ -151,13 +342,367 @@ async def connect_mcp_server(
         
         return {
             "integration_id": str(integration.id),
-            "server_url": request.server_url,
+            "server_url": server_url,  # Return cleaned URL
             "available_tools": tools,  # Return actual tools data, not just names
             "count": len(tools),
+            "oauth_required": oauth_required,  # Inform frontend if OAuth is needed
+            "message": "OAuth authentication required. Tools will be available after user authentication." if oauth_required else f"Connected successfully. Found {len(tools)} tools.",
         }
     except Exception as e:
         logger.error(f"Error connecting to MCP server: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error connecting to MCP server: {str(e)}")
+
+
+@router.get("/{integration_id}/oauth/authorize")
+async def authorize_mcp_oauth(
+    integration_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """Start OAuth2 flow for Google Workspace MCP server"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="Google OAuth credentials not configured. Please set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in .env"
+        )
+    
+    # Get integration
+    result = await db.execute(
+        select(IntegrationModel)
+        .where(
+            IntegrationModel.id == integration_id,
+            IntegrationModel.tenant_id == tenant_id,
+            IntegrationModel.service_type == "mcp_server"
+        )
+    )
+    integration = result.scalar_one_or_none()
+    
+    if not integration:
+        raise HTTPException(status_code=404, detail="MCP integration not found")
+    
+    session_metadata = integration.session_metadata or {}
+    server_url = session_metadata.get("server_url", "")
+    
+    # Check if this is a Google Workspace MCP server
+    is_google_workspace = (
+        "workspace" in server_url.lower() or
+        "8003" in server_url or
+        "google" in server_url.lower()
+    )
+    
+    if not is_google_workspace:
+        raise HTTPException(
+            status_code=400,
+            detail="OAuth is only available for Google Workspace MCP server"
+        )
+    
+    try:
+        from google_auth_oauthlib.flow import Flow
+        
+        # Create OAuth flow
+        # Use a fixed redirect_uri (not dynamic with integration_id) - integration_id is passed via state
+        redirect_uri = f"{settings.base_url}/api/integrations/mcp/oauth/callback"
+        
+        client_config = {
+            "web": {
+                "client_id": settings.google_oauth_client_id,
+                "client_secret": settings.google_oauth_client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [redirect_uri]
+            }
+        }
+        
+        # Scopes for Google Workspace
+        scopes = [
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+            "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+            "https://www.googleapis.com/auth/documents.readonly",
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            "https://www.googleapis.com/auth/tasks.readonly",
+        ]
+        
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=scopes,
+            redirect_uri=redirect_uri
+        )
+        
+        # Encode state with integration_id and user_id
+        state_payload = {
+            "integration_id": str(integration_id),
+            "user_id": str(current_user.id),
+        }
+        state_str = base64.urlsafe_b64encode(
+            json.dumps(state_payload).encode("utf-8")
+        ).decode("utf-8")
+        
+        authorization_url, _ = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent',
+            state=state_str,
+        )
+        
+        logger.info(f"OAuth authorization URL generated for integration {integration_id}, user {current_user.id}")
+        
+        return {"authorization_url": authorization_url}
+    except Exception as e:
+        logger.error(f"Error creating OAuth flow: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error creating OAuth flow: {str(e)}")
+
+
+@router.get("/oauth/callback")
+async def mcp_oauth_callback(
+    code: str,
+    state: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+):
+    """OAuth2 callback for Google Workspace MCP server"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"🔵 OAuth callback called!")
+    logger.info(f"   Code: {code[:20]}... (length: {len(code)})")
+    logger.info(f"   State: {state[:50] if state else 'None'}...")
+    logger.info(f"   Tenant ID: {tenant_id}")
+    
+    if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="Google OAuth credentials not configured"
+        )
+    
+    try:
+        from google_auth_oauthlib.flow import Flow
+        
+        # Decode state to get integration_id and user_id FIRST (before using integration_id)
+        integration_id: Optional[UUID] = None
+        user_id: Optional[UUID] = None
+        
+        logger.info(f"🔍 Decoding state parameter...")
+        logger.info(f"   State value: {state}")
+        logger.info(f"   State length: {len(state) if state else 0}")
+        logger.info(f"   State type: {type(state)}")
+        
+        if state:
+            try:
+                logger.info(f"   Attempting base64 decode...")
+                state_bytes = state.encode("utf-8")
+                missing_padding = len(state_bytes) % 4
+                if missing_padding:
+                    logger.info(f"   Adding {4 - missing_padding} padding bytes")
+                    state_bytes += b'=' * (4 - missing_padding)
+                
+                decoded = base64.urlsafe_b64decode(state_bytes)
+                logger.info(f"   Decoded bytes length: {len(decoded)}")
+                logger.info(f"   Decoded bytes preview: {decoded[:100]}")
+                
+                payload_str = decoded.decode("utf-8")
+                logger.info(f"   Decoded string: {payload_str}")
+                
+                payload = json.loads(payload_str)
+                logger.info(f"   Parsed JSON payload: {payload}")
+                
+                integration_id_str = payload.get("integration_id")
+                user_id_str = payload.get("user_id")
+                
+                logger.info(f"   Extracted integration_id_str: {integration_id_str}")
+                logger.info(f"   Extracted user_id_str: {user_id_str}")
+                
+                if integration_id_str:
+                    integration_id = UUID(integration_id_str)
+                    logger.info(f"✅ OAuth callback - Decoded integration_id: {integration_id}")
+                if user_id_str:
+                    user_id = UUID(user_id_str)
+                    logger.info(f"✅ OAuth callback - Decoded user_id: {user_id}")
+            except binascii.Error as e:
+                logger.error(f"❌ Base64 decode error: {e}")
+                logger.error(f"   State value: {state}")
+                raise HTTPException(status_code=400, detail=f"Invalid state parameter: base64 decode failed - {str(e)}")
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ JSON decode error: {e}")
+                logger.error(f"   Decoded string: {decoded.decode('utf-8', errors='replace')}")
+                raise HTTPException(status_code=400, detail=f"Invalid state parameter: JSON decode failed - {str(e)}")
+            except ValueError as e:
+                logger.error(f"❌ UUID parse error: {e}")
+                logger.error(f"   integration_id_str: {integration_id_str}")
+                logger.error(f"   user_id_str: {user_id_str}")
+                raise HTTPException(status_code=400, detail=f"Invalid state parameter: UUID parse failed - {str(e)}")
+            except Exception as e:
+                logger.error(f"❌ Unexpected error decoding state: {e}", exc_info=True)
+                raise HTTPException(status_code=400, detail=f"Invalid state parameter: {str(e)}")
+        else:
+            logger.error(f"❌ State parameter is None or empty")
+            raise HTTPException(status_code=400, detail="State parameter is required")
+        
+        if not integration_id:
+            logger.error(f"❌ integration_id is None after decoding")
+            raise HTTPException(status_code=400, detail="Invalid state parameter: integration_id is required")
+        
+        # Get integration (now that we have integration_id from state)
+        result = await db.execute(
+            select(IntegrationModel)
+            .where(
+                IntegrationModel.id == integration_id,
+                IntegrationModel.tenant_id == tenant_id,
+                IntegrationModel.service_type == "mcp_server"
+            )
+        )
+        integration = result.scalar_one_or_none()
+        
+        if not integration:
+            raise HTTPException(status_code=404, detail="MCP integration not found")
+        
+        # Create OAuth flow and fetch token
+        # Use the same fixed redirect_uri as in authorize endpoint
+        redirect_uri = f"{settings.base_url}/api/integrations/mcp/oauth/callback"
+        
+        client_config = {
+            "web": {
+                "client_id": settings.google_oauth_client_id,
+                "client_secret": settings.google_oauth_client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [redirect_uri]
+            }
+        }
+        
+        scopes = [
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+            "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+            "https://www.googleapis.com/auth/documents.readonly",
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            "https://www.googleapis.com/auth/tasks.readonly",
+        ]
+        
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=scopes,
+            redirect_uri=redirect_uri
+        )
+        
+        flow.fetch_token(code=code)
+        
+        credentials = {
+            "token": flow.credentials.token,
+            "refresh_token": flow.credentials.refresh_token,
+            "token_uri": flow.credentials.token_uri,
+            "client_id": flow.credentials.client_id,
+            "client_secret": flow.credentials.client_secret,
+            "scopes": flow.credentials.scopes,
+        }
+        
+        # Save credentials (encrypted) in session_metadata per user
+        session_metadata = integration.session_metadata or {}
+        
+        # Store OAuth credentials per user in session_metadata
+        if "oauth_credentials" not in session_metadata:
+            session_metadata["oauth_credentials"] = {}
+        
+        user_id_str = str(user_id) if user_id else "default"
+        logger.info(f"🔐 Encrypting OAuth credentials for user_id_str: {user_id_str}")
+        logger.info(f"   Credentials keys: {list(credentials.keys())}")
+        logger.info(f"   Token preview: {credentials.get('token', '')[:20]}...")
+        
+        try:
+            encrypted_credentials = _encrypt_credentials(credentials, settings.credentials_encryption_key)
+            logger.info(f"✅ Credentials encrypted successfully (length: {len(encrypted_credentials)})")
+        except Exception as encrypt_error:
+            logger.error(f"❌ Error encrypting credentials: {encrypt_error}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Error encrypting credentials: {str(encrypt_error)}")
+        
+        # Store credentials
+        if "oauth_credentials" not in session_metadata:
+            session_metadata["oauth_credentials"] = {}
+        session_metadata["oauth_credentials"][user_id_str] = encrypted_credentials
+        logger.info(f"📝 Storing credentials in session_metadata['oauth_credentials']['{user_id_str}']")
+        logger.info(f"   Total OAuth users: {list(session_metadata['oauth_credentials'].keys())}")
+        
+        # Update integration
+        integration.session_metadata = session_metadata
+        # IMPORTANT: Flag the JSONB field as modified so SQLAlchemy detects the change
+        flag_modified(integration, "session_metadata")
+        if user_id and (not integration.user_id or integration.user_id != user_id):
+            integration.user_id = user_id
+            logger.info(f"✅ Updated integration.user_id to {user_id}")
+        
+        try:
+            await db.commit()
+            logger.info(f"✅ Database commit successful")
+        except Exception as commit_error:
+            logger.error(f"❌ Error committing to database: {commit_error}", exc_info=True)
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=f"Error saving credentials: {str(commit_error)}")
+        
+        await db.refresh(integration)
+        
+        # Verify credentials were saved
+        refreshed_metadata = integration.session_metadata or {}
+        refreshed_oauth = refreshed_metadata.get("oauth_credentials", {})
+        if user_id_str in refreshed_oauth:
+            logger.info(f"✅ Verified: OAuth credentials saved successfully for user {user_id_str}")
+            logger.info(f"   Stored credentials length: {len(refreshed_oauth[user_id_str])}")
+        else:
+            logger.error(f"❌ ERROR: OAuth credentials NOT found after commit and refresh!")
+            logger.error(f"   Expected key: {user_id_str}")
+            logger.error(f"   Available keys: {list(refreshed_oauth.keys())}")
+            raise HTTPException(status_code=500, detail="Failed to save OAuth credentials - verification failed")
+        
+        logger.info(f"✅ OAuth credentials saved for integration {integration_id}, user {user_id}")
+        
+        # Try to fetch tools now that we have OAuth credentials
+        # We need to get the user from the database to pass to _get_mcp_client_for_integration
+        try:
+            if user_id:
+                from app.models.database import User as UserModel
+                user_result = await db.execute(
+                    select(UserModel).where(UserModel.id == user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                if user:
+                    client = _get_mcp_client_for_integration(integration, current_user=user)
+                    tools = await client.list_tools()
+                    logger.info(f"Successfully retrieved {len(tools)} tools after OAuth")
+                    
+                    # Update available_tools in metadata
+                    session_metadata = integration.session_metadata or {}
+                    session_metadata["available_tools"] = [tool.get("name", "") for tool in tools if isinstance(tool, dict) and "name" in tool]
+                    integration.session_metadata = session_metadata
+                    await db.commit()
+                else:
+                    logger.warning(f"User {user_id} not found, cannot fetch tools after OAuth")
+            else:
+                logger.warning("No user_id in OAuth callback, cannot fetch tools")
+        except Exception as tools_error:
+            logger.warning(f"Could not fetch tools after OAuth: {tools_error}", exc_info=True)
+            # Continue anyway - tools will be discovered when used
+        
+        # Redirect to frontend
+        frontend_url = settings.frontend_url or "http://localhost:3003"
+        redirect_url = f"{frontend_url}/integrations?success=true&integration_id={integration_id}&oauth_complete=true"
+        logger.info(f"✅ OAuth callback completed successfully, redirecting to: {redirect_url}")
+        return RedirectResponse(url=redirect_url)
+    except Exception as e:
+        logger.error(f"❌ Error in OAuth callback: {e}", exc_info=True)
+        logger.error(f"   Exception type: {type(e).__name__}")
+        logger.error(f"   Exception args: {e.args}")
+        raise HTTPException(status_code=500, detail=f"Error in OAuth callback: {str(e)}")
 
 
 @router.get("/{integration_id}/tools")
@@ -187,10 +732,18 @@ async def get_mcp_tools(
         server_url = integration.session_metadata.get('server_url', '') if integration.session_metadata else ''
         logger.info(f"Getting tools for integration {integration_id} from server: {server_url}")
         
-        client = _get_mcp_client_for_integration(integration)
+        client = _get_mcp_client_for_integration(integration, current_user=current_user)
         logger.info(f"Created MCP client with base_url: {client.base_url}")
         logger.info(f"MCP client headers: {list(client.headers.keys())} (token configured: {bool(settings.mcp_gateway_auth_token)})")
+        if "Authorization" in client.headers:
+            auth_header = client.headers["Authorization"]
+            logger.info(f"   Authorization header present: {auth_header[:30]}... (length: {len(auth_header)})")
+        else:
+            logger.info(f"   No Authorization header in client")
         
+        # For OAuth 2.1 servers, tools may not be available until user authenticates with the MCP server
+        # Try to get tools, but if it fails with auth error, return empty list (user will authenticate when using tools)
+        tools = []
         try:
             tools = await client.list_tools()
             logger.info(f"list_tools() returned: type={type(tools)}, length={len(tools) if isinstance(tools, list) else 'N/A'}")
@@ -206,27 +759,42 @@ async def get_mcp_tools(
                 error_message = str(real_error)
                 logger.warning(f"Extracted error from ExceptionGroup: {error_message}")
             
-            logger.error(f"Error in list_tools(): {error_message}", exc_info=True)
-            
-            # Log the full error for debugging
             error_str = error_message.lower()
             error_detail = error_message
             
-            # Check if it's an authentication error
-            if "401" in error_str or "unauthorized" in error_str or (hasattr(real_error, 'status_code') and real_error.status_code == 401):
+            # Check if this is an OAuth 2.1 server
+            session_metadata_check = integration.session_metadata or {}
+            oauth_required = session_metadata_check.get("oauth_required", False)
+            is_oauth_server = (
+                oauth_required or
+                "workspace" in server_url.lower() or
+                "8003" in server_url or
+                "google" in server_url.lower()
+            )
+            
+            # For OAuth 2.1 servers, "Session terminated" is expected if user hasn't authenticated yet
+            # The user will authenticate when they first use a tool
+            if is_oauth_server and ("session terminated" in error_str or "401" in error_str or "unauthorized" in error_str):
+                logger.info(f"⚠️  OAuth 2.1 server requires user authentication (expected behavior)")
+                logger.info(f"   Tools will be available after user authenticates when using a tool for the first time")
+                tools = []  # Return empty list - user will authenticate when using tools
+            elif "401" in error_str or "unauthorized" in error_str or (hasattr(real_error, 'status_code') and real_error.status_code == 401):
+                # For non-OAuth servers, authentication errors are real errors
+                logger.error(f"Error in list_tools(): {error_message}", exc_info=True)
                 logger.warning(f"MCP Gateway authentication error. Token configured: {bool(settings.mcp_gateway_auth_token)}")
-                # Re-raise the original error with a clearer message
                 raise HTTPException(
                     status_code=401,
                     detail=f"MCP Gateway authentication failed: {error_detail[:200]}. Please check MCP_GATEWAY_AUTH_TOKEN configuration."
                 )
             elif "connection" in error_str or "refused" in error_str or "connect" in error_str:
+                logger.error(f"Error in list_tools(): {error_message}", exc_info=True)
                 raise HTTPException(
                     status_code=503,
                     detail=f"MCP Gateway is not available: {error_detail[:200]}. Please check if the gateway is running."
                 )
             else:
-                # For other errors, re-raise with original error details
+                # For other errors, log and re-raise
+                logger.error(f"Error in list_tools(): {error_message}", exc_info=True)
                 raise HTTPException(
                     status_code=500,
                     detail=f"MCP Gateway error: {error_detail[:200]}"
@@ -313,7 +881,7 @@ async def select_mcp_tools(
         if not available_tool_names:
             logger.warning(f"No cached tools in metadata for integration {integration_id}, trying to fetch...")
             # Only fetch if we don't have cached tools (shouldn't happen normally)
-            client = _get_mcp_client_for_integration(integration)
+            client = _get_mcp_client_for_integration(integration, current_user=current_user)
             try:
                 available_tools = await client.list_tools()
                 available_tool_names = [tool.get("name", "") for tool in available_tools if isinstance(tool, dict)]
@@ -428,6 +996,7 @@ async def list_mcp_integrations(
                 "name": parse_metadata(i.session_metadata).get("name", "MCP Server"),
                 "server_url": parse_metadata(i.session_metadata).get("server_url", ""),
                 "selected_tools": parse_metadata(i.session_metadata).get("selected_tools", []),
+                "oauth_required": parse_metadata(i.session_metadata).get("oauth_required", False),
             }
             for i in integrations
         ],
@@ -542,7 +1111,7 @@ async def debug_mcp_connection(
         raise HTTPException(status_code=404, detail="MCP integration not found")
     
     try:
-        client = _get_mcp_client_for_integration(integration)
+        client = _get_mcp_client_for_integration(integration, current_user=current_user)
         server_url = integration.session_metadata.get('server_url', '') if integration.session_metadata else ''
         
         # Test all endpoints
@@ -608,6 +1177,7 @@ async def test_mcp_connection(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
     """Test connection to MCP server (for current tenant)"""
     import logging
@@ -626,21 +1196,51 @@ async def test_mcp_connection(
     if not integration:
         raise HTTPException(status_code=404, detail="MCP integration not found")
     
+    session_metadata = integration.session_metadata or {}
+    server_url = session_metadata.get("server_url", "")
+    oauth_required = session_metadata.get("oauth_required", False)
+    
+    # Check if this is an OAuth 2.1 server
+    is_oauth_server = (
+        oauth_required or
+        "workspace" in server_url.lower() or
+        "8003" in server_url or
+        "google" in server_url.lower()
+    )
+    
     try:
-        # DEBUG: Log settings token
-        from app.core.config import settings as debug_settings
-        logger.error(f"🔍 DEBUG - settings.mcp_gateway_auth_token: {debug_settings.mcp_gateway_auth_token[:30] if debug_settings.mcp_gateway_auth_token else 'NONE'}...")
+        client = _get_mcp_client_for_integration(integration, current_user=current_user)
         
-        client = _get_mcp_client_for_integration(integration)
+        logger.info(f"Testing connection for {server_url}")
+        logger.info(f"   OAuth required: {oauth_required}, Is OAuth server: {is_oauth_server}")
         
-        logger.error(f"🔍 DEBUG - client.base_url: {client.base_url}")
-        logger.error(f"🔍 DEBUG - client.headers: {client.headers}")
-        
-        logger.info(f"Testing connection for {integration.session_metadata.get('server_url', '')}")
-        
-        # Test tools/list (this will handle the connection properly)
-        # Don't do a separate initialize - let list_tools handle it
-        tools = await client.list_tools()
+        # For OAuth 2.1 servers, list_tools() might fail without user authentication
+        # In that case, we'll return a success status but indicate OAuth is needed
+        tools = []
+        try:
+            tools = await client.list_tools()
+            if not isinstance(tools, list):
+                logger.warning(f"Tools is not a list, got: {type(tools)}")
+                tools = []
+        except Exception as list_error:
+            error_msg = str(list_error).lower()
+            # Check if it's an OAuth/authentication error
+            if is_oauth_server and ("session terminated" in error_msg or "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg):
+                logger.info(f"⚠️  OAuth 2.1 server requires user authentication (expected behavior)")
+                logger.info(f"   Server is reachable, but tools require user authentication")
+                logger.info(f"   User will authenticate when using a tool for the first time")
+                return {
+                    "status": "connected",
+                    "oauth_required": True,
+                    "server_url": server_url,
+                    "tools_count": 0,
+                    "tools": [],
+                    "message": "Server is reachable. OAuth 2.1 authentication required. User will authenticate automatically when using a tool for the first time.",
+                }
+            else:
+                # Re-raise if it's a different error or not an OAuth server
+                logger.error(f"Connection test failed: {list_error}", exc_info=True)
+                raise
         
         # Ensure client is closed properly
         try:
@@ -648,15 +1248,12 @@ async def test_mcp_connection(
         except Exception as close_error:
             logger.warning(f"Error closing client: {close_error}")
         
-        if not isinstance(tools, list):
-            logger.warning(f"Tools is not a list, got: {type(tools)}")
-            tools = []
-        
         return {
             "status": "connected",
-            "server_url": integration.session_metadata.get("server_url", "") if integration.session_metadata else "",
+            "server_url": server_url,
             "tools_count": len(tools),
             "tools": [tool.get("name", "") if isinstance(tool, dict) else str(tool)[:50] for tool in tools[:10]] if tools else [],
+            "oauth_required": oauth_required,
         }
     except Exception as e:
         logger.error(f"Connection test failed: {e}", exc_info=True)
