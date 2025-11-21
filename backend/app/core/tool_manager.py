@@ -998,9 +998,9 @@ class ToolManager:
             from app.models.database import User as UserModel
             # Note: select is already imported globally at the top of the file
             
-            # Get current_user for OAuth - use passed current_user if available, otherwise get from session
-            current_user_for_oauth = current_user
-            if not current_user_for_oauth and session_id:
+            # Get current_user for OAuth - get from session if session_id is provided
+            current_user_for_oauth = None
+            if session_id:
                 try:
                     session_result = await db.execute(
                         select(SessionModel).where(SessionModel.id == session_id)
