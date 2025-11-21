@@ -5,6 +5,8 @@ Uses AsyncExitStack to properly manage nested async context managers
 from contextlib import AsyncExitStack
 from typing import Dict, Any, Optional, List, AsyncIterator
 from app.core.config import settings
+from app.core.oauth_utils import is_oauth_server, is_oauth_error
+from app.core.error_utils import extract_root_error, get_error_message
 import logging
 
 from mcp import ClientSession
@@ -124,44 +126,13 @@ class MCPClient:
             
         except Exception as e:
             # Extract the real error from ExceptionGroup/TaskGroup if present
-            real_error = e
-            error_message = str(e)
+            real_error = extract_root_error(e)
+            error_message = get_error_message(real_error)
             
-            # Check if it's an ExceptionGroup (Python 3.11+)
-            if hasattr(e, 'exceptions') and len(e.exceptions) > 0:
-                # Get the first exception from the group
-                real_error = e.exceptions[0]
-                error_message = str(real_error)
-                logger.warning(f"Extracted error from ExceptionGroup: {error_message}")
+            # Check if this is an expected OAuth 2.1 server error
+            is_oauth = is_oauth_server(self.base_url, oauth_required=False)
             
-            # Also check for TaskGroup exceptions (from asyncio)
-            # TaskGroup exceptions can be nested, so we need to dig deeper
-            current_error = e
-            depth = 0
-            while depth < 5:  # Limit depth to avoid infinite loops
-                if hasattr(current_error, '__cause__') and current_error.__cause__:
-                    current_error = current_error.__cause__
-                    depth += 1
-                elif hasattr(current_error, 'exceptions') and len(current_error.exceptions) > 0:
-                    current_error = current_error.exceptions[0]
-                    depth += 1
-                else:
-                    break
-            
-            if current_error != e:
-                real_error = current_error
-                error_message = str(real_error)
-                logger.warning(f"Extracted error from nested exception (depth {depth}): {error_message}")
-            
-            # Check if this is an expected OAuth 2.1 server error (Session terminated)
-            is_oauth_server = (
-                "workspace" in self.base_url.lower() or
-                "8003" in self.base_url or
-                "google" in self.base_url.lower()
-            )
-            is_session_terminated = "session terminated" in error_message.lower()
-            
-            if is_oauth_server and is_session_terminated:
+            if is_oauth and is_oauth_error(error_message):
                 # This is expected for OAuth 2.1 servers before user authentication
                 logger.info(f"ℹ️  OAuth 2.1 server requires user authentication (expected): {self.base_url}")
                 logger.debug(f"   Error: {error_message}")

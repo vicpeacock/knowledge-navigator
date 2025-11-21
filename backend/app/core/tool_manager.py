@@ -30,7 +30,8 @@ class ToolManager:
         self.email_service = EmailService()
         self.calendar_service = CalendarService()
         self.date_parser = DateParser()
-        self._mcp_clients_cache: Dict[str, MCPClient] = {}
+        # NOTE: MCP clients are NOT cached to avoid issues with expired OAuth tokens
+        # Clients are lightweight to create, so we create them fresh each time
     
     def get_base_tools(self) -> List[Dict[str, Any]]:
         """Get list of base built-in tools with their schemas"""
@@ -285,19 +286,12 @@ class ToolManager:
                             continue
                         # User doesn't have preferences for this integration - include all tools (default)
                     
-                    # Get or create MCP client for this integration
-                    # Use the same logic as _get_mcp_client_for_integration to handle Docker/localhost conversion
+                    # Get MCP client for this integration
                     # IMPORTANT: Pass current_user to retrieve OAuth tokens for OAuth 2.1 servers
-                    integration_key = str(integration.id)
-                    # Cache key includes user_id to ensure OAuth tokens are user-specific
-                    cache_key = f"{integration_key}_{current_user.id if current_user else 'none'}"
-                    if cache_key not in self._mcp_clients_cache:
-                        # Import here to avoid circular imports
-                        from app.api.integrations.mcp import _get_mcp_client_for_integration
-                        client = _get_mcp_client_for_integration(integration, current_user=current_user)
-                        self._mcp_clients_cache[cache_key] = client
-                    else:
-                        client = self._mcp_clients_cache[cache_key]
+                    # NOTE: We don't cache clients to avoid issues with expired OAuth tokens
+                    # Clients are lightweight to create, so we create them fresh each time
+                    from app.api.integrations.mcp import _get_mcp_client_for_integration
+                    client = _get_mcp_client_for_integration(integration, current_user=current_user)
                     
                     # Fetch all tools from the server
                     # For OAuth 2.1 servers (like Google Workspace MCP), tools may not be available
@@ -1135,125 +1129,56 @@ class ToolManager:
                     
                     return tool_result
                 except Exception as e:
-                    error_msg = str(e).lower()
+                    error_msg = str(e)
                     logger.error(f"   ❌ Error calling MCP tool {actual_tool_name}: {e}", exc_info=True)
                     
                     # Check if this is an OAuth 2.1 server that requires authentication
+                    from app.core.oauth_utils import is_oauth_server, is_oauth_error
+                    from app.services.oauth_token_manager import OAuthTokenManager
+                    
                     session_metadata = integration.session_metadata or {}
                     server_url = session_metadata.get("server_url", "") or ""
                     oauth_required = session_metadata.get("oauth_required", False)
-                    is_oauth_server = (
-                        oauth_required or
-                        "workspace" in server_url.lower() or
-                        "8003" in server_url or
-                        "google" in server_url.lower()
-                    )
+                    is_oauth = is_oauth_server(server_url, oauth_required)
                     
-                    # Check if OAuth token was passed and if we should try to refresh it
-                    oauth_token_passed = False
-                    should_try_refresh = False
-                    if is_oauth_server and current_user_for_oauth:
-                        oauth_credentials = session_metadata.get("oauth_credentials", {})
-                        user_id_str = str(current_user_for_oauth.id)
-                        if user_id_str in oauth_credentials:
-                            oauth_token_passed = True
-                            # If we got 401 and have a refresh token, try to refresh
-                            if "401" in error_msg or "unauthorized" in error_msg or "invalid_token" in error_msg:
-                                try:
-                                    from app.api.integrations.mcp import _decrypt_credentials, _encrypt_credentials
-                                    from app.core.config import settings
-                                    from sqlalchemy.orm.attributes import flag_modified
-                                    
-                                    encrypted_creds = oauth_credentials[user_id_str]
-                                    credentials = _decrypt_credentials(encrypted_creds, settings.credentials_encryption_key)
-                                    refresh_token = credentials.get("refresh_token")
-                                    
-                                    if refresh_token:
-                                        should_try_refresh = True
-                                        logger.info(f"   🔄 Attempting to refresh OAuth token for user {current_user_for_oauth.id}")
-                                        
-                                        try:
-                                            async with httpx.AsyncClient() as http_client:
-                                                token_uri = credentials.get("token_uri", "https://oauth2.googleapis.com/token")
-                                                client_id = credentials.get("client_id", settings.google_oauth_client_id)
-                                                client_secret = credentials.get("client_secret", settings.google_oauth_client_secret)
-                                                
-                                                refresh_response = await http_client.post(
-                                                    token_uri,
-                                                    data={
-                                                        "client_id": client_id,
-                                                        "client_secret": client_secret,
-                                                        "refresh_token": refresh_token,
-                                                        "grant_type": "refresh_token",
-                                                    },
-                                                )
-                                                
-                                                if refresh_response.status_code == 200:
-                                                    token_data = refresh_response.json()
-                                                    new_access_token = token_data.get("access_token")
-                                                    if new_access_token:
-                                                        # Update credentials with new access token
-                                                        credentials["token"] = new_access_token
-                                                        # Save updated credentials back to database
-                                                        encrypted_updated = _encrypt_credentials(credentials, settings.credentials_encryption_key)
-                                                        session_metadata["oauth_credentials"][user_id_str] = encrypted_updated
-                                                        integration.session_metadata = session_metadata
-                                                        flag_modified(integration, "session_metadata")
-                                                        await db.commit()
-                                                        
-                                                        logger.info(f"   ✅ Token refreshed successfully, retrying tool call...")
-                                                        
-                                                        # Retry the tool call with new token
-                                                        from app.api.integrations.mcp import _get_mcp_client_for_integration
-                                                        refreshed_client = _get_mcp_client_for_integration(integration, current_user=current_user_for_oauth)
-                                                        result = await asyncio.wait_for(
-                                                            refreshed_client.call_tool(actual_tool_name, parameters, stream=False),
-                                                            timeout=60.0
-                                                        )
-                                                        logger.info(f"   ✅ Tool call successful after token refresh")
-                                                        return result
-                                                    else:
-                                                        logger.warning(f"   ⚠️  Token refresh response missing access_token")
-                                                else:
-                                                    logger.warning(f"   ⚠️  Token refresh failed: {refresh_response.status_code} - {refresh_response.text[:200]}")
-                                        except Exception as refresh_error:
-                                            logger.warning(f"   ⚠️  Error refreshing token: {refresh_error}", exc_info=True)
-                                except Exception as decrypt_error:
-                                    logger.warning(f"   ⚠️  Error decrypting credentials for token refresh: {decrypt_error}", exc_info=True)
-                    
-                    # For OAuth 2.1 servers, provide a user-friendly message
-                    if is_oauth_server and ("session terminated" in error_msg or "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg or "invalid_token" in error_msg):
-                        # If we tried to refresh but it failed or wasn't attempted
-                        if oauth_token_passed:
-                            if should_try_refresh:
-                                # Refresh was attempted but failed - token is invalid or refresh token expired
-                                logger.warning(f"   ⚠️  OAuth token refresh failed - user needs to re-authenticate")
-                                return {
-                                    "error": "OAuth token expired and refresh failed. Please go to the Integrations page and click 'Authorize OAuth' again to re-authenticate with your Google account.",
-                                    "oauth_required": True,
-                                    "token_expired": True,
-                                    "refresh_failed": True,
-                                    "integration_id": str(integration.id)
-                                }
-                            else:
-                                # Token was passed but refresh wasn't attempted (no refresh_token)
-                                logger.warning(f"   ⚠️  OAuth token expired but no refresh token available - user needs to re-authenticate")
-                                return {
-                                    "error": "OAuth token expired. Please go to the Integrations page and click 'Authorize OAuth' again to refresh your authentication.",
-                                    "oauth_required": True,
-                                    "token_expired": True,
-                                    "integration_id": str(integration.id)
-                                }
-                        else:
-                            # No OAuth token was passed at all
-                            logger.info(f"   ⚠️  OAuth authentication required for Google Workspace MCP tool")
-                            return {
-                                "error": "OAuth authentication required. Please go to the Integrations page and click 'Authorize OAuth' for the Google Workspace MCP server to authenticate with your Google account.",
-                                "oauth_required": True,
-                                "integration_id": str(integration.id)
-                            }
+                    # If this is an OAuth error and we have a user, try to handle it
+                    if is_oauth and is_oauth_error(error_msg) and current_user_for_oauth:
+                        # Use OAuthTokenManager to handle the error and attempt refresh if appropriate
+                        oauth_response = await OAuthTokenManager.handle_oauth_error(
+                            e,
+                            integration,
+                            current_user_for_oauth,
+                            db,
+                        )
+                        
+                        # If token was refreshed, retry the tool call
+                        if oauth_response.get("token_refreshed"):
+                            logger.info(f"   ✅ Token refreshed successfully, retrying tool call...")
+                            from app.api.integrations.mcp import _get_mcp_client_for_integration
+                            refreshed_client = _get_mcp_client_for_integration(integration, current_user=current_user_for_oauth)
+                            try:
+                                result = await asyncio.wait_for(
+                                    refreshed_client.call_tool(actual_tool_name, parameters, stream=False),
+                                    timeout=60.0
+                                )
+                                logger.info(f"   ✅ Tool call successful after token refresh")
+                                return result
+                            except Exception as retry_error:
+                                logger.error(f"   ❌ Tool call failed after token refresh: {retry_error}", exc_info=True)
+                                # Fall through to return oauth_response
+                        
+                        # Return OAuth error response
+                        return oauth_response
+                    elif is_oauth and is_oauth_error(error_msg):
+                        # OAuth error but no user - return generic OAuth required message
+                        return {
+                            "error": "OAuth authentication required. Please go to the Integrations page and click 'Authorize OAuth' for the Google Workspace MCP server to authenticate with your Google account.",
+                            "oauth_required": True,
+                            "integration_id": str(integration.id)
+                        }
                     else:
-                        return {"error": f"Error calling MCP tool: {str(e)}"}
+                        # Not an OAuth error, return generic error
+                        return {"error": f"Error calling MCP tool: {error_msg}"}
             else:
                 logger.info(f"   ⚠️ Tool '{actual_tool_name}' NOT found in integration {integration.id}")
         

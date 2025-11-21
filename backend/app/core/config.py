@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict, field_validator
-from typing import Optional
+from typing import Optional, List
 import os
 from pathlib import Path
 
@@ -78,6 +78,23 @@ class Settings(BaseSettings):
     mcp_gateway_url: str = "http://localhost:8080"  # Docker MCP Gateway default port
     # Optional Bearer token for MCP Gateway (if it requires auth)
     mcp_gateway_auth_token: Optional[str] = None
+    
+    # Google OAuth Configuration
+    google_oauth_client_id: Optional[str] = None
+    google_oauth_client_secret: Optional[str] = None
+    # OAuth scopes for Google Workspace MCP
+    google_workspace_oauth_scopes: List[str] = [
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/documents.readonly",
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/tasks.readonly",
+    ]
 
     # Security
     secret_key: str = "your-secret-key-change-in-production"
