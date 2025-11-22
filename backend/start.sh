@@ -23,7 +23,8 @@ fi
 
 # Avvia il backend
 echo "🚀 Avviando backend..."
-nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > backend.log 2>&1 &
+mkdir -p logs
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > logs/backend.log 2>&1 &
 
 # Attendi l'avvio
 sleep 3
@@ -31,9 +32,9 @@ sleep 3
 # Verifica che sia partito
 if curl -s http://localhost:8000/health > /dev/null 2>&1; then
     echo "✅ Backend avviato correttamente su http://localhost:8000"
-    echo "📋 Log: tail -f backend.log"
+    echo "📋 Log: tail -f logs/backend.log"
 else
-    echo "❌ Backend non risponde. Controlla i log: tail -f backend.log"
+    echo "❌ Backend non risponde. Controlla i log: tail -f logs/backend.log"
     exit 1
 fi
 

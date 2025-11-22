@@ -80,7 +80,8 @@ else
 fi
 
 # Avvia il backend
-nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > "$PROJECT_ROOT/backend/backend.log" 2>&1 &
+mkdir -p "$PROJECT_ROOT/logs"
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > "$PROJECT_ROOT/logs/backend.log" 2>&1 &
 BACKEND_PID=$!
 echo $BACKEND_PID > /tmp/backend.pid
 cd ..
@@ -93,9 +94,9 @@ for i in {1..60}; do
     if [ $((i % 5)) -eq 0 ]; then
         echo "   Tentativo $i/60..."
         # Mostra ultime righe del log se disponibile
-        if [ -f "$PROJECT_ROOT/backend/backend.log" ]; then
+        if [ -f "$PROJECT_ROOT/logs/backend.log" ]; then
             echo "   Ultime righe del log:"
-            tail -3 "$PROJECT_ROOT/backend/backend.log" | sed 's/^/      /'
+            tail -3 "$PROJECT_ROOT/logs/backend.log" | sed 's/^/      /'
         fi
     fi
     
@@ -104,7 +105,7 @@ for i in {1..60}; do
         PID=$(cat /tmp/backend.pid)
         if ! ps -p "$PID" > /dev/null 2>&1; then
             echo "❌ Backend process (PID: $PID) è terminato!"
-            echo "   Controlla i log: tail -50 backend/backend.log"
+            echo "   Controlla i log: tail -50 logs/backend.log"
             exit 1
         fi
     fi
@@ -144,10 +145,10 @@ if [ "$BACKEND_READY" = false ]; then
     fi
     echo ""
     echo "📋 Ultime 20 righe del log:"
-    tail -20 "$PROJECT_ROOT/backend/backend.log" 2>/dev/null | sed 's/^/   /' || echo "   Nessun log disponibile"
+    tail -20 "$PROJECT_ROOT/logs/backend.log" 2>/dev/null | sed 's/^/   /' || echo "   Nessun log disponibile"
     echo ""
     echo "💡 Prova a controllare manualmente:"
-    echo "   tail -f backend/backend.log"
+    echo "   tail -f logs/backend.log"
     echo "   curl http://localhost:8000/health"
     exit 1
 fi
@@ -208,7 +209,7 @@ if [ -f /tmp/llama_background.pid ]; then
 fi
 echo ""
 echo "📋 Log:"
-echo "  Backend:  tail -f backend/backend.log"
+echo "  Backend:  tail -f logs/backend.log"
 echo "  Frontend: tail -f /tmp/frontend.log"
 echo ""
 echo "🛑 Per fermare: ./stop.sh"

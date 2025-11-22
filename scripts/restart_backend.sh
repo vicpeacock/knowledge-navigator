@@ -61,7 +61,8 @@ except Exception as e:
 # Avvia il backend
 echo ""
 echo "🚀 Avvio backend..."
-nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > "$PROJECT_ROOT/backend/backend.log" 2>&1 &
+mkdir -p "$PROJECT_ROOT/logs"
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > "$PROJECT_ROOT/logs/backend.log" 2>&1 &
 BACKEND_PID=$!
 echo $BACKEND_PID > /tmp/backend.pid
 echo "   PID: $BACKEND_PID"
@@ -81,13 +82,13 @@ done
 
 if [ "$BACKEND_READY" = false ]; then
     echo "❌ Backend non risponde dopo 30 secondi"
-    echo "   Controlla i log: tail -f backend/backend.log"
+    echo "   Controlla i log: tail -f logs/backend.log"
     exit 1
 fi
 
 echo ""
 echo "📋 Informazioni:"
-echo "   Log: tail -f backend/backend.log"
+echo "   Log: tail -f logs/backend.log"
 echo "   API Docs: http://localhost:8000/docs"
 echo "   Health: http://localhost:8000/health"
 
