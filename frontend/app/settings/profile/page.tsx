@@ -58,6 +58,7 @@ function ProfileContent() {
     oauth_authorized: boolean
   }>>([])
   const [oauthIntegrationsError, setOAuthIntegrationsError] = useState<string | null>(null)
+  const [oauthIntegrationsSuccess, setOAuthIntegrationsSuccess] = useState<string | null>(null)
 
   useEffect(() => {
     loadProfile()
@@ -520,15 +521,29 @@ function ProfileContent() {
                       {integration.server_url}
                     </p>
                   </div>
-                  {!integration.oauth_authorized && (
+                  <div className="flex items-center gap-2">
+                    {integration.oauth_authorized && (
+                      <button
+                        onClick={() => handleRevokeOAuth(integration.integration_id)}
+                        className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2 text-xs"
+                        title="Revoke OAuth authorization"
+                      >
+                        Revoke
+                      </button>
+                    )}
                     <button
                       onClick={() => handleAuthorizeOAuth(integration.integration_id)}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm"
+                      className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm ${
+                        integration.oauth_authorized
+                          ? 'bg-yellow-600 text-white hover:bg-yellow-700'
+                          : 'bg-blue-600 text-white hover:bg-blue-700'
+                      }`}
+                      title={integration.oauth_authorized ? 'Re-authenticate to update permissions or switch account' : 'Authorize Google account access'}
                     >
                       <ExternalLink size={16} />
-                      Authorize
+                      {integration.oauth_authorized ? 'Re-authorize' : 'Authorize'}
                     </button>
-                  )}
+                  </div>
                 </div>
               ))}
             </div>
