@@ -29,15 +29,19 @@ class MCPClient:
         raw_url = base_url or settings.mcp_gateway_url
         logger.debug(f"   Raw URL (after fallback): {repr(raw_url)}")
         
-        # Clean up URL: remove trailing slashes and /mcp suffix
+        # Clean up URL: remove trailing slashes
+        # IMPORTANT: streamablehttp_client does NOT automatically append /mcp to the URL
+        # It uses the URL exactly as provided. So we need to ensure /mcp is in the URL.
         if raw_url:
             self.base_url = raw_url.strip()
             # Remove trailing slash
             if self.base_url.endswith("/"):
                 self.base_url = self.base_url[:-1]
-            # Remove /mcp suffix if present (streamable_http will add it)
-            if self.base_url.endswith("/mcp"):
-                self.base_url = self.base_url[:-4]
+            # Ensure /mcp is in the URL (streamablehttp_client does NOT add it automatically)
+            # If URL doesn't end with /mcp, add it
+            if not self.base_url.endswith("/mcp"):
+                self.base_url = f"{self.base_url}/mcp"
+            logger.debug(f"   Final base_url with /mcp: {self.base_url}")
         else:
             self.base_url = raw_url
         
@@ -263,12 +267,24 @@ class MCPClient:
             # streamablehttp_client applies headers to ALL requests (including initialize()),
             # but this is fine because the server accepts Authorization during initialize() even if not required.
             
-            logger.debug(f"Connecting to MCP server with headers: {list(tool_headers.keys())}")
-            logger.debug(f"   Base URL: {self.base_url}")
-            logger.debug(f"   OAuth token present: {bool(self.oauth_token)}")
+            logger.info(f"🔌 Connecting to MCP server for tool call")
+            logger.info(f"   Base URL: {self.base_url}")
+            logger.info(f"   Headers being sent: {list(tool_headers.keys())}")
+            logger.info(f"   OAuth token present: {bool(self.oauth_token)}")
+            if 'Accept' in tool_headers:
+                logger.info(f"   Accept header: {tool_headers['Accept']}")
+            if 'Content-Type' in tool_headers:
+                logger.info(f"   Content-Type header: {tool_headers['Content-Type']}")
+            if 'Authorization' in tool_headers:
+                logger.info(f"   Authorization header: Bearer <token> (length: {len(tool_headers['Authorization'])})")
+            
+            # Use base_url which now includes /mcp (added in __init__)
+            # streamablehttp_client uses the URL exactly as provided, so we must include /mcp
+            target_url = self.base_url
+            logger.debug(f"   streamablehttp_client will use URL: {target_url}")
             
             transport = await exit_stack.enter_async_context(
-                streamablehttp_client(self.base_url, headers=tool_headers)
+                streamablehttp_client(target_url, headers=tool_headers)
             )
             read_stream, write_stream, session_info = transport
             
