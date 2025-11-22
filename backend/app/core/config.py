@@ -34,6 +34,15 @@ class Settings(BaseSettings):
             env_settings,     # Then environment variables
             file_secret_settings,
         )
+    
+    def model_post_init(self, __context):
+        """Load API keys from environment if not set, supporting both naming conventions"""
+        import os
+        # Support both GOOGLE_PSE_* and GOOGLE_CSE_* naming conventions
+        if not self.google_pse_api_key:
+            self.google_pse_api_key = os.getenv("GOOGLE_PSE_API_KEY") or os.getenv("GOOGLE_CSE_API_KEY")
+        if not self.google_pse_cx:
+            self.google_pse_cx = os.getenv("GOOGLE_PSE_CX") or os.getenv("GOOGLE_CSE_CX")
     # Database
     database_url: str = "postgresql+asyncpg://knavigator:knavigator_pass@localhost:5432/knowledge_navigator"
     postgres_host: str = "localhost"
@@ -145,8 +154,17 @@ class Settings(BaseSettings):
     google_maps_api_key: Optional[str] = None
     
     # Google Custom Search Engine (for web search with Gemini)
+    # Support both GOOGLE_PSE_API_KEY and GOOGLE_CSE_API_KEY (CSE = Custom Search Engine, PSE = Programmable Search Engine)
     google_pse_api_key: Optional[str] = None  # Google Programmable Search Engine API key
     google_pse_cx: Optional[str] = None  # Custom Search Engine ID
+    
+    def model_post_init(self, __context):
+        """Load API keys from environment if not set, supporting both naming conventions"""
+        import os
+        if not self.google_pse_api_key:
+            self.google_pse_api_key = os.getenv("GOOGLE_PSE_API_KEY") or os.getenv("GOOGLE_CSE_API_KEY")
+        if not self.google_pse_cx:
+            self.google_pse_cx = os.getenv("GOOGLE_PSE_CX") or os.getenv("GOOGLE_CSE_CX")
     
     # Email sending (SMTP) - for invitation emails, password reset, etc.
     smtp_enabled: bool = False  # Set to True to enable email sending
