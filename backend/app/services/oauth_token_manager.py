@@ -78,9 +78,36 @@ class OAuthTokenManager:
             credentials = _decrypt_credentials(encrypted_creds, settings.credentials_encryption_key)
             access_token = credentials.get("token")
             refresh_token = credentials.get("refresh_token")
+            token_created_at = credentials.get("token_created_at")  # Timestamp when token was created
             
             if access_token:
-                # Token exists - return it (if expired, will be caught on first use)
+                # Check if token might be expired (Google tokens typically expire after 1 hour)
+                from datetime import datetime, timezone, timedelta
+                if token_created_at:
+                    try:
+                        created_time = datetime.fromisoformat(token_created_at.replace('Z', '+00:00'))
+                        # Google access tokens expire after 1 hour
+                        # Check if token is older than 50 minutes (refresh proactively)
+                        if datetime.now(timezone.utc) - created_time > timedelta(minutes=50):
+                            logger.info(f"OAuth token is older than 50 minutes, attempting refresh...")
+                            if refresh_token and auto_refresh:
+                                try:
+                                    return await OAuthTokenManager.refresh_token(integration, user, db)
+                                except (OAuthTokenRefreshError, OAuthAuthenticationRequiredError) as refresh_err:
+                                    logger.warning(f"Token refresh failed: {refresh_err}")
+                                    raise OAuthAuthenticationRequiredError(
+                                        str(integration.id),
+                                        "Your Google OAuth token has expired. Please go to your Profile page and click 'Re-authorize' to refresh your authentication."
+                                    )
+                            else:
+                                raise OAuthAuthenticationRequiredError(
+                                    str(integration.id),
+                                    "Your Google OAuth token has expired. Please go to your Profile page and click 'Re-authorize' to refresh your authentication."
+                                )
+                    except (ValueError, TypeError) as parse_error:
+                        logger.debug(f"Could not parse token_created_at: {parse_error}, using token as-is")
+                
+                # Token exists and seems valid - return it (if expired, will be caught on first use)
                 logger.debug(f"Retrieved OAuth access token for user {user.id}")
                 return access_token
             elif refresh_token and auto_refresh:
@@ -92,7 +119,7 @@ class OAuthTokenManager:
                 logger.warning(f"No access token available for user {user.id}")
                 raise OAuthAuthenticationRequiredError(
                     str(integration.id),
-                    "OAuth token expired. Please re-authenticate."
+                    "OAuth authentication required. Please go to your Profile page and click 'Re-authorize' to authenticate with your Google account."
                 )
         except (OAuthTokenExpiredError, OAuthAuthenticationRequiredError):
             raise
@@ -180,7 +207,9 @@ class OAuthTokenManager:
                             
                             if new_access_token:
                                 # Update credentials with new access token
+                                from datetime import datetime, timezone
                                 credentials["token"] = new_access_token
+                                credentials["token_created_at"] = datetime.now(timezone.utc).isoformat()  # Update creation time
                                 
                                 # Save updated credentials back to database
                                 encrypted_updated = _encrypt_credentials(
