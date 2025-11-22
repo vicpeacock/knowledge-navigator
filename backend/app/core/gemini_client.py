@@ -337,6 +337,16 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
             
             if gemini_tools:
                 logger.info(f"Passing {len(gemini_tools)} tools to Gemini (filtered from {len(tools)} original tools)")
+                # Log tool names for debugging
+                tool_names = [t.get("function_declarations", [{}])[0].get("name", "unknown") for t in gemini_tools]
+                mcp_tools = [n for n in tool_names if n.startswith("mcp_")]
+                logger.info(f"   Tool breakdown: {len(mcp_tools)} MCP tools")
+                if mcp_tools:
+                    logger.info(f"   MCP tools: {', '.join(mcp_tools[:10])}{'...' if len(mcp_tools) > 10 else ''}")
+                    # Log Drive tools specifically
+                    drive_tools = [n for n in tool_names if 'drive' in n.lower()]
+                    if drive_tools:
+                        logger.info(f"   📁 Drive tools passed to Gemini: {', '.join(drive_tools[:10])}{'...' if len(drive_tools) > 10 else ''}")
         
         # Set response format if specified
         generation_config = {}
@@ -449,8 +459,10 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                                             logger.warning(f"Error extracting function call args: {e}")
                                             args_dict = {}
                                     
+                                    tool_name_from_gemini = getattr(func_call, 'name', '')
+                                    logger.info(f"🔧 Gemini called tool: '{tool_name_from_gemini}'")
                                     tool_calls.append({
-                                        "name": getattr(func_call, 'name', ''),
+                                        "name": tool_name_from_gemini,
                                         "parameters": args_dict
                                     })
                                 elif hasattr(part, 'text'):

@@ -398,7 +398,9 @@ export default function ToolsPreferences({ onClose, showHeader = true, showCance
                             >
                               <h4 className="text-sm font-semibold text-gray-900">
                                 {displayName}
-                                <span className="ml-2 text-xs text-gray-500 font-normal">(MCP Server)</span>
+                                {displayName === integrationName ? null : (
+                                  <span className="ml-2 text-xs text-gray-500 font-normal">({integrationName})</span>
+                                )}
                               </h4>
                               <div className="flex items-center space-x-3">
                                 <div 
