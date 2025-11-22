@@ -347,6 +347,12 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                     drive_tools = [n for n in tool_names if 'drive' in n.lower()]
                     if drive_tools:
                         logger.info(f"   📁 Drive tools passed to Gemini: {', '.join(drive_tools[:10])}{'...' if len(drive_tools) > 10 else ''}")
+                # Log customsearch_search specifically
+                if "customsearch_search" in tool_names:
+                    logger.info(f"   ✅ customsearch_search is available to Gemini")
+                else:
+                    logger.warning(f"   ⚠️  customsearch_search NOT in tools passed to Gemini!")
+                    logger.warning(f"   Available tools: {', '.join(tool_names[:20])}{'...' if len(tool_names) > 20 else ''}")
         
         # Set response format if specified
         generation_config = {}
