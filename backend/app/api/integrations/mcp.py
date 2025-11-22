@@ -343,9 +343,11 @@ async def connect_mcp_server(
         integration = IntegrationModel(
             provider="mcp",
             service_type="mcp_server",
+            purpose="mcp_server",  # MCP servers always have purpose="mcp_server"
             credentials_encrypted=request.server_url,  # Store URL (not encrypted, but using same field)
             enabled=True,
             tenant_id=tenant_id,
+            user_id=None,  # MCP server integrations are tenant-level (no user_id)
             session_metadata={
                 "server_url": server_url,  # Use cleaned URL
                 "name": request.name,

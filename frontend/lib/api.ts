@@ -307,8 +307,10 @@ export const webApi = {
 // Integrations API
 export const integrationsApi = {
       calendar: {
-        authorize: (integrationId?: string) => {
-          const params = integrationId ? { integration_id: integrationId } : {}
+        authorize: (integrationId?: string, serviceIntegration?: boolean) => {
+          const params: any = {}
+          if (integrationId) params.integration_id = integrationId
+          if (serviceIntegration) params.service_integration = true
           return api.get('/api/integrations/calendars/oauth/authorize', { params })
         },
         getEvents: (provider: string = 'google', startTime?: string, endTime?: string, integrationId?: string) => {
@@ -327,6 +329,10 @@ export const integrationsApi = {
         listIntegrations: (provider?: string) => {
           const params = provider ? { provider } : {}
           return api.get('/api/integrations/calendars/integrations', { params })
+        },
+        listServiceIntegrations: (provider?: string) => {
+          const params = provider ? { provider } : {}
+          return api.get('/api/integrations/calendars/admin/integrations', { params })
         },
         deleteIntegration: (integrationId: string) =>
           api.delete(`/api/integrations/calendars/integrations/${integrationId}`),
@@ -350,8 +356,10 @@ export const integrationsApi = {
       api.delete(`/api/integrations/mcp/${integrationId}/oauth/revoke`),
   },
   email: {
-        authorize: (integrationId?: string) => {
-          const params = integrationId ? { integration_id: integrationId } : {}
+        authorize: (integrationId?: string, serviceIntegration?: boolean) => {
+          const params: any = {}
+          if (integrationId) params.integration_id = integrationId
+          if (serviceIntegration) params.service_integration = true
           return api.get('/api/integrations/emails/oauth/authorize', { params })
         },
         getMessages: (provider: string = 'gmail', maxResults: number = 10, query?: string, integrationId?: string, includeBody?: boolean) => {

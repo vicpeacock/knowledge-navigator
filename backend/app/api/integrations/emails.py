@@ -13,7 +13,8 @@ from app.services.email_service import EmailService, IntegrationAuthError
 from app.core.ollama_client import OllamaClient
 from app.core.dependencies import get_ollama_client
 from app.core.tenant_context import get_tenant_id
-from app.core.user_context import get_current_user
+from app.core.user_context import get_current_user, require_admin
+from app.core.integration_validation import validate_integration_purpose
 from app.models.database import User  # type: ignore  # for type hints only
 from cryptography.fernet import Fernet
 import base64
@@ -55,6 +56,11 @@ def _decrypt_credentials(encrypted: str, key: str) -> Dict[str, Any]:
         raise ValueError(f"Error decrypting credentials: {str(e)}")
 
 
+class EmailSetupRequest(BaseModel):
+    provider: str  # google, apple, microsoft
+    credentials: Optional[Dict[str, Any]] = None
+
+
 class EmailQueryRequest(BaseModel):
     query: str  # Gmail query string (e.g., "is:unread", "from:example@gmail.com")
     integration_id: Optional[UUID] = None
@@ -63,11 +69,17 @@ class EmailQueryRequest(BaseModel):
 @router.get("/oauth/authorize")
 async def authorize_gmail(
     integration_id: Optional[UUID] = None,
+    service_integration: bool = Query(False, description="Create service integration (admin only, for system communications)"),
     email_service: EmailService = Depends(get_email_service),
     tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
 ):
-    """Start OAuth2 flow for Gmail"""
+    """Start OAuth2 flow for Gmail
+    
+    Args:
+        integration_id: Optional integration ID to update existing integration
+        service_integration: If True, create service integration (admin only, user_id=NULL, purpose=service_email)
+    """
     from app.core.config import settings
     
     if not settings.google_client_id:
@@ -76,11 +88,19 @@ async def authorize_gmail(
             detail="Google OAuth credentials not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env"
         )
     
+    # Only admin can create service integrations
+    if service_integration and current_user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only administrators can create service integrations"
+        )
+    
     try:
-        # Encode state with integration_id and user_id so callback can associate integration to user
+        # Encode state with integration_id, user_id, and service_integration flag
         state_payload = {
             "integration_id": str(integration_id) if integration_id else None,
-            "user_id": str(current_user.id),
+            "user_id": None if service_integration else str(current_user.id),  # NULL for service integrations
+            "service_integration": service_integration,
         }
         import json as json_lib
         import base64
@@ -131,6 +151,7 @@ async def oauth_callback(
         # Decode state (may be raw UUID from older flow or base64-encoded JSON)
         integration_id: Optional[UUID] = None
         user_id: Optional[UUID] = None
+        service_integration: bool = False
         if state:
             import base64
             import json as json_lib
@@ -149,14 +170,19 @@ async def oauth_callback(
                 payload = json_lib.loads(decoded.decode("utf-8"))
                 integration_id_str = payload.get("integration_id")
                 user_id_str = payload.get("user_id")
+                service_integration = payload.get("service_integration", False)
                 
-                logger.info(f"OAuth callback (Email) - Decoded state: integration_id={integration_id_str}, user_id={user_id_str}")
+                logger.info(f"OAuth callback (Email) - Decoded state: integration_id={integration_id_str}, user_id={user_id_str}, service_integration={service_integration}")
                 
                 if integration_id_str:
                     integration_id = UUID(integration_id_str)
                 if user_id_str:
                     user_id = UUID(user_id_str)
                     logger.info(f"OAuth callback (Email) - Setting user_id={user_id} for new integration")
+                elif service_integration:
+                    # Service integrations have user_id = NULL
+                    user_id = None
+                    logger.info(f"OAuth callback (Email) - Service integration, user_id=NULL")
             except Exception as e:
                 logger.warning(f"OAuth callback (Email) - Failed to decode state as JSON: {e}, trying as UUID")
                 # Fallback: treat state as raw UUID (old behavior - deprecated)
@@ -200,11 +226,15 @@ async def oauth_callback(
                 encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
                 integration.credentials_encrypted = encrypted
                 
-                # IMPORTANTE: Aggiorna anche user_id se mancante o se fornito nello state
+                # IMPORTANTE: Aggiorna anche user_id e purpose se mancante o se fornito nello state
                 # Questo risolve il problema delle integrazioni create senza user_id
                 if user_id and (not integration.user_id or integration.user_id != user_id):
                     logger.info(f"OAuth callback (Email) - Updating user_id for integration {integration_id}: {integration.user_id} -> {user_id}")
                     integration.user_id = user_id
+                    # Ensure purpose is set correctly for user integration
+                    if not integration.purpose or not integration.purpose.startswith("user_"):
+                        integration.purpose = "user_email"
+                        logger.info(f"OAuth callback (Email) - Updated purpose to user_email for integration {integration_id}")
                 
                 await db.commit()
                 await db.refresh(integration)
@@ -216,20 +246,27 @@ async def oauth_callback(
                     status_code=400,
                     detail="L'autorizzazione non ha fornito il refresh token. Concedi tutti i permessi richiesti e riprova."
                 )
-            if not user_id:
-                logger.error(f"OAuth callback (Email) - Cannot create new integration: no user_id in state")
+            # For service integrations, user_id is NULL (allowed)
+            # For user integrations, user_id is required
+            if not service_integration and not user_id:
+                logger.error(f"OAuth callback (Email) - Cannot create new user integration: no user_id in state")
                 raise HTTPException(
                     status_code=400,
-                    detail="Invalid state parameter: user_id is required. Please try connecting again."
+                    detail="Invalid state parameter: user_id is required for user integrations. Please try connecting again."
                 )
             encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
+            # Determine purpose based on service_integration flag
+            purpose = "service_email" if service_integration else "user_email"
+            # Validate purpose and user_id consistency
+            validate_integration_purpose(purpose, user_id)
             integration = Integration(
                 provider="google",
                 service_type="email",
+                purpose=purpose,
                 credentials_encrypted=encrypted,
                 enabled=True,
                 tenant_id=tenant_id,
-                user_id=user_id,
+                user_id=user_id,  # NULL for service integrations, user_id for user integrations
             )
             db.add(integration)
             await db.commit()
@@ -452,15 +489,13 @@ async def list_email_integrations(
     tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
 ):
-    """List email integrations for current user (and optional global ones)"""
-    from sqlalchemy import or_
-
+    """List email integrations for current user (only user_email, not service_email)"""
     query = (
         select(Integration)
         .where(Integration.service_type == "email")
+        .where(Integration.purpose == "user_email")  # Only user integrations
         .where(Integration.tenant_id == tenant_id)
-        # Per-user or global (user_id is NULL)
-        .where(or_(Integration.user_id == current_user.id, Integration.user_id.is_(None)))
+        .where(Integration.user_id == current_user.id)  # Only current user's integrations
     )
     
     if provider:
@@ -475,6 +510,42 @@ async def list_email_integrations(
                 "id": str(integration.id),
                 "provider": integration.provider,
                 "enabled": integration.enabled,
+                "purpose": integration.purpose,
+            }
+            for integration in integrations
+        ]
+    }
+
+
+@router.get("/admin/integrations")
+async def list_service_email_integrations(
+    provider: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(require_admin),  # Only admin can list service integrations
+):
+    """List service email integrations (admin only) - for system communications"""
+    query = (
+        select(Integration)
+        .where(Integration.service_type == "email")
+        .where(Integration.purpose == "service_email")  # Only service integrations
+        .where(Integration.tenant_id == tenant_id)
+        .where(Integration.user_id.is_(None))  # Service integrations have no user_id
+    )
+    
+    if provider:
+        query = query.where(Integration.provider == provider)
+    
+    result = await db.execute(query)
+    integrations = result.scalars().all()
+    
+    return {
+        "integrations": [
+            {
+                "id": str(integration.id),
+                "provider": integration.provider,
+                "enabled": integration.enabled,
+                "purpose": integration.purpose,
             }
             for integration in integrations
         ]
@@ -506,3 +577,45 @@ async def delete_email_integration(
     await db.commit()
     
     return {"message": "Integration deleted successfully"}
+
+
+@router.post("/admin/service")
+async def create_service_email_integration(
+    request: EmailSetupRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(require_admin),  # Only admin can create service integrations
+):
+    """
+    Create a service email integration (admin only).
+    Service integrations are used for system messages (e.g., authentication emails).
+    """
+    if request.provider == "google":
+        raise HTTPException(
+            status_code=400,
+            detail="Use OAuth flow for Google email. Service integrations should be created via OAuth with user_id=NULL."
+        )
+    
+    # Validate purpose and user_id consistency
+    validate_integration_purpose("service_email", None, current_user, is_admin_required=True)
+    
+    # Create service integration (user_id = NULL, purpose = service_email)
+    integration = Integration(
+        provider=request.provider,
+        service_type="email",
+        purpose="service_email",  # Service integration
+        enabled=True,
+        session_metadata=request.credentials or {},
+        tenant_id=tenant_id,
+        user_id=None,  # Service integrations have no user_id
+    )
+    db.add(integration)
+    await db.commit()
+    await db.refresh(integration)
+    
+    return {
+        "id": integration.id,
+        "provider": integration.provider,
+        "purpose": integration.purpose,
+        "message": f"Service email integration for {request.provider} created"
+    }

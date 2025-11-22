@@ -184,9 +184,15 @@ export default function IntegrationsPage() {
     }
 
     try {
+      // For admin: use service integrations endpoints (for system communications)
+      // For regular users: use regular endpoints (their personal integrations)
       const [calendarResponse, emailResponse, mcpResponse] = await Promise.all([
-        integrationsApi.calendar.listIntegrations(),
-        integrationsApi.email.listIntegrations(),
+        isAdmin 
+          ? integrationsApi.calendar.listServiceIntegrations().catch(() => ({ data: { integrations: [] } }))
+          : integrationsApi.calendar.listIntegrations(),
+        isAdmin 
+          ? integrationsApi.email.listServiceIntegrations().catch(() => ({ data: { integrations: [] } }))
+          : integrationsApi.email.listIntegrations(),
         integrationsApi.mcp.listIntegrations().catch(() => ({ data: { integrations: [] } })),
       ])
       let calendarList: Integration[] = calendarResponse.data.integrations || []
@@ -225,7 +231,9 @@ export default function IntegrationsPage() {
   const connectGoogleCalendar = async (integrationId?: string) => {
     setConnectingCalendar(true)
     try {
-      const response = await integrationsApi.calendar.authorize(integrationId)
+      // For admin in Integrations page: create service integration
+      const serviceIntegration = isAdmin
+      const response = await integrationsApi.calendar.authorize(integrationId, serviceIntegration)
       if (response.data?.authorization_url) {
         window.location.href = response.data.authorization_url
       } else {
@@ -243,7 +251,9 @@ export default function IntegrationsPage() {
   const connectGmail = async (integrationId?: string) => {
     setConnectingEmail(true)
     try {
-      const response = await integrationsApi.email.authorize(integrationId)
+      // For admin in Integrations page: create service integration
+      const serviceIntegration = isAdmin
+      const response = await integrationsApi.email.authorize(integrationId, serviceIntegration)
       if (response.data?.authorization_url) {
         window.location.href = response.data.authorization_url
       } else {

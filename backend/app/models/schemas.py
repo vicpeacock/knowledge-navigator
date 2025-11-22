@@ -125,6 +125,7 @@ class MemoryLong(MemoryLongBase):
 class IntegrationBase(BaseModel):
     provider: str
     service_type: str = Field(..., pattern="^(calendar|email|whatsapp|mcp_server)$")
+    purpose: Optional[str] = Field(None, pattern="^(user_email|service_email|user_calendar|service_calendar|user_whatsapp|service_whatsapp|mcp_server)$")
     enabled: bool = True
     metadata: Dict[str, Any] = {}
 
@@ -137,10 +138,12 @@ class IntegrationUpdate(BaseModel):
     credentials_encrypted: Optional[str] = None
     enabled: Optional[bool] = None
     metadata: Optional[Dict[str, Any]] = None
+    purpose: Optional[str] = Field(None, pattern="^(user_email|service_email|user_calendar|service_calendar|user_whatsapp|service_whatsapp|mcp_server)$")
 
 
 class Integration(IntegrationBase):
     id: UUID
+    purpose: str  # Required in response
 
     class Config:
         from_attributes = True

@@ -49,11 +49,12 @@ class CalendarWatcher:
         """
         events_created = []
         
-        # Get all active Google Calendar integrations
+        # Get all active Google Calendar integrations for users (not service integrations)
         result = await self.db.execute(
             select(Integration).where(
                 Integration.provider == "google",
                 Integration.service_type == "calendar",
+                Integration.purpose == "user_calendar",  # Only user integrations
                 Integration.enabled == True
             )
         )
@@ -99,9 +100,8 @@ class CalendarWatcher:
                     return events_created
             else:
                 logger.warning(f"⚠️  User {integration.user_id} not found for integration {integration.id}")
-        # For global integrations (user_id = NULL), check all users in tenant
-        # For now, we'll create notifications for global integrations (backward compatibility)
-        # TODO: Consider adding tenant-level preferences or checking all users
+        # Note: Only user integrations (purpose="user_calendar") are processed by CalendarWatcher
+        # Service integrations (purpose="service_calendar") are excluded from background polling
         
         # Setup calendar service per questa integrazione
         try:
