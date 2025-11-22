@@ -60,6 +60,24 @@ function ProfileContent() {
   }>>([])
   const [oauthIntegrationsError, setOAuthIntegrationsError] = useState<string | null>(null)
   const [oauthIntegrationsSuccess, setOAuthIntegrationsSuccess] = useState<string | null>(null)
+  const [emailIntegrationsLoading, setEmailIntegrationsLoading] = useState(true)
+  const [emailIntegrations, setEmailIntegrations] = useState<Array<{
+    id: string
+    provider: string
+    enabled: boolean
+    purpose: string
+  }>>([])
+  const [emailIntegrationsError, setEmailIntegrationsError] = useState<string | null>(null)
+  const [emailIntegrationsSuccess, setEmailIntegrationsSuccess] = useState<string | null>(null)
+  const [calendarIntegrationsLoading, setCalendarIntegrationsLoading] = useState(true)
+  const [calendarIntegrations, setCalendarIntegrations] = useState<Array<{
+    id: string
+    provider: string
+    enabled: boolean
+    purpose: string
+  }>>([])
+  const [calendarIntegrationsError, setCalendarIntegrationsError] = useState<string | null>(null)
+  const [calendarIntegrationsSuccess, setCalendarIntegrationsSuccess] = useState<string | null>(null)
 
   useEffect(() => {
     // Check if we're returning from OAuth callback FIRST
@@ -93,6 +111,20 @@ function ProfileContent() {
       loadProfile()
       loadBackgroundServicesPreferences()
       loadOAuthIntegrations()
+      loadEmailIntegrations()
+      loadCalendarIntegrations()
+    }
+    
+    // Check if we're returning from email/calendar OAuth callback
+    const urlParams = new URLSearchParams(window.location.search)
+    if (urlParams.get('success') === 'true' && urlParams.get('integration_id')) {
+      // OAuth callback completed - reload integrations
+      loadEmailIntegrations()
+      loadCalendarIntegrations()
+      // Clean URL
+      window.history.replaceState({}, document.title, '/settings/profile')
+      setEmailIntegrationsSuccess('Email integration connected successfully!')
+      setCalendarIntegrationsSuccess('Calendar integration connected successfully!')
     }
   }, [])
 
@@ -200,6 +232,132 @@ function ProfileContent() {
       // Clean up sessionStorage on error
       sessionStorage.removeItem('oauth_redirect_back')
       sessionStorage.removeItem('oauth_integration_id')
+    }
+  }
+
+  const handleRevokeOAuth = async (integrationId: string) => {
+    try {
+      await integrationsApi.mcp.revoke(integrationId)
+      setOAuthIntegrationsSuccess('OAuth authorization revoked successfully')
+      // Reload integrations to reflect the change
+      loadOAuthIntegrations()
+    } catch (error: any) {
+      console.error('OAuth revocation failed:', error.response?.data?.detail || error.message)
+      setOAuthIntegrationsError(`OAuth revocation failed: ${error.response?.data?.detail || error.message}`)
+    }
+  }
+
+  const loadEmailIntegrations = async () => {
+    try {
+      setEmailIntegrationsLoading(true)
+      setEmailIntegrationsError(null)
+      const response = await integrationsApi.email.listIntegrations('google')
+      setEmailIntegrations(response.data.integrations || [])
+    } catch (err: any) {
+      const errorDetail = err.response?.data?.detail
+      if (err.response?.status === 401 || (typeof errorDetail === 'string' && errorDetail.includes('Authorization header missing'))) {
+        setEmailIntegrationsError('Authentication required. Please refresh the page or log in again.')
+        return
+      }
+      if (Array.isArray(errorDetail)) {
+        setEmailIntegrationsError(errorDetail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', '))
+      } else if (typeof errorDetail === 'string') {
+        setEmailIntegrationsError(errorDetail)
+      } else {
+        setEmailIntegrationsError(err.response?.data?.message || err.message || 'Failed to load email integrations')
+      }
+    } finally {
+      setEmailIntegrationsLoading(false)
+    }
+  }
+
+  const loadCalendarIntegrations = async () => {
+    try {
+      setCalendarIntegrationsLoading(true)
+      setCalendarIntegrationsError(null)
+      const response = await integrationsApi.calendar.listIntegrations('google')
+      setCalendarIntegrations(response.data.integrations || [])
+    } catch (err: any) {
+      const errorDetail = err.response?.data?.detail
+      if (err.response?.status === 401 || (typeof errorDetail === 'string' && errorDetail.includes('Authorization header missing'))) {
+        setCalendarIntegrationsError('Authentication required. Please refresh the page or log in again.')
+        return
+      }
+      if (Array.isArray(errorDetail)) {
+        setCalendarIntegrationsError(errorDetail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', '))
+      } else if (typeof errorDetail === 'string') {
+        setCalendarIntegrationsError(errorDetail)
+      } else {
+        setCalendarIntegrationsError(err.response?.data?.message || err.message || 'Failed to load calendar integrations')
+      }
+    } finally {
+      setCalendarIntegrationsLoading(false)
+    }
+  }
+
+  const handleAuthorizeEmail = async (integrationId?: string) => {
+    try {
+      // Store current URL in sessionStorage before redirect (in case token is lost)
+      sessionStorage.setItem('oauth_redirect_back', '/settings/profile')
+      
+      const response = await integrationsApi.email.authorize(integrationId, false) // false = user integration, not service
+      // Redirect to OAuth authorization URL
+      if (response.data.authorization_url) {
+        window.location.href = response.data.authorization_url
+      } else {
+        setEmailIntegrationsError('No authorization URL received')
+      }
+    } catch (error: any) {
+      console.error('Email OAuth authorization failed:', error.response?.data?.detail || error.message)
+      setEmailIntegrationsError(`OAuth authorization failed: ${error.response?.data?.detail || error.message}`)
+      sessionStorage.removeItem('oauth_redirect_back')
+    }
+  }
+
+  const handleAuthorizeCalendar = async (integrationId?: string) => {
+    try {
+      // Store current URL in sessionStorage before redirect (in case token is lost)
+      sessionStorage.setItem('oauth_redirect_back', '/settings/profile')
+      
+      const response = await integrationsApi.calendar.authorize(integrationId, false) // false = user integration, not service
+      // Redirect to OAuth authorization URL
+      if (response.data.authorization_url) {
+        window.location.href = response.data.authorization_url
+      } else {
+        setCalendarIntegrationsError('No authorization URL received')
+      }
+    } catch (error: any) {
+      console.error('Calendar OAuth authorization failed:', error.response?.data?.detail || error.message)
+      setCalendarIntegrationsError(`OAuth authorization failed: ${error.response?.data?.detail || error.message}`)
+      sessionStorage.removeItem('oauth_redirect_back')
+    }
+  }
+
+  const handleDeleteEmailIntegration = async (integrationId: string) => {
+    if (!confirm('Are you sure you want to delete this email integration?')) {
+      return
+    }
+    try {
+      await integrationsApi.email.deleteIntegration(integrationId)
+      setEmailIntegrationsSuccess('Email integration deleted successfully')
+      loadEmailIntegrations()
+    } catch (error: any) {
+      console.error('Delete email integration failed:', error.response?.data?.detail || error.message)
+      setEmailIntegrationsError(`Failed to delete email integration: ${error.response?.data?.detail || error.message}`)
+    }
+  }
+
+  const handleDeleteCalendarIntegration = async (integrationId: string) => {
+    if (!confirm('Are you sure you want to delete this calendar integration?')) {
+      return
+    }
+    try {
+      await integrationsApi.calendar.deleteIntegration(integrationId)
+      setCalendarIntegrationsSuccess('Calendar integration deleted successfully')
+      loadCalendarIntegrations()
+    } catch (error: any) {
+      console.error('Delete calendar integration failed:', error.response?.data?.detail || error.message)
+      setCalendarIntegrationsError(`Failed to delete calendar integration: ${error.response?.data?.detail || error.message}`)
     }
   }
 
@@ -497,6 +655,179 @@ function ProfileContent() {
               </button>
             </form>
           )}
+        </div>
+
+        {/* Email & Calendar Integrations */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+          <h2 className="text-2xl font-semibold mb-4">Email & Calendar Integrations</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Connect your personal Gmail and Google Calendar accounts to receive notifications and access your data.
+            Each user can connect multiple accounts independently.
+          </p>
+
+          {/* Email Integrations */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">Gmail Accounts</h3>
+              <button
+                onClick={() => handleAuthorizeEmail()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm"
+              >
+                <ExternalLink size={16} />
+                Connect Gmail
+              </button>
+            </div>
+
+            {emailIntegrationsError && (
+              <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-red-800 dark:text-red-200">{emailIntegrationsError}</p>
+              </div>
+            )}
+
+            {emailIntegrationsSuccess && (
+              <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                <p className="text-green-800 dark:text-green-200">{emailIntegrationsSuccess}</p>
+              </div>
+            )}
+
+            {emailIntegrationsLoading ? (
+              <div className="text-sm text-gray-500">Loading email integrations...</div>
+            ) : emailIntegrations.length === 0 ? (
+              <div className="text-sm text-gray-500 p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                No Gmail accounts connected. Click "Connect Gmail" to add your first account.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {emailIntegrations.map((integration) => (
+                  <div
+                    key={integration.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                          Gmail ({integration.provider})
+                        </h4>
+                        {integration.enabled ? (
+                          <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                            <CheckCircle size={14} />
+                            Enabled
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                            <XCircle size={14} />
+                            Disabled
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        ID: {integration.id.substring(0, 8)}...
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleAuthorizeEmail(integration.id)}
+                        className="px-3 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 flex items-center gap-2 text-xs"
+                        title="Re-authenticate this Gmail account"
+                      >
+                        <ExternalLink size={14} />
+                        Re-authorize
+                      </button>
+                      <button
+                        onClick={() => handleDeleteEmailIntegration(integration.id)}
+                        className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2 text-xs"
+                        title="Delete this Gmail integration"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Calendar Integrations */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">Google Calendar Accounts</h3>
+              <button
+                onClick={() => handleAuthorizeCalendar()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm"
+              >
+                <ExternalLink size={16} />
+                Connect Calendar
+              </button>
+            </div>
+
+            {calendarIntegrationsError && (
+              <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-red-800 dark:text-red-200">{calendarIntegrationsError}</p>
+              </div>
+            )}
+
+            {calendarIntegrationsSuccess && (
+              <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                <p className="text-green-800 dark:text-green-200">{calendarIntegrationsSuccess}</p>
+              </div>
+            )}
+
+            {calendarIntegrationsLoading ? (
+              <div className="text-sm text-gray-500">Loading calendar integrations...</div>
+            ) : calendarIntegrations.length === 0 ? (
+              <div className="text-sm text-gray-500 p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                No Google Calendar accounts connected. Click "Connect Calendar" to add your first account.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {calendarIntegrations.map((integration) => (
+                  <div
+                    key={integration.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                          Google Calendar ({integration.provider})
+                        </h4>
+                        {integration.enabled ? (
+                          <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                            <CheckCircle size={14} />
+                            Enabled
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                            <XCircle size={14} />
+                            Disabled
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        ID: {integration.id.substring(0, 8)}...
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleAuthorizeCalendar(integration.id)}
+                        className="px-3 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 flex items-center gap-2 text-xs"
+                        title="Re-authenticate this Google Calendar account"
+                      >
+                        <ExternalLink size={14} />
+                        Re-authorize
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCalendarIntegration(integration.id)}
+                        className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2 text-xs"
+                        title="Delete this Google Calendar integration"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* OAuth Authorizations */}

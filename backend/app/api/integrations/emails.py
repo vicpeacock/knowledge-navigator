@@ -286,10 +286,17 @@ async def oauth_callback(
             )
         
         # Redirect to frontend with success
-        frontend_url = "http://localhost:3003"
-        return RedirectResponse(
-            url=f"{frontend_url}/integrations?success=true&integration_id={integration_id}"
-        )
+        # Determine redirect URL based on purpose
+        frontend_url = "http://localhost:3003"  # Can be made configurable
+        # Get the integration to check its purpose
+        integration = await db.get(Integration, integration_id)
+        if integration and integration.purpose in ("user_email", "user_calendar"):
+            # User integrations redirect to profile page
+            redirect_url = f"{frontend_url}/settings/profile?success=true&integration_id={integration_id}"
+        else:
+            # Service integrations redirect to integrations page (admin)
+            redirect_url = f"{frontend_url}/integrations?success=true&integration_id={integration_id}"
+        return RedirectResponse(url=redirect_url)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in OAuth callback: {str(e)}")
 
