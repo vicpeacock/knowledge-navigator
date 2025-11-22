@@ -1810,6 +1810,53 @@ async def response_formatter_node(state: LangGraphChatState) -> LangGraphChatSta
             ]
             
             response_text = state.get("response", "")
+            
+            # If response_text is empty but we have tool_results, generate a response from tool results
+            if not response_text and tool_results:
+                logger.warning("⚠️  Response text is empty but tool_results exist - generating response from tool results")
+                try:
+                    from app.agents.langgraph_app import _format_tool_results_for_llm
+                    tool_results_text = _format_tool_results_for_llm(tool_results)
+                    request = state.get("request")
+                    request_message = request.message if request else "Richiesta utente"
+                    
+                    final_prompt = f"""{request_message}
+
+{tool_results_text}
+
+Rispondi all'utente basandoti sui risultati dei tool sopra. Se ci sono errori, spiega all'utente cosa è successo e come può risolvere il problema."""
+                    
+                    ollama = state.get("ollama")
+                    if ollama:
+                        session_context = state.get("session_context", [])
+                        retrieved_memory = state.get("retrieved_memory", [])
+                        final_response = await ollama.generate_with_context(
+                            prompt=final_prompt,
+                            session_context=session_context,
+                            retrieved_memory=retrieved_memory if retrieved_memory else None,
+                            tools=None,
+                            tools_description=None,
+                            return_raw=False,
+                        )
+                        if isinstance(final_response, str):
+                            response_text = final_response
+                        elif isinstance(final_response, dict):
+                            response_text = final_response.get("content", "")
+                        else:
+                            response_text = str(final_response) or ""
+                    else:
+                        # Fallback if ollama is not available
+                        error_summary = []
+                        for tr in tool_results:
+                            tool_name = tr.get('tool', 'unknown')
+                            tool_result = tr.get('result', {})
+                            if isinstance(tool_result, dict) and "error" in tool_result:
+                                error_summary.append(f"Tool {tool_name}: {tool_result['error']}")
+                        response_text = f"Ho eseguito {len(tool_results)} tool(s). " + "; ".join(error_summary)
+                except Exception as e:
+                    logger.error(f"Error generating response from tool results: {e}", exc_info=True)
+                    # Final fallback
+                    response_text = f"Ho eseguito {len(tool_results)} tool(s). Alcuni tool hanno restituito errori."
             logger.debug(f"🔍 Response Formatter: response text length: {len(response_text) if response_text else 0}")
             logger.debug(f"🔍 Response Formatter: response preview: {response_text[:100] if response_text else 'EMPTY'}")
             logger.debug(f"🔍 Response Formatter: tools_used: {len(tools_used)}, tool_results: {len(tool_results)}")
