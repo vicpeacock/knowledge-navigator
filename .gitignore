@@ -68,3 +68,7 @@ others/logs/
 
 mcp-gateway.pid
 others/mcp-gateway.pid
+
+# Test scripts - non committare su GitHub
+backend/tests/scripts/
+backend/scripts/
