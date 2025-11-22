@@ -172,7 +172,7 @@ async def main():
     logger.info(f"🔍 Verifica backend su {BASE_URL}...")
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{BASE_URL}/api/health")
+            response = await client.get(f"{BASE_URL}/health")
             if response.status_code != 200:
                 logger.error(f"❌ Backend non risponde correttamente: {response.status_code}")
                 logger.error("   Avvia il backend: cd backend && uvicorn app.main:app --reload")
@@ -191,17 +191,23 @@ async def main():
         return 1
     
     try:
-        # Get admin token
-        admin_token = await get_auth_token("admin@example.com", "admin123")
-        logger.info("✅ Login admin riuscito")
+        # Get admin token with correct password
+        try:
+            admin_token = await get_auth_token("admin@example.com", "AdminPassword123!")
+            logger.info("✅ Login admin riuscito")
+        except Exception as e:
+            logger.error(f"❌ Impossibile fare login come admin: {e}")
+            logger.error("   Password corretta: AdminPassword123!")
+            logger.error("   Esegui: python3 tests/scripts/reset_admin_password.py")
+            return 1
         
-        # Get user token (if exists)
+        # Get user token (if exists) - use admin token for user tests if user doesn't exist
+        user_token = admin_token
         try:
             user_token = await get_auth_token("user@example.com", "user123")
             logger.info("✅ Login utente riuscito")
         except:
-            logger.warning("⚠️  Utente user@example.com non trovato, uso admin per test utente")
-            user_token = admin_token
+            logger.warning("⚠️  Utente user@example.com non trovato o password errata, uso admin per test utente")
         
         # Run tests
         tests = [
