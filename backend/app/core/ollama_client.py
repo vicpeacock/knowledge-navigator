@@ -224,6 +224,12 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
             logger.info(f"   Tool breakdown: {len(mcp_tools)} MCP tools, {len(web_tools)} web tools")
             if mcp_tools:
                 logger.info(f"   MCP tools: {', '.join(mcp_tools[:5])}{'...' if len(mcp_tools) > 5 else ''}")
+                # Log Drive tools specifically
+                drive_tools = [n for n in tool_names if 'drive' in n.lower()]
+                if drive_tools:
+                    logger.info(f"   📁 Drive tools passed to LLM: {', '.join(drive_tools[:10])}{'...' if len(drive_tools) > 10 else ''}")
+                else:
+                    logger.warning(f"   ⚠️  No Drive tools found in tools passed to LLM!")
             if web_tools:
                 logger.error(f"   🚨🚨🚨 CRITICAL: Web tools still found after filtering: {', '.join(web_tools)}")
             else:
