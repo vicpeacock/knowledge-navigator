@@ -186,18 +186,18 @@ class ToolManager:
             },
             {
                 "name": "customsearch_search",
-                "description": "Esegue una ricerca sul web usando Google Custom Search API. Usa questo tool SOLO per informazioni generali che NON sono email o calendario dell'utente. Esempi: 'cerca informazioni su X', 'notizie su Y', 'cosa è Z'. NON usare per domande su email ('ci sono email non lette?' → usa get_emails) o calendario ('cosa ho domani?' → usa get_calendar_events). Richiede GOOGLE_PSE_API_KEY e GOOGLE_PSE_CX configurati.",
+                "description": "Esegue una ricerca sul web per trovare informazioni generali. Usa questo tool quando l'utente chiede di cercare, trovare, o ottenere informazioni su qualsiasi argomento che NON riguarda email o calendario. Esempi: 'cerca informazioni su X', 'notizie su Y', 'cosa è Z', 'meteo a Bussigny', 'informazioni sulla band Swisspulse'. IMPORTANTE: Usa sempre questo tool per ricerche web - non dire che la chiave API non è configurata senza prima provare a chiamare il tool. NON usare per domande su email ('ci sono email non lette?' → usa get_emails) o calendario ('cosa ho domani?' → usa get_calendar_events).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "La query di ricerca da eseguire sul web"
+                            "description": "La query di ricerca da eseguire sul web (es: 'Swisspulse band', 'meteo Bussigny', 'notizie Python')"
                         },
                         "num": {
                             "type": "integer",
                             "default": 10,
-                            "description": "Numero di risultati da restituire (max 10)"
+                            "description": "Numero di risultati da restituire (max 10, default: 10)"
                         }
                     },
                     "required": ["query"]
@@ -2671,13 +2671,8 @@ def _get_known_google_workspace_tools() -> List[Dict[str, Any]]:
         }, ["task_id"]),
     ])
     
-    # Google Custom Search Tools (for Gemini - alternative to web_search)
-    tools.extend([
-        make_tool("customsearch_search", "Esegue una ricerca sul web usando Google Custom Search API. Usa questo tool SOLO per informazioni generali che NON sono email o calendario dell'utente. Esempi: 'cerca informazioni su X', 'notizie su Y', 'cosa è Z'. NON usare per domande su email ('ci sono email non lette?' → usa get_emails) o calendario ('cosa ho domani?' → usa get_calendar_events). Richiede GOOGLE_PSE_API_KEY e GOOGLE_PSE_CX configurati.", {
-            "query": {"type": "string", "description": "La query di ricerca da eseguire sul web"},
-            "num": {"type": "integer", "default": 10, "description": "Numero di risultati da restituire (max 10)"}
-        }, ["query"]),
-    ])
+    # Note: customsearch_search is now in get_base_tools() as a built-in tool
+    # It's no longer here to avoid duplication
     
     return tools
 
