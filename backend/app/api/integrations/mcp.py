@@ -658,7 +658,7 @@ async def mcp_oauth_callback(
         
         from datetime import datetime, timezone
         import base64
-        import json
+        import json as json_lib
         
         credentials = {
             "token": flow.credentials.token,
@@ -687,7 +687,7 @@ async def mcp_oauth_callback(
                         if padding != 4:
                             payload_b64 += '=' * padding
                         payload_bytes = base64.urlsafe_b64decode(payload_b64)
-                        payload = json.loads(payload_bytes.decode('utf-8'))
+                        payload = json_lib.loads(payload_bytes.decode('utf-8'))
                         google_email = payload.get("email")
                         if google_email:
                             logger.info(f"📧 Retrieved Google email from ID token: {google_email}")
