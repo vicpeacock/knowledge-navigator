@@ -80,8 +80,10 @@ function ProfileContent() {
   const [calendarIntegrationsSuccess, setCalendarIntegrationsSuccess] = useState<string | null>(null)
 
   useEffect(() => {
-    // Check if we're returning from OAuth callback FIRST
+    // Check URL parameters once
     const urlParams = new URLSearchParams(window.location.search)
+    
+    // Check if we're returning from MCP OAuth callback
     if (urlParams.get('oauth_success') === 'true') {
       // OAuth authorization completed - verify we still have auth token
       const token = localStorage.getItem('access_token')
@@ -106,25 +108,27 @@ function ProfileContent() {
       // Then reload integrations
       loadOAuthIntegrations()
       setOAuthIntegrationsSuccess('OAuth authorization completed successfully!')
-    } else {
-      // Normal page load
+    } 
+    // Check if we're returning from email/calendar OAuth callback
+    else if (urlParams.get('success') === 'true' && urlParams.get('integration_id')) {
+      // OAuth callback completed - reload integrations
       loadProfile()
       loadBackgroundServicesPreferences()
       loadOAuthIntegrations()
-      loadEmailIntegrations()
-      loadCalendarIntegrations()
-    }
-    
-    // Check if we're returning from email/calendar OAuth callback
-    const urlParams = new URLSearchParams(window.location.search)
-    if (urlParams.get('success') === 'true' && urlParams.get('integration_id')) {
-      // OAuth callback completed - reload integrations
       loadEmailIntegrations()
       loadCalendarIntegrations()
       // Clean URL
       window.history.replaceState({}, document.title, '/settings/profile')
       setEmailIntegrationsSuccess('Email integration connected successfully!')
       setCalendarIntegrationsSuccess('Calendar integration connected successfully!')
+    } 
+    // Normal page load
+    else {
+      loadProfile()
+      loadBackgroundServicesPreferences()
+      loadOAuthIntegrations()
+      loadEmailIntegrations()
+      loadCalendarIntegrations()
     }
   }, [])
 

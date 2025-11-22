@@ -74,11 +74,17 @@ class CalendarQueryRequest(BaseModel):
 @router.get("/oauth/authorize")
 async def authorize_google_calendar(
     integration_id: Optional[UUID] = None,
+    service_integration: bool = Query(False, description="Create service integration (admin only, for system communications)"),
     calendar_service: CalendarService = Depends(get_calendar_service),
     tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
 ):
-    """Start OAuth2 flow for Google Calendar"""
+    """Start OAuth2 flow for Google Calendar
+    
+    Args:
+        integration_id: Optional integration ID to update existing integration
+        service_integration: If True, create service integration (admin only, user_id=NULL, purpose=service_calendar)
+    """
     from app.core.config import settings
     
     if not settings.google_client_id:
@@ -87,11 +93,19 @@ async def authorize_google_calendar(
             detail="Google OAuth credentials not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env"
         )
     
+    # Only admin can create service integrations
+    if service_integration and current_user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only administrators can create service integrations"
+        )
+    
     try:
-        # Encode state with integration_id and user_id so callback can associate integration to user
+        # Encode state with integration_id, user_id, and service_integration flag
         state_payload = {
             "integration_id": str(integration_id) if integration_id else None,
-            "user_id": str(current_user.id),
+            "user_id": None if service_integration else str(current_user.id),  # NULL for service integrations
+            "service_integration": service_integration,
         }
         import json as json_lib
         import base64
