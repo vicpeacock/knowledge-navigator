@@ -278,6 +278,73 @@ async def oauth_callback(
             await db.refresh(integration)
             integration_id = integration.id
         
+        # Get Google user email from ID token (if available) or access token
+        google_email = None
+        try:
+            # First, try to get email from ID token (more reliable)
+            id_token = getattr(flow.credentials, 'id_token', None)
+            if id_token:
+                try:
+                    # Decode JWT ID token (format: header.payload.signature)
+                    import base64 as b64
+                    parts = id_token.split('.')
+                    if len(parts) >= 2:
+                        # Decode payload (base64url)
+                        payload_b64 = parts[1]
+                        # Add padding if needed
+                        padding = 4 - len(payload_b64) % 4
+                        if padding != 4:
+                            payload_b64 += '=' * padding
+                        payload_bytes = b64.urlsafe_b64decode(payload_b64)
+                        payload = json_lib.loads(payload_bytes.decode('utf-8'))
+                        google_email = payload.get("email")
+                        if google_email:
+                            logger.info(f"📧 Retrieved Google email from ID token: {google_email}")
+                except Exception as id_token_error:
+                    logger.warning(f"⚠️  Could not decode ID token: {id_token_error}")
+            
+            # Fallback: try to get email from access token via API
+            if not google_email:
+                import httpx
+                access_token = credentials.get("token")
+                if access_token:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(
+                            "https://www.googleapis.com/oauth2/v2/userinfo",
+                            headers={"Authorization": f"Bearer {access_token}"},
+                            timeout=5.0
+                        )
+                        if response.status_code == 200:
+                            user_info = response.json()
+                            google_email = user_info.get("email")
+                            if google_email:
+                                logger.info(f"📧 Retrieved Google email from API: {google_email}")
+        except Exception as email_error:
+            logger.warning(f"⚠️  Could not retrieve Google email during OAuth callback: {email_error}")
+        
+        # Save Google email in session_metadata if available
+        # Get the integration (it should exist by now)
+        integration = await db.get(Integration, integration_id)
+        if integration and google_email:
+            session_metadata = integration.session_metadata or {}
+            if "oauth_user_emails" not in session_metadata:
+                session_metadata["oauth_user_emails"] = {}
+            # Use user_id if available, otherwise use integration.user_id
+            target_user_id = user_id or integration.user_id
+            if target_user_id:
+                session_metadata["oauth_user_emails"][str(target_user_id)] = google_email
+                integration.session_metadata = session_metadata
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(integration, "session_metadata")
+                await db.commit()
+                logger.info(f"💾 Saved Google email to integration metadata for user {target_user_id}: {google_email}")
+            else:
+                logger.warning(f"⚠️  Cannot save Google email: no user_id available (user_id={user_id}, integration.user_id={integration.user_id})")
+        elif not google_email:
+            logger.warning(f"⚠️  No Google email retrieved during OAuth callback")
+        elif not integration:
+            logger.error(f"❌ Integration {integration_id} not found after creation")
+        
         # Setup calendar service
         try:
             await calendar_service.setup_google(credentials, str(integration_id))
@@ -518,6 +585,8 @@ async def list_calendar_integrations(
     current_user: User = Depends(get_current_user),
 ):
     """List calendar integrations for current user (only user_calendar, not service_calendar)"""
+    import logging
+    logger = logging.getLogger(__name__)
     query = (
         select(Integration)
         .where(Integration.service_type == "calendar")
@@ -532,16 +601,32 @@ async def list_calendar_integrations(
     result = await db.execute(query)
     integrations = result.scalars().all()
     
+    # Get Google email from session_metadata for each integration
+    result_integrations = []
+    for integration in integrations:
+        integration_data = {
+            "id": str(integration.id),
+            "provider": integration.provider,
+            "enabled": integration.enabled,
+            "purpose": integration.purpose,
+        }
+        
+        # Try to get Google email from session_metadata
+        session_metadata = integration.session_metadata or {}
+        oauth_user_emails = session_metadata.get("oauth_user_emails", {})
+        if integration.user_id:
+            google_email = oauth_user_emails.get(str(integration.user_id))
+            if google_email:
+                integration_data["google_email"] = google_email
+                logger.debug(f"📧 Found Google email for integration {integration.id}: {google_email}")
+            else:
+                logger.debug(f"⚠️  No Google email found in metadata for integration {integration.id}, user {integration.user_id}")
+                logger.debug(f"   Available user emails: {list(oauth_user_emails.keys())}")
+        
+        result_integrations.append(integration_data)
+    
     return {
-        "integrations": [
-            {
-                "id": str(integration.id),
-                "provider": integration.provider,
-                "enabled": integration.enabled,
-                "purpose": integration.purpose,
-            }
-            for integration in integrations
-        ]
+        "integrations": result_integrations
     }
 
 

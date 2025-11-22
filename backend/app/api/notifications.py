@@ -30,8 +30,9 @@ async def get_notifications(
     offset: Optional[int] = Query(None, ge=0, description="Offset for pagination"),
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get pending notifications (for current tenant)"""
+    """Get pending notifications (for current tenant and current user)"""
     notification_service = NotificationService(db)
     notifications = await notification_service.get_pending_notifications(
         session_id=session_id,
@@ -41,7 +42,50 @@ async def get_notifications(
         limit=limit,
         offset=offset,
     )
-    return notifications
+    
+    # Filter notifications for current user (same logic as in stream and sessions.py)
+    from app.models.database import Integration
+    from sqlalchemy import select
+    
+    # Pre-load integrations for current user
+    user_integrations_result = await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == tenant_id,
+            Integration.user_id == current_user.id,
+            Integration.enabled == True,
+        )
+    )
+    user_integrations = {str(i.id): i for i in user_integrations_result.scalars().all()}
+    
+    integrations_without_user_id_result = await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == tenant_id,
+            Integration.user_id.is_(None),
+            Integration.enabled == True,
+        )
+    )
+    integrations_without_user_id = {str(i.id): i for i in integrations_without_user_id_result.scalars().all()}
+    
+    # Filter notifications for current user
+    filtered_notifications = []
+    for n in notifications:
+        notif_type = n.get("type")
+        content = n.get("content", {})
+        
+        if notif_type in ["email_received", "calendar_event_starting"]:
+            notification_user_id = content.get("user_id")
+            integration_id = content.get("integration_id")
+            
+            if notification_user_id:
+                if str(notification_user_id) != str(current_user.id):
+                    continue
+            elif integration_id:
+                integration_id_str = str(integration_id)
+                if integration_id_str not in user_integrations and integration_id_str not in integrations_without_user_id:
+                    continue
+        filtered_notifications.append(n)
+    
+    return filtered_notifications
 
 
 @router.get("/stream")
