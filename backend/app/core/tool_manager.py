@@ -737,6 +737,13 @@ class ToolManager:
                     duration = time.time() - start_time
                     observe_histogram("tool_execution_duration_seconds", duration, labels={"tool": tool_name, "type": "web"})
                     return result
+                elif tool_name == "customsearch_search":
+                    result = await self._execute_customsearch_search(parameters, db, session_id, auto_index)
+                    logger.info(f"Tool {tool_name} completed")
+                    add_trace_event("tool.execution.completed", {"tool": tool_name, "type": "web"})
+                    duration = time.time() - start_time
+                    observe_histogram("tool_execution_duration_seconds", duration, labels={"tool": tool_name, "type": "web"})
+                    return result
                 # WhatsApp tools temporarily disabled - will be re-enabled with Business API
                 # elif tool_name == "get_whatsapp_messages":
                 #     result = await self._execute_get_whatsapp_messages(parameters)
@@ -1985,6 +1992,115 @@ Riassunto:"""
             }
         except Exception as e:
             logger.error(f"Error calling Ollama web_search: {e}", exc_info=True)
+            return {"error": str(e)}
+    
+    async def _execute_customsearch_search(
+        self,
+        parameters: Dict[str, Any],
+        db: Optional[AsyncSession] = None,
+        session_id: Optional[UUID] = None,
+        auto_index: bool = True,
+    ) -> Dict[str, Any]:
+        """Execute customsearch_search tool using Google Custom Search API"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        query = parameters.get("query")
+        num_results = parameters.get("num", 10)
+        
+        if not query:
+            return {"error": "Query parameter is required for customsearch_search"}
+        
+        # Check if API key and CX are configured
+        if not settings.google_pse_api_key:
+            logger.error("GOOGLE_PSE_API_KEY not configured. Google Custom Search requires an API key.")
+            return {
+                "error": "GOOGLE_PSE_API_KEY not configured. Please set it in your .env file or environment variables. Get an API key from https://developers.google.com/custom-search/v1/overview"
+            }
+        
+        if not settings.google_pse_cx:
+            logger.error("GOOGLE_PSE_CX not configured. Google Custom Search requires a Custom Search Engine ID.")
+            return {
+                "error": "GOOGLE_PSE_CX not configured. Please set it in your .env file or environment variables. Create a Custom Search Engine at https://programmablesearchengine.google.com/"
+            }
+        
+        try:
+            import httpx
+            
+            # Call Google Custom Search API
+            url = "https://www.googleapis.com/customsearch/v1"
+            params = {
+                "key": settings.google_pse_api_key,
+                "cx": settings.google_pse_cx,
+                "q": query,
+                "num": min(num_results, 10)  # Google API limits to 10 results per request
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+            
+            # Format results for LLM
+            results_list = []
+            if "items" in data:
+                for item in data.get("items", []):
+                    results_list.append({
+                        "title": item.get("title", "N/A"),
+                        "url": item.get("link", "N/A"),
+                        "content": item.get("snippet", "N/A"),
+                    })
+            
+            results_text = "\n\n=== Risultati Ricerca Web (Google Custom Search) ===\n"
+            for i, r in enumerate(results_list, 1):
+                results_text += f"\n{i}. {r['title']}\n"
+                results_text += f"   URL: {r['url']}\n"
+                results_text += f"   {r['content']}\n"
+            
+            result_dict = {
+                "summary": results_text,
+                "results": results_list,
+                "query": query,
+                "total_results": data.get("searchInformation", {}).get("totalResults", "0"),
+            }
+            
+            # Auto-index search results if enabled
+            if auto_index and session_id and db and results_list:
+                try:
+                    from app.services.web_indexer import WebIndexer
+                    from app.core.dependencies import get_memory_manager, init_clients
+                    from app.models.database import Session as SessionModel
+                    from sqlalchemy import select
+                    
+                    # Get tenant_id from session
+                    session_result = await db.execute(
+                        select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                    )
+                    tenant_id = session_result.scalar_one_or_none()
+                    
+                    # Initialize memory manager if not already done
+                    init_clients()
+                    memory_manager = get_memory_manager()
+                    web_indexer = WebIndexer(memory_manager)
+                    index_stats = await web_indexer.index_web_search_results(
+                        db=db,
+                        search_query=query,
+                        results=results_list,
+                        session_id=session_id,
+                        tenant_id=tenant_id,
+                    )
+                    result_dict["indexing_stats"] = index_stats
+                    logger.info(f"Auto-indexed {index_stats.get('indexed', 0)} web search results")
+                except Exception as e:
+                    logger.warning(f"Failed to auto-index web search results: {e}", exc_info=True)
+            
+            return result_dict
+            
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error calling Google Custom Search API: {e.response.status_code} - {e.response.text}")
+            return {"error": f"HTTP error from Google Custom Search API: {e.response.status_code}"}
+        except Exception as e:
+            logger.error(f"Error calling Google Custom Search API: {e}", exc_info=True)
             return {"error": str(e)}
     
     async def _execute_web_fetch(
