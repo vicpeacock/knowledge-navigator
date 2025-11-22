@@ -666,29 +666,49 @@ async def analyze_message_for_plan(
         "Se crei un piano, includi tutti gli step necessari con i tool appropriati."
     )
 
+    logger = logging.getLogger(__name__)
     try:
         client = planner_client or ollama_client
         if client is None:
-            logging.getLogger(__name__).warning("Planner client is None, using fallback")
+            logger.warning("Planner client is None, using fallback")
             return {"needs_plan": False, "reason": "planner_unavailable", "steps": []}
+        
+        logger.info(f"🔍 Calling planner client: {type(client).__name__}, URL: {getattr(client, 'base_url', 'N/A')}")
+        logger.info(f"   Prompt length: {len(analysis_prompt + f'\\n\\nRichiesta utente:\\n{request.message}')}")
+        logger.info(f"   Context messages: {len(session_context[-3:]) if session_context else 0}")
+        
         response = await client.generate(
             prompt=analysis_prompt + f"\n\nRichiesta utente:\n{request.message}",
             context=session_context[-3:] if session_context else None,
             system=system_prompt,
         )
+        
+        logger.info(f"✅ Planner response received: type={type(response)}")
+        
         # response is a dict from generate()
         if isinstance(response, dict):
             content = response.get("message", {}).get("content", "")
+            if not content:
+                # Try alternative response formats
+                content = response.get("response", "") or response.get("content", "")
+            logger.info(f"   Content length: {len(content)}, preview: {content[:100]}")
         elif isinstance(response, str):
             content = response
+            logger.info(f"   Content length: {len(content)}, preview: {content[:100]}")
         else:
             content = str(response)
+            logger.warning(f"   Unexpected response type: {type(response)}, content: {content[:100]}")
+        
         parsed = safe_json_loads(content)
         if isinstance(parsed, dict):
+            logger.info(f"✅ Planner analysis parsed successfully: needs_plan={parsed.get('needs_plan')}")
             return parsed
+        else:
+            logger.warning(f"⚠️  Planner response is not a dict: {type(parsed)}")
     except Exception as exc:
-        logging.getLogger(__name__).warning(f"Planner analysis failed: {exc}", exc_info=True)
+        logger.error(f"❌ Planner analysis failed: {exc}", exc_info=True)
 
+    logger.warning("⚠️  Planner returning fallback response")
     return {"needs_plan": False, "reason": "fallback", "steps": []}
 
 
