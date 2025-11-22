@@ -70,11 +70,12 @@ class EmailPoller:
         """
         events_created = []
         
-        # Get all active Gmail integrations
+        # Get all active Gmail integrations for users (not service integrations)
         result = await self.db.execute(
             select(Integration).where(
                 Integration.provider == "google",
                 Integration.service_type == "email",
+                Integration.purpose == "user_email",  # Only user integrations
                 Integration.enabled == True
             )
         )

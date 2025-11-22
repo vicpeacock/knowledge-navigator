@@ -13,7 +13,8 @@ from app.services.calendar_service import CalendarService
 from app.services.exceptions import IntegrationAuthError
 from app.services.date_parser import DateParser
 from app.core.tenant_context import get_tenant_id
-from app.core.user_context import get_current_user
+from app.core.user_context import get_current_user, require_admin
+from app.core.integration_validation import validate_integration_purpose
 from app.models.database import User  # type: ignore  # for type hints only
 from cryptography.fernet import Fernet
 import base64
@@ -178,14 +179,19 @@ async def oauth_callback(
                 payload = json_lib.loads(decoded.decode("utf-8"))
                 integration_id_str = payload.get("integration_id")
                 user_id_str = payload.get("user_id")
+                service_integration = payload.get("service_integration", False)
                 
-                logger.info(f"OAuth callback - Decoded state: integration_id={integration_id_str}, user_id={user_id_str}")
+                logger.info(f"OAuth callback (Calendar) - Decoded state: integration_id={integration_id_str}, user_id={user_id_str}, service_integration={service_integration}")
                 
                 if integration_id_str:
                     integration_id = UUID(integration_id_str)
                 if user_id_str:
                     user_id = UUID(user_id_str)
-                    logger.info(f"OAuth callback - Setting user_id={user_id} for new integration")
+                    logger.info(f"OAuth callback (Calendar) - Setting user_id={user_id} for new integration")
+                elif service_integration:
+                    # Service integrations have user_id = NULL
+                    user_id = None
+                    logger.info(f"OAuth callback (Calendar) - Service integration, user_id=NULL")
             except Exception as e:
                 logger.warning(f"OAuth callback - Failed to decode state as JSON: {e}, trying as UUID")
                 # Fallback: treat state as raw UUID (old behavior)
@@ -219,6 +225,16 @@ async def oauth_callback(
 
                 encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
                 integration.credentials_encrypted = encrypted
+                
+                # IMPORTANTE: Aggiorna anche user_id e purpose se mancante o se fornito nello state
+                if user_id and (not integration.user_id or integration.user_id != user_id):
+                    logger.info(f"OAuth callback (Calendar) - Updating user_id for integration {integration_id}: {integration.user_id} -> {user_id}")
+                    integration.user_id = user_id
+                    # Ensure purpose is set correctly for user integration
+                    if not integration.purpose or not integration.purpose.startswith("user_"):
+                        integration.purpose = "user_calendar"
+                        logger.info(f"OAuth callback (Calendar) - Updated purpose to user_calendar for integration {integration_id}")
+                
                 await db.commit()
             else:
                 raise HTTPException(status_code=404, detail="Integration not found")
@@ -230,13 +246,18 @@ async def oauth_callback(
                     detail="L'autorizzazione non ha fornito il refresh token. Concedi tutti i permessi richiesti e riprova."
                 )
             encrypted = _encrypt_credentials(credentials, settings.credentials_encryption_key)
+            # Determine purpose based on service_integration flag
+            purpose = "service_calendar" if service_integration else "user_calendar"
+            # Validate purpose and user_id consistency
+            validate_integration_purpose(purpose, user_id)
             integration = Integration(
                 provider="google",
                 service_type="calendar",
+                purpose=purpose,
                 credentials_encrypted=encrypted,
                 enabled=True,
                 tenant_id=tenant_id,
-                user_id=user_id,
+                user_id=user_id,  # NULL for service integrations, user_id for user integrations
             )
             db.add(integration)
             await db.commit()
@@ -279,9 +300,11 @@ async def setup_calendar(
         )
     
     # For other providers, store credentials directly
+    # Default to user_calendar if no purpose specified (for backward compatibility)
     integration = Integration(
         provider=request.provider,
         service_type="calendar",
+        purpose="user_calendar",  # Default to user_calendar for non-OAuth providers
         enabled=True,
         session_metadata=request.credentials or {},
         tenant_id=tenant_id,
@@ -473,15 +496,13 @@ async def list_calendar_integrations(
     tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
 ):
-    """List calendar integrations for current user (and optional global ones)"""
-    from sqlalchemy import or_
-
+    """List calendar integrations for current user (only user_calendar, not service_calendar)"""
     query = (
         select(Integration)
         .where(Integration.service_type == "calendar")
+        .where(Integration.purpose == "user_calendar")  # Only user integrations
         .where(Integration.tenant_id == tenant_id)
-        # Per-user or global (user_id is NULL)
-        .where(or_(Integration.user_id == current_user.id, Integration.user_id.is_(None)))
+        .where(Integration.user_id == current_user.id)  # Only current user's integrations
     )
     
     if provider:
@@ -496,6 +517,42 @@ async def list_calendar_integrations(
                 "id": str(integration.id),
                 "provider": integration.provider,
                 "enabled": integration.enabled,
+                "purpose": integration.purpose,
+            }
+            for integration in integrations
+        ]
+    }
+
+
+@router.get("/admin/integrations")
+async def list_service_calendar_integrations(
+    provider: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(require_admin),  # Only admin can list service integrations
+):
+    """List service calendar integrations (admin only) - for system-level operations"""
+    query = (
+        select(Integration)
+        .where(Integration.service_type == "calendar")
+        .where(Integration.purpose == "service_calendar")  # Only service integrations
+        .where(Integration.tenant_id == tenant_id)
+        .where(Integration.user_id.is_(None))  # Service integrations have no user_id
+    )
+    
+    if provider:
+        query = query.where(Integration.provider == provider)
+    
+    result = await db.execute(query)
+    integrations = result.scalars().all()
+    
+    return {
+        "integrations": [
+            {
+                "id": str(integration.id),
+                "provider": integration.provider,
+                "enabled": integration.enabled,
+                "purpose": integration.purpose,
             }
             for integration in integrations
         ]
@@ -527,3 +584,45 @@ async def delete_calendar_integration(
     await db.commit()
     
     return {"message": "Integration deleted successfully"}
+
+
+@router.post("/admin/service")
+async def create_service_calendar_integration(
+    request: CalendarSetupRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(require_admin),  # Only admin can create service integrations
+):
+    """
+    Create a service calendar integration (admin only).
+    Service integrations are used for system-level calendar operations.
+    """
+    if request.provider == "google":
+        raise HTTPException(
+            status_code=400,
+            detail="Use OAuth flow for Google calendar. Service integrations should be created via OAuth with user_id=NULL."
+        )
+    
+    # Validate purpose and user_id consistency
+    validate_integration_purpose("service_calendar", None, current_user, is_admin_required=True)
+    
+    # Create service integration (user_id = NULL, purpose = service_calendar)
+    integration = Integration(
+        provider=request.provider,
+        service_type="calendar",
+        purpose="service_calendar",  # Service integration
+        enabled=True,
+        session_metadata=request.credentials or {},
+        tenant_id=tenant_id,
+        user_id=None,  # Service integrations have no user_id
+    )
+    db.add(integration)
+    await db.commit()
+    await db.refresh(integration)
+    
+    return {
+        "id": integration.id,
+        "provider": integration.provider,
+        "purpose": integration.purpose,
+        "message": f"Service calendar integration for {request.provider} created"
+    }

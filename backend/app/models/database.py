@@ -200,10 +200,11 @@ class Integration(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    # Optional per-user ownership (NULL = global integration for tenant)
+    # Optional per-user ownership (NULL = service integration, NOT NULL = user integration)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     provider = Column(String(50), nullable=False)  # google, apple, microsoft, mcp
     service_type = Column(String(50), nullable=False)  # calendar, email, whatsapp, mcp_server
+    purpose = Column(String(50), nullable=False)  # user_email, service_email, user_calendar, service_calendar, user_whatsapp, service_whatsapp, mcp_server
     credentials_encrypted = Column(Text)  # Encrypted credentials (for OAuth services) or MCP server URL/config
     enabled = Column(Boolean, default=True)
     session_metadata = Column("metadata", JSONB, default={})  # For MCP: selected_tools list, server_url, etc.
@@ -211,6 +212,14 @@ class Integration(Base):
     # Relationships
     tenant = relationship("Tenant", backref="integrations")
     user = relationship("User", backref="integrations")
+    
+    # Constraints
+    __table_args__ = (
+        # Check constraint: user_* purpose requires user_id, service_* purpose requires user_id = NULL
+        # Note: This is enforced at application level, database constraint would be complex
+        Index('ix_integrations_purpose', 'purpose'),
+        Index('ix_integrations_tenant_purpose_enabled', 'tenant_id', 'purpose', 'enabled'),
+    )
 
 
 class Notification(Base):
