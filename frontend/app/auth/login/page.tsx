@@ -30,7 +30,19 @@ export default function LoginPage() {
 
     try {
       await login(email, password)
-      // Redirect handled by AuthContext
+      // Check for redirect parameter
+      const urlParams = new URLSearchParams(window.location.search)
+      const redirect = urlParams.get('redirect')
+      const oauthSuccess = urlParams.get('oauth_success')
+      
+      if (redirect) {
+        // Redirect to specified page (e.g., after OAuth callback)
+        const redirectUrl = oauthSuccess ? `${redirect}?oauth_success=true` : redirect
+        router.push(redirectUrl)
+      } else {
+        // Default redirect handled by AuthContext
+        router.push('/')
+      }
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.')
     } finally {
