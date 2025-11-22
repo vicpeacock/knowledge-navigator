@@ -2068,7 +2068,9 @@ Riassunto:"""
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 logger.info(f"   Calling Google Custom Search API: {url}")
-                logger.info(f"   Query: {query}, num: {min(num_results, 10)}")
+                logger.info(f"   Query: '{query}', num: {min(num_results, 10)}")
+                logger.info(f"   API Key present: {bool(settings.google_pse_api_key)}")
+                logger.info(f"   CX present: {bool(settings.google_pse_cx)}")
                 response = await client.get(url, params=params)
                 
                 # Log response status
