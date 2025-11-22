@@ -186,8 +186,9 @@ Il sistema implementa principi di Context Engineering:
 - `get_calendar_events` - Google Calendar integration
 - `get_emails` - Gmail integration
 - `summarize_emails` - AI email summarization
-- `web_search` - Ricerca web Ollama API
-- `web_fetch` - Fetch contenuto pagina web
+- `web_search` - Ricerca web Ollama API (solo per Ollama)
+- `web_fetch` - Fetch contenuto pagina web (solo per Ollama)
+- `customsearch_search` - Ricerca web Google Custom Search API (solo per Gemini)
 
 **MCP Tools (Dynamic):**
 - Browser tools (Playwright): `navigate`, `snapshot`, `click`, `evaluate`, etc.

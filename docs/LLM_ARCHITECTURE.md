@@ -6,12 +6,19 @@ Il sistema Knowledge Navigator utilizza **tre tipi di LLM** per diversi scopi:
 
 ### 1. **LLM Principale (Main LLM)** - Chat Interattiva
 - **Scopo**: Gestisce le conversazioni interattive con l'utente
-- **Configurazione**: `ollama_base_url`, `ollama_model`
-- **Default**: `http://localhost:11434`, `gpt-oss:20b`
+- **Configurazione**: 
+  - Ollama: `ollama_base_url`, `ollama_model`
+  - Gemini: `gemini_api_key`, `gemini_model`
+- **Default**: 
+  - Ollama: `http://localhost:11434`, `gpt-oss:20b`
+  - Gemini: `gemini-2.5-flash`
 - **Uso**: 
   - Risposte alle richieste dell'utente
   - Generazione di risposte finali
   - Tool calling durante le conversazioni
+- **Tool di Ricerca Web**:
+  - **Ollama**: Usa `web_search` (richiede `OLLAMA_API_KEY`)
+  - **Gemini**: Usa `customsearch_search` (richiede `GOOGLE_PSE_API_KEY` e `GOOGLE_PSE_CX`)
 
 ### 2. **Planner LLM** - Pianificazione delle Azioni
 - **Scopo**: Analizza le richieste dell'utente e determina se serve un piano con tool
