@@ -70,15 +70,13 @@ def init_clients():
                 logger.info(f"Initializing Gemini client (planner): model={planner_model}")
                 _planner_client = GeminiClient(model=planner_model)
             else:
-                # Use planner URL if set, otherwise fallback to background or main Ollama URL
-                planner_url = settings.ollama_planner_base_url or settings.ollama_background_base_url or settings.ollama_base_url
-                planner_model = settings.ollama_planner_model or settings.ollama_background_model or settings.ollama_model
+                # Use planner URL if set, otherwise fallback to main Ollama URL (NOT background LLM)
+                # Planner should use main LLM (Ollama) as default, not background LLM (which might be llama.cpp)
+                planner_url = settings.ollama_planner_base_url or settings.ollama_base_url
+                planner_model = settings.ollama_planner_model or settings.ollama_model
                 
-                # Check if planner URL is llama.cpp (11435) or if use_llama_cpp_background is True and planner_url matches background URL
-                is_llama_cpp = (
-                    "11435" in planner_url or 
-                    (settings.use_llama_cpp_background and planner_url == settings.ollama_background_base_url)
-                )
+                # Check if planner URL is llama.cpp (11435) - only if explicitly configured
+                is_llama_cpp = "11435" in planner_url
                 
                 if is_llama_cpp:
                     from app.core.llama_cpp_client import LlamaCppClient

@@ -185,12 +185,9 @@ settings = Settings()
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
 # Populate planner defaults dinamically
+# Planner should use main LLM (Ollama) as default, not background LLM
 if settings.ollama_planner_base_url is None:
-    settings.ollama_planner_base_url = (
-        settings.ollama_background_base_url or settings.ollama_base_url
-    )
+    settings.ollama_planner_base_url = settings.ollama_base_url
 if settings.ollama_planner_model is None:
-    settings.ollama_planner_model = (
-        settings.ollama_background_model or settings.ollama_model
-    )
+    settings.ollama_planner_model = settings.ollama_model
 
