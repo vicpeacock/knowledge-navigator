@@ -68,8 +68,10 @@ class Settings(BaseSettings):
     require_background_llm: bool = False  # Se True, il background LLM è considerato mandatory
 
     # Planner LLM (dedicato alla generazione del piano)
-    ollama_planner_base_url: Optional[str] = None  # Se None, usa ollama_background_base_url o ollama_base_url
-    ollama_planner_model: Optional[str] = None  # Se None, usa ollama_background_model o ollama_model
+    # IMPORTANTE: Il planner usa lo stesso LLM principale come default per garantire coerenza
+    # Se si vuole un planner più leggero, configurare esplicitamente ollama_planner_base_url e ollama_planner_model
+    ollama_planner_base_url: Optional[str] = None  # Se None, usa ollama_base_url (LLM principale)
+    ollama_planner_model: Optional[str] = None  # Se None, usa ollama_model (LLM principale)
 
     # MCP Gateway (default, can be overridden per integration)
     # Default: localhost:8080 (if backend runs on host)
