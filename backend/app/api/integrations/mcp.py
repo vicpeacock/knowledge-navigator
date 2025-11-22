@@ -15,7 +15,7 @@ from app.models.schemas import Integration, IntegrationCreate, IntegrationUpdate
 from app.core.mcp_client import MCPClient
 from app.core.config import settings
 from app.core.tenant_context import get_tenant_id
-from app.core.user_context import get_current_user
+from app.core.user_context import get_current_user, get_current_user_optional
 from app.core.oauth_utils import is_oauth_server
 from app.core.error_utils import extract_root_error, get_error_message
 from fastapi.responses import RedirectResponse
@@ -523,7 +523,7 @@ async def mcp_oauth_callback(
     state: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """OAuth2 callback for Google Workspace MCP server"""
     import logging

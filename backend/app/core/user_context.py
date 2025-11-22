@@ -125,6 +125,38 @@ async def get_current_user(
     return user
 
 
+async def get_current_user_optional(
+    authorization: Optional[str] = Header(None),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+) -> Optional[User]:
+    """
+    Extract current user from JWT token in Authorization header (optional).
+    Returns None if no authorization header is present instead of raising an exception.
+    
+    This is useful for endpoints that can work with or without authentication
+    (e.g., OAuth callbacks that receive redirects from external services).
+    
+    Args:
+        authorization: Authorization header (Bearer <token>)
+        db: Database session
+        tenant_id: Tenant ID from tenant context
+        
+    Returns:
+        Optional[User]: Current authenticated user, or None if no auth header
+    """
+    if not authorization:
+        logger.debug("[get_current_user_optional] No authorization header, returning None")
+        return None
+    
+    try:
+        return await get_current_user(authorization=authorization, db=db, tenant_id=tenant_id)
+    except HTTPException:
+        # If authentication fails, return None instead of raising
+        logger.debug("[get_current_user_optional] Authentication failed, returning None")
+        return None
+
+
 async def require_role(
     required_role: str,
     current_user: User = Depends(get_current_user),
@@ -156,4 +188,3 @@ async def require_admin(
 ) -> User:
     """Dependency to require admin role"""
     return await require_role("admin", current_user)
-
