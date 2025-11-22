@@ -657,6 +657,8 @@ async def mcp_oauth_callback(
         flow.fetch_token(code=code)
         
         from datetime import datetime, timezone
+        import base64
+        import json
         
         credentials = {
             "token": flow.credentials.token,
@@ -668,28 +670,51 @@ async def mcp_oauth_callback(
             "token_created_at": datetime.now(timezone.utc).isoformat(),  # Track when token was created
         }
         
-        # Get Google user email from token (save it for later display)
+        # Get Google user email from ID token (if available) or access token
         google_email = None
         try:
-            import httpx
-            access_token = credentials.get("token")
-            if not access_token:
-                logger.warning(f"⚠️  No access token in credentials to retrieve Google email")
-            else:
-                logger.info(f"🔑 Attempting to retrieve Google email with token (length: {len(access_token)})")
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        "https://www.googleapis.com/oauth2/v2/userinfo",
-                        headers={"Authorization": f"Bearer {access_token}"},
-                        timeout=5.0
-                    )
-                    logger.info(f"📡 Google userinfo API response: {response.status_code}")
-                    if response.status_code == 200:
-                        user_info = response.json()
-                        google_email = user_info.get("email")
-                        logger.info(f"📧 Retrieved Google email during OAuth callback: {google_email}")
-                    else:
-                        logger.warning(f"⚠️  Failed to get Google email: {response.status_code} - {response.text[:200]}")
+            # First, try to get email from ID token (more reliable)
+            id_token = getattr(flow.credentials, 'id_token', None)
+            if id_token:
+                try:
+                    # Decode JWT ID token (format: header.payload.signature)
+                    parts = id_token.split('.')
+                    if len(parts) >= 2:
+                        # Decode payload (base64url)
+                        payload_b64 = parts[1]
+                        # Add padding if needed
+                        padding = 4 - len(payload_b64) % 4
+                        if padding != 4:
+                            payload_b64 += '=' * padding
+                        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+                        payload = json.loads(payload_bytes.decode('utf-8'))
+                        google_email = payload.get("email")
+                        if google_email:
+                            logger.info(f"📧 Retrieved Google email from ID token: {google_email}")
+                except Exception as id_token_error:
+                    logger.debug(f"Could not decode ID token: {id_token_error}")
+            
+            # Fallback: try to get email from access token via API
+            if not google_email:
+                import httpx
+                access_token = credentials.get("token")
+                if not access_token:
+                    logger.warning(f"⚠️  No access token in credentials to retrieve Google email")
+                else:
+                    logger.info(f"🔑 Attempting to retrieve Google email with access token (length: {len(access_token)})")
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(
+                            "https://www.googleapis.com/oauth2/v2/userinfo",
+                            headers={"Authorization": f"Bearer {access_token}"},
+                            timeout=5.0
+                        )
+                        logger.info(f"📡 Google userinfo API response: {response.status_code}")
+                        if response.status_code == 200:
+                            user_info = response.json()
+                            google_email = user_info.get("email")
+                            logger.info(f"📧 Retrieved Google email from API: {google_email}")
+                        else:
+                            logger.warning(f"⚠️  Failed to get Google email: {response.status_code} - {response.text[:200]}")
         except Exception as email_error:
             logger.warning(f"⚠️  Could not retrieve Google email during OAuth callback: {email_error}", exc_info=True)
         
