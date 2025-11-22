@@ -70,14 +70,29 @@ def init_clients():
                 logger.info(f"Initializing Gemini client (planner): model={planner_model}")
                 _planner_client = GeminiClient(model=planner_model)
             else:
-                # Use planner URL if set, otherwise fallback to main Ollama URL
-                planner_url = settings.ollama_planner_base_url or settings.ollama_base_url
-                planner_model = settings.ollama_planner_model or settings.ollama_model
-                logger.info(f"Initializing Ollama client (planner): URL={planner_url}, model={planner_model}")
-                _planner_client = OllamaClient(
-                    base_url=planner_url,
-                    model=planner_model,
+                # Use planner URL if set, otherwise fallback to background or main Ollama URL
+                planner_url = settings.ollama_planner_base_url or settings.ollama_background_base_url or settings.ollama_base_url
+                planner_model = settings.ollama_planner_model or settings.ollama_background_model or settings.ollama_model
+                
+                # Check if planner URL is llama.cpp (11435) or if use_llama_cpp_background is True and planner_url matches background URL
+                is_llama_cpp = (
+                    "11435" in planner_url or 
+                    (settings.use_llama_cpp_background and planner_url == settings.ollama_background_base_url)
                 )
+                
+                if is_llama_cpp:
+                    from app.core.llama_cpp_client import LlamaCppClient
+                    logger.info(f"Initializing LlamaCpp client (planner): URL={planner_url}, model={planner_model}")
+                    _planner_client = LlamaCppClient(
+                        base_url=planner_url,
+                        model=planner_model,
+                    )
+                else:
+                    logger.info(f"Initializing Ollama client (planner): URL={planner_url}, model={planner_model}")
+                    _planner_client = OllamaClient(
+                        base_url=planner_url,
+                        model=planner_model,
+                    )
         except Exception as exc:
             logger.error("Failed to initialize planner LLM client: %s", exc, exc_info=True)
             raise
