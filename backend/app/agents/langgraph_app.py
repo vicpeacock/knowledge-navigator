@@ -1927,9 +1927,17 @@ async def run_langgraph_chat(
     
     logger.info("🔍 About to invoke LangGraph app.ainvoke()")
     try:
-        final_state = await app.ainvoke(state)
+        # Add timeout to prevent infinite blocking (5 minutes max)
+        final_state = await asyncio.wait_for(
+            app.ainvoke(state),
+            timeout=300.0  # 5 minutes timeout
+        )
         logger.info("✅ LangGraph app.ainvoke() completed successfully")
         print(f"[LANGGRAPH] Execution completed for session {session_id}", file=sys.stderr)
+    except asyncio.TimeoutError:
+        logger.error("❌ LangGraph app.ainvoke() TIMED OUT after 5 minutes!")
+        print(f"[LANGGRAPH] Execution timed out for session {session_id}", file=sys.stderr)
+        raise TimeoutError("LangGraph execution timed out after 5 minutes")
     except Exception as exc:
         logger.error("❌ LangGraph app.ainvoke() FAILED: %s", exc, exc_info=True)
         print(f"[LANGGRAPH] Execution failed: {exc}", file=sys.stderr)

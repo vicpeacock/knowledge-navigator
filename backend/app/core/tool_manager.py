@@ -640,7 +640,7 @@ class ToolManager:
             try:
                 # Check if it's an MCP tool (prefixed with "mcp_")
                 if tool_name.startswith("mcp_"):
-                    result = await self._execute_mcp_tool(tool_name, parameters, db, session_id, auto_index)
+                    result = await self._execute_mcp_tool(tool_name, parameters, db, session_id, auto_index, current_user=current_user)
                     logger.info(f"MCP Tool {tool_name} completed")
                     add_trace_event("tool.execution.completed", {"tool": tool_name, "type": "mcp"})
                     duration = time.time() - start_time
@@ -965,6 +965,7 @@ class ToolManager:
         db: AsyncSession,
         session_id: Optional[UUID] = None,
         auto_index: bool = True,
+        current_user: Optional["User"] = None,  # type: ignore[name-defined]
     ) -> Dict[str, Any]:
         """Execute an MCP tool"""
         import logging
@@ -1007,9 +1008,16 @@ class ToolManager:
             from app.models.database import User as UserModel
             # select is already imported globally at the top of the file
             
-            # Get current_user for OAuth - get from session if session_id is provided
+            # Get current_user for OAuth - prioritize passed current_user, fallback to session
             current_user_for_oauth = None
-            if session_id:
+            
+            # Priority 1: Use current_user passed to execute_tool (from LangGraph state)
+            if current_user:
+                current_user_for_oauth = current_user
+                logger.info(f"   ✅ Using current_user passed to execute_tool: {current_user_for_oauth.id if current_user_for_oauth else 'None'}")
+            
+            # Priority 2: Get from session if current_user not provided
+            elif session_id:
                 try:
                     session_result = await db.execute(
                         select(SessionModel).where(SessionModel.id == session_id)
@@ -1020,14 +1028,45 @@ class ToolManager:
                             select(UserModel).where(UserModel.id == session.user_id)
                         )
                         current_user_for_oauth = user_result.scalar_one_or_none()
+                        if current_user_for_oauth:
+                            logger.info(f"   ✅ Retrieved current_user from session: {current_user_for_oauth.id}")
                 except Exception as e:
                     logger.warning(f"   Could not get user from session: {e}")
             
+            if not current_user_for_oauth:
+                logger.warning(f"   ⚠️  No current_user available for OAuth - token will not be passed to MCP server")
+            
             # Get MCP client with user context for OAuth
-            # IMPORTANT: Pass current_user_for_oauth to retrieve OAuth tokens from database
+            # IMPORTANT: Retrieve OAuth token with automatic refresh BEFORE creating client
             logger.info(f"   Getting MCP client for integration {integration.id} with user context")
             logger.info(f"   Current user for OAuth: {current_user_for_oauth.id if current_user_for_oauth else 'None'}")
-            client = _get_mcp_client_for_integration(integration, current_user=current_user_for_oauth)
+            
+            # For OAuth servers, retrieve token with automatic refresh using OAuthTokenManager
+            oauth_token: Optional[str] = None
+            session_metadata = integration.session_metadata or {}
+            server_url = session_metadata.get("server_url", "") or ""
+            oauth_required = session_metadata.get("oauth_required", False)
+            from app.core.oauth_utils import is_oauth_server
+            is_oauth = is_oauth_server(server_url, oauth_required)
+            
+            if is_oauth and current_user_for_oauth:
+                from app.services.oauth_token_manager import OAuthTokenManager
+                try:
+                    oauth_token = await OAuthTokenManager.get_valid_token(
+                        integration=integration,
+                        user=current_user_for_oauth,
+                        db=db,
+                        auto_refresh=True
+                    )
+                    logger.info(f"   ✅ Retrieved OAuth token with refresh capability for user {current_user_for_oauth.id}")
+                except Exception as oauth_error:
+                    logger.warning(f"   ⚠️  Could not retrieve OAuth token: {oauth_error}")
+                    # Continue without token - user may need to authenticate
+                    oauth_token = None
+            
+            # Create client with OAuth token if available
+            # Pass oauth_token directly to avoid double retrieval
+            client = _get_mcp_client_for_integration(integration, current_user=current_user_for_oauth, oauth_token=oauth_token)
             
             # List all tools from this integration to check if the tool exists
             # For OAuth 2.1 servers, tools may not be available until user authenticates
@@ -1163,8 +1202,9 @@ class ToolManager:
                         # If token was refreshed, retry the tool call
                         if oauth_response.get("token_refreshed"):
                             logger.info(f"   ✅ Token refreshed successfully, retrying tool call...")
+                            new_token = oauth_response.get("new_token")
                             from app.api.integrations.mcp import _get_mcp_client_for_integration
-                            refreshed_client = _get_mcp_client_for_integration(integration, current_user=current_user_for_oauth)
+                            refreshed_client = _get_mcp_client_for_integration(integration, current_user=current_user_for_oauth, oauth_token=new_token)
                             try:
                                 result = await asyncio.wait_for(
                                     refreshed_client.call_tool(actual_tool_name, parameters, stream=False),

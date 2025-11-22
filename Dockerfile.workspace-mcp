@@ -21,6 +21,24 @@ RUN git clone https://github.com/taylorwilsdon/google_workspace_mcp.git .
 # Installa dipendenze
 RUN uv sync
 
+# Applica patch per accettare Authorization header durante initialize() in modalità EXTERNAL_OAUTH21_PROVIDER
+# Copia script di patch
+COPY backend/patches/workspace_mcp_server_patch.py /tmp/workspace_mcp_server_patch.py
+COPY backend/patches/workspace_mcp_server_patch_v2.py /tmp/workspace_mcp_server_patch_v2.py
+COPY backend/patches/workspace_mcp_external_oauth_provider_patch.py /tmp/workspace_mcp_external_oauth_provider_patch.py
+COPY backend/patches/workspace_mcp_external_oauth_provider_patch_v2.py /tmp/workspace_mcp_external_oauth_provider_patch_v2.py
+COPY backend/patches/workspace_mcp_external_oauth_provider_patch_v3.py /tmp/workspace_mcp_external_oauth_provider_patch_v3.py
+# Applica patch al server (v1: set server.auth = provider)
+RUN python /tmp/workspace_mcp_server_patch.py /app/core/server.py || echo "Server patch v1 application failed or already applied"
+# Applica patch al server (v2: set server.auth = None - authentication handled by middleware)
+RUN python /tmp/workspace_mcp_server_patch_v2.py /app/core/server.py || echo "Server patch v2 application failed or already applied"
+# Applica patch al provider (v1: error handling)
+RUN python /tmp/workspace_mcp_external_oauth_provider_patch.py /app/auth/external_oauth_provider.py || echo "Provider patch v1 application failed or already applied"
+# Applica patch al provider (v2: direct HTTP validation)
+RUN python /tmp/workspace_mcp_external_oauth_provider_patch_v2.py /app/auth/external_oauth_provider.py || echo "Provider patch v2 application failed or already applied"
+# Applica patch al provider (v3: permissive token during initialize)
+RUN python /tmp/workspace_mcp_external_oauth_provider_patch_v3.py /app/auth/external_oauth_provider.py || echo "Provider patch v3 application failed or already applied"
+
 # Stage finale - immagine runtime minimale
 FROM python:3.11-slim
 
@@ -32,7 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Installa uv
 RUN pip install --no-cache-dir uv
 
-# Copia codice applicazione dallo stage builder
+# Copia codice applicazione dallo stage builder (include patch applicata)
 WORKDIR /app
 COPY --from=builder /app /app
 

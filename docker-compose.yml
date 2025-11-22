@@ -53,6 +53,12 @@ services:
       # La porta esterna (8003) è gestita dal port mapping di Docker
       # Enable OAuth 2.1 for multi-user support (ogni utente autentica con il proprio account Google)
       - MCP_ENABLE_OAUTH21=true
+      # Enable external OAuth 2.1 provider mode (passiamo token OAuth dall'esterno via Authorization header)
+      # Questo permette al server di accettare bearer token invece di gestire il flusso OAuth internamente
+      - EXTERNAL_OAUTH21_PROVIDER=true
+      # Enable stateless mode (required when using external OAuth provider)
+      # In stateless mode, each request must include a valid bearer token
+      - WORKSPACE_MCP_STATELESS_MODE=true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health || exit 1"]
       interval: 30s

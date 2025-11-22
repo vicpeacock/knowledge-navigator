@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
-import { authApi, usersApi } from '@/lib/api'
+import { authApi, usersApi, integrationsApi } from '@/lib/api'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { ExternalLink, CheckCircle, XCircle } from 'lucide-react'
 
 // Common timezones
 const TIMEZONES = [
@@ -40,9 +41,37 @@ function ProfileContent() {
   const [profileError, setProfileError] = useState<string | null>(null)
   const [profileSuccess, setProfileSuccess] = useState<string | null>(null)
   const [profileSaving, setProfileSaving] = useState(false)
+  const [backgroundServicesLoading, setBackgroundServicesLoading] = useState(true)
+  const [backgroundServicesData, setBackgroundServicesData] = useState<{ email_notifications_enabled: boolean; calendar_notifications_enabled: boolean }>({
+    email_notifications_enabled: true,
+    calendar_notifications_enabled: true,
+  })
+  const [backgroundServicesError, setBackgroundServicesError] = useState<string | null>(null)
+  const [backgroundServicesSuccess, setBackgroundServicesSuccess] = useState<string | null>(null)
+  const [backgroundServicesSaving, setBackgroundServicesSaving] = useState(false)
+  const [oauthIntegrationsLoading, setOAuthIntegrationsLoading] = useState(true)
+  const [oauthIntegrations, setOAuthIntegrations] = useState<Array<{
+    integration_id: string
+    integration_name: string
+    server_url: string
+    oauth_required: boolean
+    oauth_authorized: boolean
+  }>>([])
+  const [oauthIntegrationsError, setOAuthIntegrationsError] = useState<string | null>(null)
 
   useEffect(() => {
     loadProfile()
+    loadBackgroundServicesPreferences()
+    loadOAuthIntegrations()
+    
+    // Check if we're returning from OAuth callback
+    const urlParams = new URLSearchParams(window.location.search)
+    if (urlParams.get('oauth_success') === 'true') {
+      // OAuth authorization completed - reload integrations
+      loadOAuthIntegrations()
+      // Clean URL
+      window.history.replaceState({}, document.title, '/settings/profile')
+    }
   }, [])
 
   const loadProfile = async () => {
@@ -65,6 +94,89 @@ function ProfileContent() {
       }
     } finally {
       setProfileLoading(false)
+    }
+  }
+
+  const loadBackgroundServicesPreferences = async () => {
+    try {
+      setBackgroundServicesLoading(true)
+      const response = await usersApi.getBackgroundServicesPreferences()
+      setBackgroundServicesData({
+        email_notifications_enabled: response.data.email_notifications_enabled ?? true,
+        calendar_notifications_enabled: response.data.calendar_notifications_enabled ?? true,
+      })
+    } catch (err: any) {
+      const errorDetail = err.response?.data?.detail
+      if (Array.isArray(errorDetail)) {
+        setBackgroundServicesError(errorDetail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', '))
+      } else if (typeof errorDetail === 'string') {
+        setBackgroundServicesError(errorDetail)
+      } else {
+        setBackgroundServicesError(err.response?.data?.message || err.message || 'Failed to load background services preferences')
+      }
+    } finally {
+      setBackgroundServicesLoading(false)
+    }
+  }
+
+  const loadOAuthIntegrations = async () => {
+    try {
+      setOAuthIntegrationsLoading(true)
+      setOAuthIntegrationsError(null)
+      const response = await usersApi.getOAuthIntegrations()
+      setOAuthIntegrations(response.data.integrations || [])
+    } catch (err: any) {
+      const errorDetail = err.response?.data?.detail
+      if (Array.isArray(errorDetail)) {
+        setOAuthIntegrationsError(errorDetail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', '))
+      } else if (typeof errorDetail === 'string') {
+        setOAuthIntegrationsError(errorDetail)
+      } else {
+        setOAuthIntegrationsError(err.response?.data?.message || err.message || 'Failed to load OAuth integrations')
+      }
+    } finally {
+      setOAuthIntegrationsLoading(false)
+    }
+  }
+
+  const handleAuthorizeOAuth = async (integrationId: string) => {
+    try {
+      const response = await integrationsApi.mcp.authorize(integrationId)
+      // Redirect to OAuth authorization URL
+      if (response.data.authorization_url) {
+        window.location.href = response.data.authorization_url
+      } else {
+        setOAuthIntegrationsError('No authorization URL received')
+      }
+    } catch (error: any) {
+      console.error('OAuth authorization failed:', error.response?.data?.detail || error.message)
+      setOAuthIntegrationsError(`OAuth authorization failed: ${error.response?.data?.detail || error.message}`)
+    }
+  }
+
+  const handleUpdateBackgroundServices = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBackgroundServicesError(null)
+    setBackgroundServicesSuccess(null)
+
+    try {
+      setBackgroundServicesSaving(true)
+      await usersApi.updateBackgroundServicesPreferences({
+        email_notifications_enabled: backgroundServicesData.email_notifications_enabled,
+        calendar_notifications_enabled: backgroundServicesData.calendar_notifications_enabled,
+      })
+      setBackgroundServicesSuccess('Background services preferences updated successfully')
+    } catch (err: any) {
+      const errorDetail = err.response?.data?.detail
+      if (Array.isArray(errorDetail)) {
+        setBackgroundServicesError(errorDetail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', '))
+      } else if (typeof errorDetail === 'string') {
+        setBackgroundServicesError(errorDetail)
+      } else {
+        setBackgroundServicesError(err.response?.data?.message || err.message || 'Failed to update background services preferences')
+      }
+    } finally {
+      setBackgroundServicesSaving(false)
     }
   }
 
@@ -264,6 +376,144 @@ function ProfileContent() {
                 {profileSaving ? 'Saving...' : 'Save Profile'}
               </button>
             </form>
+          )}
+        </div>
+
+        {/* Background Services Preferences */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+          <h2 className="text-2xl font-semibold mb-4">Background Services</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Control whether you receive proactive notifications from background services (email polling, calendar watching).
+            These services run automatically and create notifications independently of tool preferences.
+          </p>
+
+          {backgroundServicesError && (
+            <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p className="text-red-800 dark:text-red-200">{backgroundServicesError}</p>
+            </div>
+          )}
+
+          {backgroundServicesSuccess && (
+            <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <p className="text-green-800 dark:text-green-200">{backgroundServicesSuccess}</p>
+            </div>
+          )}
+
+          {backgroundServicesLoading ? (
+            <div className="text-sm text-gray-500">Loading preferences...</div>
+          ) : (
+            <form onSubmit={handleUpdateBackgroundServices} className="space-y-4">
+              <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                <div className="flex-1">
+                  <label htmlFor="email_notifications" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Email Notifications
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Receive notifications when new emails arrive in your Gmail account
+                  </p>
+                </div>
+                <input
+                  id="email_notifications"
+                  type="checkbox"
+                  checked={backgroundServicesData.email_notifications_enabled}
+                  onChange={(e) => setBackgroundServicesData({ ...backgroundServicesData, email_notifications_enabled: e.target.checked })}
+                  className="h-5 w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                <div className="flex-1">
+                  <label htmlFor="calendar_notifications" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Calendar Notifications
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Receive notifications for upcoming calendar events
+                  </p>
+                </div>
+                <input
+                  id="calendar_notifications"
+                  type="checkbox"
+                  checked={backgroundServicesData.calendar_notifications_enabled}
+                  onChange={(e) => setBackgroundServicesData({ ...backgroundServicesData, calendar_notifications_enabled: e.target.checked })}
+                  className="h-5 w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={backgroundServicesSaving}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {backgroundServicesSaving ? 'Saving...' : 'Save Preferences'}
+              </button>
+            </form>
+          )}
+        </div>
+
+        {/* OAuth Authorizations */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+          <h2 className="text-2xl font-semibold mb-4">OAuth Authorizations</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Authorize your Google account to access Google Workspace services (Drive, Calendar, Gmail, etc.).
+            Each user must authorize their own account separately.
+          </p>
+
+          {oauthIntegrationsError && (
+            <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p className="text-red-800 dark:text-red-200">{oauthIntegrationsError}</p>
+            </div>
+          )}
+
+          {oauthIntegrationsLoading ? (
+            <div className="text-sm text-gray-500">Loading OAuth integrations...</div>
+          ) : oauthIntegrations.length === 0 ? (
+            <div className="text-sm text-gray-500">
+              No OAuth integrations found. If you expect to see Google Workspace integrations here, 
+              please ensure that an admin has configured the Google Workspace MCP server in the 
+              <Link href="/integrations" className="text-blue-600 dark:text-blue-400 hover:underline ml-1">
+                Integrations
+              </Link> page.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {oauthIntegrations.map((integration) => (
+                <div
+                  key={integration.integration_id}
+                  className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg"
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                        {integration.integration_name}
+                      </h3>
+                      {integration.oauth_authorized ? (
+                        <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                          <CheckCircle size={14} />
+                          Authorized
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-xs text-yellow-600 dark:text-yellow-400">
+                          <XCircle size={14} />
+                          Not Authorized
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {integration.server_url}
+                    </p>
+                  </div>
+                  {!integration.oauth_authorized && (
+                    <button
+                      onClick={() => handleAuthorizeOAuth(integration.integration_id)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm"
+                    >
+                      <ExternalLink size={16} />
+                      Authorize
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
