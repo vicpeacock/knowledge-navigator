@@ -672,18 +672,26 @@ async def mcp_oauth_callback(
         google_email = None
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    "https://www.googleapis.com/oauth2/v2/userinfo",
-                    headers={"Authorization": f"Bearer {credentials['token']}"},
-                    timeout=5.0
-                )
-                if response.status_code == 200:
-                    user_info = response.json()
-                    google_email = user_info.get("email")
-                    logger.info(f"📧 Retrieved Google email during OAuth callback: {google_email}")
+            access_token = credentials.get("token")
+            if not access_token:
+                logger.warning(f"⚠️  No access token in credentials to retrieve Google email")
+            else:
+                logger.info(f"🔑 Attempting to retrieve Google email with token (length: {len(access_token)})")
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        "https://www.googleapis.com/oauth2/v2/userinfo",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                        timeout=5.0
+                    )
+                    logger.info(f"📡 Google userinfo API response: {response.status_code}")
+                    if response.status_code == 200:
+                        user_info = response.json()
+                        google_email = user_info.get("email")
+                        logger.info(f"📧 Retrieved Google email during OAuth callback: {google_email}")
+                    else:
+                        logger.warning(f"⚠️  Failed to get Google email: {response.status_code} - {response.text[:200]}")
         except Exception as email_error:
-            logger.warning(f"⚠️  Could not retrieve Google email during OAuth callback: {email_error}")
+            logger.warning(f"⚠️  Could not retrieve Google email during OAuth callback: {email_error}", exc_info=True)
         
         # Save credentials (encrypted) in session_metadata per user
         session_metadata = integration.session_metadata or {}
