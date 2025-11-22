@@ -699,31 +699,33 @@ async def get_oauth_integrations(
             google_email = None
             if oauth_authorized:
                 try:
-                    from app.api.integrations.mcp import _decrypt_credentials
-                    from app.core.config import settings
+                    from app.services.oauth_token_manager import OAuthTokenManager
                     
-                    encrypted_creds = oauth_credentials.get(user_id_str)
-                    if encrypted_creds:
-                        credentials = _decrypt_credentials(encrypted_creds, settings.credentials_encryption_key)
-                        access_token = credentials.get("token")
-                        
-                        if access_token:
-                            # Call Google API to get user info
-                            import httpx
-                            async with httpx.AsyncClient() as client:
-                                response = await client.get(
-                                    "https://www.googleapis.com/oauth2/v2/userinfo",
-                                    headers={"Authorization": f"Bearer {access_token}"},
-                                    timeout=5.0
-                                )
-                                if response.status_code == 200:
-                                    user_info = response.json()
-                                    google_email = user_info.get("email")
-                                    logger.info(f"      📧 Retrieved Google email: {google_email}")
-                                else:
-                                    logger.warning(f"      ⚠️  Failed to get Google user info: {response.status_code}")
+                    # Use OAuthTokenManager to get a valid token (handles refresh automatically)
+                    valid_token = await OAuthTokenManager.get_valid_token(
+                        integration=integration,
+                        user=current_user,
+                        db=db,
+                        auto_refresh=True
+                    )
+                    
+                    if valid_token:
+                        # Call Google API to get user info
+                        import httpx
+                        async with httpx.AsyncClient() as client:
+                            response = await client.get(
+                                "https://www.googleapis.com/oauth2/v2/userinfo",
+                                headers={"Authorization": f"Bearer {valid_token}"},
+                                timeout=5.0
+                            )
+                            if response.status_code == 200:
+                                user_info = response.json()
+                                google_email = user_info.get("email")
+                                logger.info(f"      📧 Retrieved Google email: {google_email}")
+                            else:
+                                logger.warning(f"      ⚠️  Failed to get Google user info: {response.status_code} - {response.text[:200]}")
                 except Exception as email_error:
-                    logger.warning(f"      ⚠️  Could not retrieve Google email: {email_error}")
+                    logger.warning(f"      ⚠️  Could not retrieve Google email: {email_error}", exc_info=True)
             
             logger.info(f"      ✅ Adding to OAuth integrations list (authorized: {oauth_authorized}, email: {google_email})")
             
