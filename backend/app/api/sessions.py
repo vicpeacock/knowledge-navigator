@@ -1012,13 +1012,16 @@ async def chat(
     current_user: User = Depends(get_current_user),
 ):
     """Send a message and get AI response (for current user)"""
-    # Log immediately at the start of the function
+    # Log immediately at the start of the function - BEFORE any processing
     import sys
-    print(f"[CHAT ENDPOINT] ===== CHAT REQUEST RECEIVED =====", file=sys.stderr)
-    print(f"[CHAT ENDPOINT] session_id={session_id}, message_length={len(request.message) if request else 'None'}, user={current_user.email if current_user else 'None'}", file=sys.stderr)
-    logger.info(f"📨📨📨 CHAT REQUEST RECEIVED: session_id={session_id}, message='{request.message[:100] if request and request.message else 'None'}', user={current_user.email if current_user else 'None'}")
-    import sys
-    print(f"[SESSIONS] CHAT REQUEST: session_id={session_id}, message='{request.message[:100]}', user={current_user.email}", file=sys.stderr)
+    try:
+        print(f"[CHAT ENDPOINT] ===== CHAT REQUEST RECEIVED =====", file=sys.stderr)
+        print(f"[CHAT ENDPOINT] session_id={session_id}, message_length={len(request.message) if request else 'None'}, user={current_user.email if current_user else 'None'}", file=sys.stderr)
+        logger.info(f"📨📨📨 CHAT REQUEST RECEIVED: session_id={session_id}, message='{request.message[:100] if request and request.message else 'None'}', user={current_user.email if current_user else 'None'}")
+        print(f"[SESSIONS] CHAT REQUEST: session_id={session_id}, message='{request.message[:100]}', user={current_user.email}", file=sys.stderr)
+    except Exception as log_error:
+        # Even if logging fails, try to continue
+        print(f"[CHAT ENDPOINT] ERROR in initial logging: {log_error}", file=sys.stderr)
     
     # Check active SSE connections for this session
     active_sessions = agent_activity_stream.get_active_sessions()
@@ -1252,6 +1255,9 @@ async def chat(
 
         session.session_metadata = existing_metadata
 
+        # CRITICAL: Save assistant message to database BEFORE returning response to frontend
+        # This ensures that if the HTTP response fails or times out, the message is still
+        # available when the frontend reloads messages from the database
         if not langgraph_result.get("assistant_message_saved", False):
             assistant_message = MessageModel(
                 session_id=session_id,
@@ -1265,14 +1271,24 @@ async def chat(
             )
             db.add(assistant_message)
 
+        # Commit MUST complete before returning response to ensure message is persisted
         try:
             await db.commit()
             await db.refresh(session)
+            logger.info(f"✅ Assistant message saved to database for session {session_id}")
         except Exception as commit_error:
-            logger.error(f"❌ Error committing to database: {commit_error}", exc_info=True)
+            logger.error(f"❌ Error committing assistant message to database: {commit_error}", exc_info=True)
             await db.rollback()
-            # Try to get the response anyway, even if commit failed
-            logger.warning("⚠️  Database commit failed, but returning response anyway")
+            # CRITICAL: If commit fails, we still need to ensure the message is saved
+            # Try one more time before returning
+            try:
+                db.add(assistant_message)
+                await db.commit()
+                logger.info(f"✅ Assistant message saved to database (retry) for session {session_id}")
+            except Exception as retry_error:
+                logger.error(f"❌ Retry commit also failed: {retry_error}", exc_info=True)
+                await db.rollback()
+                logger.warning("⚠️  Database commit failed, but returning response anyway")
 
         # Ensure response is not empty - if it is, provide a fallback message
         if not chat_response.response or not chat_response.response.strip():
@@ -1293,7 +1309,17 @@ async def chat(
 
         _publish_agent_events(agent_activity_stream, session_id, agent_events)
 
-        return chat_response.model_copy(update={"agent_activity": agent_events})
+        final_response = chat_response.model_copy(update={"agent_activity": agent_events})
+        
+        # Log before returning to verify response is correct
+        logger.info(f"📤 Returning ChatResponse to frontend:")
+        logger.info(f"   Response length: {len(final_response.response) if final_response.response else 0}")
+        logger.info(f"   Response preview: {final_response.response[:200] if final_response.response else 'EMPTY'}...")
+        logger.info(f"   Tools used: {len(final_response.tools_used)}")
+        logger.info(f"   Agent activity events: {len(final_response.agent_activity)}")
+        print(f"[SESSIONS] Returning ChatResponse: response_length={len(final_response.response) if final_response.response else 0}", file=sys.stderr)
+        
+        return final_response
     
     # Initialize tool manager
     from app.core.tool_manager import ToolManager
@@ -1894,7 +1920,7 @@ Analizza i risultati dei tool sopra e rispondi all'utente in modo naturale e dir
     agent_events = _generate_fallback_agent_events()
     _publish_agent_events(agent_activity_stream, session_id, agent_events)
 
-    return ChatResponse(
+    final_response = ChatResponse(
         response=response_text,
         session_id=session_id,
         memory_used=memory_used,
@@ -1904,6 +1930,15 @@ Analizza i risultati dei tool sopra e rispondi all'utente in modo naturale e dir
         high_urgency_notifications=high_urgency_notifs,
         agent_activity=agent_events,
     )
+    
+    # Log before returning to verify response is correct (legacy path)
+    logger.info(f"📤 Returning ChatResponse (legacy path) to frontend:")
+    logger.info(f"   Response length: {len(final_response.response) if final_response.response else 0}")
+    logger.info(f"   Response preview: {final_response.response[:200] if final_response.response else 'EMPTY'}...")
+    logger.info(f"   Tools used: {len(final_response.tools_used)}")
+    print(f"[SESSIONS] Returning ChatResponse (legacy): response_length={len(final_response.response) if final_response.response else 0}", file=sys.stderr)
+    
+    return final_response
 
 
 @router.get("/{session_id}/agent-activity/stream")

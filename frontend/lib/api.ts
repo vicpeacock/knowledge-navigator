@@ -196,6 +196,12 @@ export const usersApi = {
     api.get('/api/v1/users/me/tools'),
   updateToolsPreferences: (enabledTools: string[]) =>
     api.put('/api/v1/users/me/tools', { enabled_tools: enabledTools }),
+  getBackgroundServicesPreferences: () =>
+    api.get('/api/v1/users/me/background-services'),
+  updateBackgroundServicesPreferences: (data: { email_notifications_enabled?: boolean; calendar_notifications_enabled?: boolean }) =>
+    api.put('/api/v1/users/me/background-services', data),
+  getOAuthIntegrations: () =>
+    api.get('/api/v1/users/me/oauth-integrations'),
 }
 
 // API Keys API

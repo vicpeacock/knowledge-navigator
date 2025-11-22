@@ -8,11 +8,12 @@ from pydantic import BaseModel, EmailStr, Field
 import logging
 
 from app.db.database import get_db
-from app.models.database import User
+from app.models.database import User, Integration
 from app.core.tenant_context import get_tenant_id
 from app.core.user_context import get_current_user, require_admin
 from app.core.auth import hash_password, generate_email_verification_token
 from app.services.email_sender import get_email_sender
+from app.core.oauth_utils import is_google_workspace_server
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,32 @@ class UserProfileUpdate(BaseModel):
     """Update model for current user's own profile"""
     name: Optional[str] = None
     timezone: Optional[str] = None
+
+
+class BackgroundServicesPreferences(BaseModel):
+    """Preferences for background services (email polling, calendar watching)"""
+    email_notifications_enabled: Optional[bool] = True
+    calendar_notifications_enabled: Optional[bool] = True
+
+
+class BackgroundServicesPreferencesResponse(BaseModel):
+    """Response model for background services preferences"""
+    email_notifications_enabled: bool
+    calendar_notifications_enabled: bool
+
+
+class OAuthIntegrationStatus(BaseModel):
+    """Status of OAuth authorization for an MCP integration"""
+    integration_id: UUID
+    integration_name: str
+    server_url: str
+    oauth_required: bool
+    oauth_authorized: bool  # True if user has authorized OAuth for this integration
+
+
+class OAuthIntegrationsResponse(BaseModel):
+    """Response model for OAuth integrations status"""
+    integrations: List[OAuthIntegrationStatus]
 
 
 class UserResponse(BaseModel):
@@ -550,4 +577,137 @@ async def update_user_tools_preferences(
         available_tools=all_available_tools,
         user_preferences=preferences.enabled_tools,
     )
+
+
+@router.get("/me/background-services", response_model=BackgroundServicesPreferencesResponse)
+async def get_background_services_preferences(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current user's background services preferences"""
+    user_metadata = current_user.user_metadata or {}
+    background_prefs = user_metadata.get("background_services", {})
+    
+    # Default values: both enabled by default
+    email_enabled = background_prefs.get("email_notifications_enabled", True)
+    calendar_enabled = background_prefs.get("calendar_notifications_enabled", True)
+    
+    return BackgroundServicesPreferencesResponse(
+        email_notifications_enabled=email_enabled,
+        calendar_notifications_enabled=calendar_enabled,
+    )
+
+
+@router.put("/me/background-services", response_model=BackgroundServicesPreferencesResponse)
+async def update_background_services_preferences(
+    preferences: BackgroundServicesPreferences,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update current user's background services preferences"""
+    user_metadata = current_user.user_metadata or {}
+    user_metadata = dict(user_metadata)  # Create a copy to ensure SQLAlchemy detects the change
+    
+    # Initialize background_services if not present
+    if "background_services" not in user_metadata:
+        user_metadata["background_services"] = {}
+    
+    # Create a new dict for background_services to ensure SQLAlchemy detects the change
+    background_services = dict(user_metadata.get("background_services", {}))
+    
+    # Update preferences (only if provided)
+    if preferences.email_notifications_enabled is not None:
+        background_services["email_notifications_enabled"] = preferences.email_notifications_enabled
+    if preferences.calendar_notifications_enabled is not None:
+        background_services["calendar_notifications_enabled"] = preferences.calendar_notifications_enabled
+    
+    user_metadata["background_services"] = background_services
+    
+    # Use explicit UPDATE statement to ensure JSONB is saved correctly
+    from sqlalchemy import update
+    from app.models.database import User
+    await db.execute(
+        update(User)
+        .where(User.id == current_user.id)
+        .values(user_metadata=user_metadata)
+    )
+    await db.commit()
+    await db.refresh(current_user)
+    
+    logger.info(
+        f"Updated background services preferences for user {current_user.email}: "
+        f"email={background_services.get('email_notifications_enabled', True)}, "
+        f"calendar={background_services.get('calendar_notifications_enabled', True)}"
+    )
+    
+    return BackgroundServicesPreferencesResponse(
+        email_notifications_enabled=background_services.get("email_notifications_enabled", True),
+        calendar_notifications_enabled=background_services.get("calendar_notifications_enabled", True),
+    )
+
+
+@router.get("/me/oauth-integrations", response_model=OAuthIntegrationsResponse)
+async def get_oauth_integrations(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+):
+    """
+    Get list of MCP integrations that require OAuth and their authorization status for the current user.
+    This endpoint is used by the Profile page to show which integrations need OAuth authorization.
+    """
+    logger.info(f"🔍 Getting OAuth integrations for user {current_user.email} (tenant: {tenant_id})")
+    
+    # Get all enabled MCP integrations for this tenant
+    result = await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == tenant_id,
+            Integration.service_type == "mcp_server",
+            Integration.enabled == True
+        )
+    )
+    all_integrations = result.scalars().all()
+    
+    logger.info(f"   Found {len(all_integrations)} enabled MCP integrations")
+    
+    oauth_integrations = []
+    user_id_str = str(current_user.id)
+    
+    for integration in all_integrations:
+        session_metadata = integration.session_metadata or {}
+        server_url = session_metadata.get("server_url", "") or ""
+        integration_name = session_metadata.get("name", "") or server_url
+        
+        logger.info(f"   Checking integration {integration.id}: {integration_name}")
+        logger.info(f"      Server URL: {server_url}")
+        
+        # Check if this is a Google Workspace MCP server (requires OAuth)
+        is_google = is_google_workspace_server(server_url)
+        oauth_required = session_metadata.get("oauth_required", False)
+        
+        logger.info(f"      Is Google Workspace server: {is_google}")
+        logger.info(f"      OAuth required flag: {oauth_required}")
+        
+        # Also check oauth_required flag in metadata (some servers might have this set)
+        if is_google or oauth_required:
+            # Check if user has OAuth credentials for this integration
+            oauth_credentials = session_metadata.get("oauth_credentials", {})
+            oauth_authorized = user_id_str in oauth_credentials
+            
+            logger.info(f"      ✅ Adding to OAuth integrations list (authorized: {oauth_authorized})")
+            
+            oauth_integrations.append(
+                OAuthIntegrationStatus(
+                    integration_id=integration.id,
+                    integration_name=integration_name,
+                    server_url=server_url,
+                    oauth_required=True,
+                    oauth_authorized=oauth_authorized,
+                )
+            )
+        else:
+            logger.info(f"      ⏭️  Skipping (not a Google Workspace server)")
+    
+    logger.info(f"✅ Returning {len(oauth_integrations)} OAuth integrations")
+    return OAuthIntegrationsResponse(integrations=oauth_integrations)
 

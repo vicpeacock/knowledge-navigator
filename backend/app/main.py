@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 import time
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -167,64 +168,144 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         if frontend_trace_id:
             span_attributes["frontend.trace_id"] = frontend_trace_id
         
-        with trace_span(f"{method} {path}", span_attributes):
-            set_trace_attribute("http.method", method)
-            set_trace_attribute("http.path", path)
-            if frontend_trace_id:
-                set_trace_attribute("frontend.trace_id", frontend_trace_id)
-                # Log correlation for debugging
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.debug(f"Frontend trace ID received: {frontend_trace_id}")
-            
-            # Increment request counter
-            increment_counter("http_requests_total", labels={
-                "method": method,
-                "path": path,
-                "status": "unknown"
-            })
-            
-            try:
-                response = await call_next(request)
-                duration = time.time() - start_time
+        # Use trace_span but wrap it in try/except to avoid blocking
+        try:
+            with trace_span(f"{method} {path}", span_attributes):
+                set_trace_attribute("http.method", method)
+                set_trace_attribute("http.path", path)
+                if frontend_trace_id:
+                    set_trace_attribute("frontend.trace_id", frontend_trace_id)
+                    # Log correlation for debugging
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.debug(f"Frontend trace ID received: {frontend_trace_id}")
                 
-                # Record metrics
+                # Increment request counter
+                increment_counter("http_requests_total", labels={
+                    "method": method,
+                    "path": path,
+                    "status": "unknown"
+                })
+                
+                try:
+                    # Add timeout to prevent infinite blocking in middleware
+                    response = await asyncio.wait_for(
+                        call_next(request),
+                        timeout=600.0  # 10 minutes max - should be enough for chat requests
+                    )
+                    duration = time.time() - start_time
+                    
+                    # Record metrics
+                    status_code = response.status_code
+                    observe_histogram("http_request_duration_seconds", duration, labels={
+                        "method": method,
+                        "path": path,
+                        "status": str(status_code)
+                    })
+                    
+                    increment_counter("http_requests_total", value=1, labels={
+                        "method": method,
+                        "path": path,
+                        "status": str(status_code)
+                    })
+                    
+                    # Add trace ID to response headers
+                    trace_id = get_trace_id()
+                    if trace_id:
+                        response.headers["X-Trace-ID"] = trace_id
+                    
+                    return response
+                except asyncio.TimeoutError:
+                    duration = time.time() - start_time
+                    logger.error(f"Request timeout after {duration:.2f}s: {method} {path}")
+                    observe_histogram("http_request_duration_seconds", duration, labels={
+                        "method": method,
+                        "path": path,
+                        "status": "504"
+                    })
+                    increment_counter("http_requests_errors_total", labels={
+                        "method": method,
+                        "path": path,
+                        "error_type": "TimeoutError"
+                    })
+                    from fastapi import HTTPException, status as http_status
+                    raise HTTPException(
+                        status_code=http_status.HTTP_504_GATEWAY_TIMEOUT,
+                        detail=f"Request timed out after {duration:.2f} seconds"
+                    )
+                except Exception as e:
+                    duration = time.time() - start_time
+                    status_code = 500
+                    
+                    # Record error metrics
+                    observe_histogram("http_request_duration_seconds", duration, labels={
+                        "method": method,
+                        "path": path,
+                        "status": "500"
+                    })
+                    
+                    increment_counter("http_requests_errors_total", labels={
+                        "method": method,
+                        "path": path,
+                        "error_type": type(e).__name__
+                    })
+                    
+                    raise
+        except Exception as trace_error:
+            # If tracing fails, continue anyway - don't block requests
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Tracing error (continuing anyway): {trace_error}")
+            try:
+                response = await asyncio.wait_for(
+                    call_next(request),
+                    timeout=600.0
+                )
+                duration = time.time() - start_time
                 status_code = response.status_code
+                # Log metrics even if tracing failed
                 observe_histogram("http_request_duration_seconds", duration, labels={
                     "method": method,
                     "path": path,
                     "status": str(status_code)
                 })
-                
                 increment_counter("http_requests_total", value=1, labels={
                     "method": method,
                     "path": path,
                     "status": str(status_code)
                 })
-                
-                # Add trace ID to response headers
-                trace_id = get_trace_id()
-                if trace_id:
-                    response.headers["X-Trace-ID"] = trace_id
-                
                 return response
+            except asyncio.TimeoutError:
+                duration = time.time() - start_time
+                logger.error(f"Request timeout after {duration:.2f}s (fallback): {method} {path}")
+                observe_histogram("http_request_duration_seconds", duration, labels={
+                    "method": method,
+                    "path": path,
+                    "status": "504"
+                })
+                increment_counter("http_requests_errors_total", labels={
+                    "method": method,
+                    "path": path,
+                    "error_type": "TimeoutError"
+                })
+                from fastapi import HTTPException, status as http_status
+                raise HTTPException(
+                    status_code=http_status.HTTP_504_GATEWAY_TIMEOUT,
+                    detail=f"Request timed out after {duration:.2f} seconds (fallback)"
+                )
             except Exception as e:
                 duration = time.time() - start_time
                 status_code = 500
-                
-                # Record error metrics
+                logger.error(f"Error in request (fallback): {e}", exc_info=True)
                 observe_histogram("http_request_duration_seconds", duration, labels={
                     "method": method,
                     "path": path,
                     "status": "500"
                 })
-                
                 increment_counter("http_requests_errors_total", labels={
                     "method": method,
                     "path": path,
                     "error_type": type(e).__name__
                 })
-                
                 raise
 
 

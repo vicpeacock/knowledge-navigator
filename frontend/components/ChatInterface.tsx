@@ -364,17 +364,25 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
     setLoading(true)
 
     try {
+      console.log('[ChatInterface] Sending chat request...')
       const response = await sessionsApi.chat(sessionId, input)
-      console.log('Chat response received:', response.data)
+      console.log('[ChatInterface] Chat response received:', {
+        hasData: !!response.data,
+        hasResponse: !!(response.data?.response),
+        responseLength: response.data?.response?.length || 0,
+        responsePreview: response.data?.response?.substring(0, 100) || 'EMPTY',
+        toolsUsed: response.data?.tools_used?.length || 0,
+        agentActivity: response.data?.agent_activity?.length || 0,
+      })
       
       // Check if response is valid
-      if (!response.data) {
-        console.error('No data in response:', response)
-        // Don't throw error - might be background task
-        console.log('No data in response (might be background task), will reload messages')
+      if (!response || !response.data) {
+        console.error('[ChatInterface] No data in response:', response)
+        // If no response data, the message might have been saved but response failed
+        // Reload messages from database to get the saved response
+        console.log('[ChatInterface] No data in response - reloading messages from database')
         setLoading(false)
-        // Reload messages to get the response that was saved
-        setTimeout(() => loadMessages(), 2000)
+        setTimeout(() => loadMessages(), 1000)
         return
       }
       

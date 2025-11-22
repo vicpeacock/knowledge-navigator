@@ -787,26 +787,12 @@ export default function IntegrationsPage() {
 
                       <div className="flex gap-2">
                       {integration.oauth_required && (
-                        <button
-                          onClick={async () => {
-                            try {
-                              const response = await integrationsApi.mcp.authorize(integration.id)
-                              // Redirect to OAuth authorization URL
-                              if (response.data.authorization_url) {
-                                window.location.href = response.data.authorization_url
-                              } else {
-                                addStatusMessage('error', 'No authorization URL received')
-                              }
-                            } catch (error: any) {
-                              console.error('OAuth authorization failed:', error.response?.data?.detail || error.message)
-                              addStatusMessage('error', `OAuth authorization failed: ${error.response?.data?.detail || error.message}`)
-                            }
-                          }}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                        >
-                          <ExternalLink size={16} />
-                          Authorize OAuth
-                        </button>
+                        <div className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg flex items-center gap-2 text-sm">
+                          <span>OAuth required - authorize in</span>
+                          <Link href="/settings/profile" className="text-blue-600 dark:text-blue-400 hover:underline">
+                            Profile Settings
+                          </Link>
+                        </div>
                       )}
                       <button
                         onClick={async () => {

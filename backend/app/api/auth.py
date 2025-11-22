@@ -154,10 +154,15 @@ async def login(
     tenant_id: UUID = Depends(get_tenant_id),
 ):
     """Login user and return JWT tokens"""
-    # Find user by email and tenant
+    # Email matching should be case-insensitive
+    from sqlalchemy import func
+    normalized_email = request.email.lower().strip()
+    logger.info(f"🔐 Login attempt for email: {request.email} (normalized: {normalized_email}), tenant_id: {tenant_id}")
+    
+    # Find user by email (case-insensitive) and tenant
     result = await db.execute(
         select(User).where(
-            User.email == request.email,
+            func.lower(User.email) == normalized_email,
             User.tenant_id == tenant_id,
             User.active == True
         )
@@ -165,6 +170,7 @@ async def login(
     user = result.scalar_one_or_none()
     
     if not user:
+        logger.warning(f"❌ Login failed: User not found for email {request.email} (normalized: {normalized_email}, tenant: {tenant_id})")
         # Don't reveal if user exists or not (security best practice)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

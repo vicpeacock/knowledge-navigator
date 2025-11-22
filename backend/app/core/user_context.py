@@ -37,6 +37,8 @@ async def get_current_user(
     Raises:
         HTTPException: If token is invalid or user not found
     """
+    logger.debug(f"[get_current_user] Called with tenant_id={tenant_id}, has_auth={bool(authorization)}")
+    
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -93,14 +95,23 @@ async def get_current_user(
         )
     
     # Get user from database
-    result = await db.execute(
-        select(User).where(
-            User.id == user_uuid,
-            User.tenant_id == tenant_id,  # Ensure user belongs to current tenant
-            User.active == True
+    logger.debug(f"[get_current_user] Querying database for user_id={user_uuid}, tenant_id={tenant_id}")
+    try:
+        result = await db.execute(
+            select(User).where(
+                User.id == user_uuid,
+                User.tenant_id == tenant_id,  # Ensure user belongs to current tenant
+                User.active == True
+            )
         )
-    )
-    user = result.scalar_one_or_none()
+        user = result.scalar_one_or_none()
+        logger.debug(f"[get_current_user] Query completed, user found: {user is not None}")
+    except Exception as db_error:
+        logger.error(f"[get_current_user] Database query failed: {db_error}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error during authentication",
+        ) from db_error
     
     if not user:
         logger.warning(f"User not found or inactive: {user_uuid} (tenant: {tenant_id})")
@@ -110,6 +121,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    logger.debug(f"[get_current_user] Returning user: {user.email}")
     return user
 
 

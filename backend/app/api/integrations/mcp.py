@@ -150,19 +150,24 @@ def _get_oauth_token_for_user(
         return None
 
 
-def _get_mcp_client_for_integration(integration: IntegrationModel, current_user: Optional[User] = None) -> MCPClient:
+def _get_mcp_client_for_integration(
+    integration: IntegrationModel, 
+    current_user: Optional[User] = None,
+    oauth_token: Optional[str] = None
+) -> MCPClient:
     """
     Create MCP client for a specific integration.
     
     This function handles:
     - URL resolution (Docker vs localhost)
     - OAuth server detection
-    - OAuth token retrieval (if available)
+    - OAuth token retrieval (if available) or use provided token
     - MCPClient creation
     
     Args:
         integration: The MCP integration
-        current_user: Optional user for OAuth token retrieval
+        current_user: Optional user for OAuth token retrieval (used if oauth_token not provided)
+        oauth_token: Optional pre-retrieved OAuth token (takes precedence over current_user)
         
     Returns:
         Configured MCPClient instance
@@ -184,14 +189,15 @@ def _get_mcp_client_for_integration(integration: IntegrationModel, current_user:
     is_oauth = is_oauth_server(resolved_url, oauth_required)
     use_auth_token = not is_oauth
     
-    # For OAuth 2.1 servers, retrieve OAuth token if user is available
-    oauth_token: Optional[str] = None
-    if is_oauth and current_user:
+    # For OAuth 2.1 servers, retrieve OAuth token if not provided
+    if is_oauth and not oauth_token and current_user:
         oauth_token = _get_oauth_token_for_user(integration, current_user)
         if oauth_token:
             logger.info(f"✅ Retrieved OAuth access token for user {current_user.id}")
         else:
             logger.info(f"ℹ️  No OAuth token available for user {current_user.id} - user may need to authenticate")
+    elif is_oauth and oauth_token:
+        logger.info(f"✅ Using provided OAuth token")
     
     # Create client with OAuth token if available (for OAuth 2.1 servers)
     # or without token (for MCP Gateway or when no OAuth credentials available)
@@ -467,6 +473,7 @@ async def mcp_oauth_callback(
     state: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: Optional[User] = Depends(get_current_user),
 ):
     """OAuth2 callback for Google Workspace MCP server"""
     import logging
@@ -476,6 +483,7 @@ async def mcp_oauth_callback(
     logger.info(f"   Code: {code[:20]}... (length: {len(code)})")
     logger.info(f"   State: {state[:50] if state else 'None'}...")
     logger.info(f"   Tenant ID: {tenant_id}")
+    logger.info(f"   Current user from session: {current_user.email if current_user else 'None'} (ID: {current_user.id if current_user else 'None'})")
     
     if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
         raise HTTPException(
@@ -550,6 +558,16 @@ async def mcp_oauth_callback(
             logger.error(f"❌ integration_id is None after decoding")
             raise HTTPException(status_code=400, detail="Invalid state parameter: integration_id is required")
         
+        # CRITICAL FIX: If user_id is not in state or is None, use current_user from session
+        # This ensures we always save credentials for the correct user
+        if not user_id:
+            if current_user:
+                user_id = current_user.id
+                logger.warning(f"⚠️  user_id not found in state, using current_user from session: {user_id}")
+            else:
+                logger.error(f"❌ user_id is None and no current_user available in callback")
+                raise HTTPException(status_code=400, detail="User ID is required but not found in state or session")
+        
         # Get integration (now that we have integration_id from state)
         result = await db.execute(
             select(IntegrationModel)
@@ -604,8 +622,14 @@ async def mcp_oauth_callback(
         if "oauth_credentials" not in session_metadata:
             session_metadata["oauth_credentials"] = {}
         
-        user_id_str = str(user_id) if user_id else "default"
+        # Ensure we have a valid user_id (should be set by now from state or current_user)
+        if not user_id:
+            logger.error(f"❌ user_id is still None after all checks")
+            raise HTTPException(status_code=400, detail="User ID is required but not found")
+        
+        user_id_str = str(user_id)
         logger.info(f"🔐 Encrypting OAuth credentials for user_id_str: {user_id_str}")
+        logger.info(f"   User email (if available): {current_user.email if current_user else 'Not available'}")
         logger.info(f"   Credentials keys: {list(credentials.keys())}")
         logger.info(f"   Token preview: {credentials.get('token', '')[:20]}...")
         
@@ -682,9 +706,9 @@ async def mcp_oauth_callback(
             logger.warning(f"Could not fetch tools after OAuth: {tools_error}", exc_info=True)
             # Continue anyway - tools will be discovered when used
         
-        # Redirect to frontend
+        # Redirect to frontend Profile page (where OAuth authorization is managed)
         frontend_url = settings.frontend_url or "http://localhost:3003"
-        redirect_url = f"{frontend_url}/integrations?success=true&integration_id={integration_id}&oauth_complete=true"
+        redirect_url = f"{frontend_url}/settings/profile?oauth_success=true&integration_id={integration_id}"
         logger.info(f"✅ OAuth callback completed successfully, redirecting to: {redirect_url}")
         return RedirectResponse(url=redirect_url)
     except Exception as e:

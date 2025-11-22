@@ -82,6 +82,27 @@ class CalendarWatcher:
         """Check upcoming events for a specific integration"""
         events_created = []
         
+        # Check user preferences for calendar notifications (if integration has a user_id)
+        if integration.user_id:
+            from app.models.database import User
+            user_result = await self.db.execute(
+                select(User).where(User.id == integration.user_id)
+            )
+            user = user_result.scalar_one_or_none()
+            if user:
+                user_metadata = user.user_metadata or {}
+                background_services = user_metadata.get("background_services", {})
+                calendar_notifications_enabled = background_services.get("calendar_notifications_enabled", True)
+                
+                if not calendar_notifications_enabled:
+                    logger.info(f"📅 Calendar notifications disabled for user {user.email} (integration {integration.id}) - skipping")
+                    return events_created
+            else:
+                logger.warning(f"⚠️  User {integration.user_id} not found for integration {integration.id}")
+        # For global integrations (user_id = NULL), check all users in tenant
+        # For now, we'll create notifications for global integrations (backward compatibility)
+        # TODO: Consider adding tenant-level preferences or checking all users
+        
         # Setup calendar service per questa integrazione
         try:
             # Decrypt credentials

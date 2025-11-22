@@ -86,13 +86,27 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
         }, 0)
       }
     } catch (error: any) {
-      console.error('Error fetching notifications:', error)
-      // Se è un errore di timeout o di rete, mantieni le notifiche esistenti
-      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-        console.warn('Request timeout, keeping existing notifications')
-      } else {
-        // Per altri errori, svuota le notifiche
+      console.error('[NotificationBell] Error fetching notifications:', error)
+      const status = error.response?.status
+      const errorCode = error.code
+      const errorMessage = error.message || ''
+      
+      // Mantieni le notifiche esistenti per la maggior parte degli errori
+      // Svuota solo se l'errore indica che le notifiche non sono più valide
+      if (
+        status === 401 || // Unauthorized - l'utente non è più autenticato
+        status === 403 || // Forbidden - l'utente non ha più accesso
+        status === 404    // Not Found - la sessione non esiste più
+      ) {
+        console.warn(`[NotificationBell] Clearing notifications due to ${status} error (auth/session issue)`)
         setNotifications([])
+      } else if (errorCode === 'ECONNABORTED' || errorMessage.includes('timeout')) {
+        // Timeout: mantieni le notifiche esistenti
+        console.warn('[NotificationBell] Request timeout, keeping existing notifications')
+      } else {
+        // Altri errori (500, network, etc.): mantieni le notifiche esistenti
+        // Non svuotare perché potrebbero essere errori temporanei
+        console.warn(`[NotificationBell] Error ${status || errorCode || 'unknown'}, keeping existing notifications to avoid data loss`)
       }
     } finally {
       setLoading(false)
@@ -120,10 +134,15 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
         try {
           const data = JSON.parse(event.data)
           if (data.type === 'notification_update') {
+            console.log(`[NotificationBell] SSE update: received ${data.notifications?.length || 0} notifications`)
             setNotifications(data.notifications || [])
+          } else if (data.type === 'error') {
+            console.error('[NotificationBell] SSE error:', data.message)
+            // Non svuotare le notifiche in caso di errore SSE, mantieni quelle esistenti
           }
         } catch (e) {
-          console.error('Error parsing SSE message:', e)
+          console.error('[NotificationBell] Error parsing SSE message:', e)
+          // Non svuotare le notifiche in caso di errore di parsing
         }
       }
 
@@ -151,11 +170,17 @@ export default function NotificationBell({ sessionId }: NotificationBellProps) {
   // Initial fetch and polling when popup is closed
   useEffect(() => {
     if (sessionId && !isOpen) {
+      // Fetch immediately when popup closes
       fetchNotifications()
-      const interval = setInterval(fetchNotifications, 30000) // Poll every 30s when closed
+      // Poll every 30s when closed (but don't clear notifications on error)
+      const interval = setInterval(() => {
+        console.log('[NotificationBell] Polling notifications (popup closed)')
+        fetchNotifications()
+      }, 30000) // Poll every 30s when closed
       return () => clearInterval(interval)
     } else if (sessionId && isOpen) {
       // Fetch once when popup opens (SSE will take over)
+      console.log('[NotificationBell] Popup opened, fetching notifications')
       fetchNotifications()
     }
   }, [sessionId, isOpen, fetchNotifications])
