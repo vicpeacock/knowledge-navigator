@@ -61,6 +61,7 @@ class OAuthIntegrationStatus(BaseModel):
     server_url: str
     oauth_required: bool
     oauth_authorized: bool  # True if user has authorized OAuth for this integration
+    google_email: Optional[str] = None  # Email of the authorized Google account
 
 
 class OAuthIntegrationsResponse(BaseModel):
@@ -694,7 +695,37 @@ async def get_oauth_integrations(
             oauth_credentials = session_metadata.get("oauth_credentials", {})
             oauth_authorized = user_id_str in oauth_credentials
             
-            logger.info(f"      ✅ Adding to OAuth integrations list (authorized: {oauth_authorized})")
+            # Try to get Google email from OAuth credentials
+            google_email = None
+            if oauth_authorized:
+                try:
+                    from app.api.integrations.mcp import _decrypt_credentials
+                    from app.core.config import settings
+                    
+                    encrypted_creds = oauth_credentials.get(user_id_str)
+                    if encrypted_creds:
+                        credentials = _decrypt_credentials(encrypted_creds, settings.credentials_encryption_key)
+                        access_token = credentials.get("token")
+                        
+                        if access_token:
+                            # Call Google API to get user info
+                            import httpx
+                            async with httpx.AsyncClient() as client:
+                                response = await client.get(
+                                    "https://www.googleapis.com/oauth2/v2/userinfo",
+                                    headers={"Authorization": f"Bearer {access_token}"},
+                                    timeout=5.0
+                                )
+                                if response.status_code == 200:
+                                    user_info = response.json()
+                                    google_email = user_info.get("email")
+                                    logger.info(f"      📧 Retrieved Google email: {google_email}")
+                                else:
+                                    logger.warning(f"      ⚠️  Failed to get Google user info: {response.status_code}")
+                except Exception as email_error:
+                    logger.warning(f"      ⚠️  Could not retrieve Google email: {email_error}")
+            
+            logger.info(f"      ✅ Adding to OAuth integrations list (authorized: {oauth_authorized}, email: {google_email})")
             
             oauth_integrations.append(
                 OAuthIntegrationStatus(
@@ -703,6 +734,7 @@ async def get_oauth_integrations(
                     server_url=server_url,
                     oauth_required=True,
                     oauth_authorized=oauth_authorized,
+                    google_email=google_email,
                 )
             )
         else:
