@@ -158,6 +158,8 @@ function ProfileContent() {
       setOAuthIntegrationsLoading(true)
       setOAuthIntegrationsError(null)
       const response = await usersApi.getOAuthIntegrations()
+      console.log('OAuth integrations response:', response.data)
+      console.log('Integrations:', response.data.integrations)
       setOAuthIntegrations(response.data.integrations || [])
     } catch (err: any) {
       const errorDetail = err.response?.data?.detail
