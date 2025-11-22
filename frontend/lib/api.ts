@@ -346,6 +346,8 @@ export const integrationsApi = {
     debug: (integrationId: string) => api.get(`/api/integrations/mcp/${integrationId}/debug`),
     authorize: (integrationId: string) =>
       api.get(`/api/integrations/mcp/${integrationId}/oauth/authorize`),
+    revoke: (integrationId: string) =>
+      api.delete(`/api/integrations/mcp/${integrationId}/oauth/revoke`),
   },
   email: {
         authorize: (integrationId?: string) => {

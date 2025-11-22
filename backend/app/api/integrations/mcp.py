@@ -452,10 +452,12 @@ async def authorize_mcp_oauth(
             json.dumps(state_payload).encode("utf-8")
         ).decode("utf-8")
         
+        # Always use 'consent' prompt to force re-authorization if needed
+        # This allows users to re-authenticate and update permissions
         authorization_url, _ = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
-            prompt='consent',
+            prompt='consent',  # Force consent screen even if already authorized
             state=state_str,
         )
         
@@ -465,6 +467,54 @@ async def authorize_mcp_oauth(
     except Exception as e:
         logger.error(f"Error creating OAuth flow: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error creating OAuth flow: {str(e)}")
+
+
+@router.delete("/{integration_id}/oauth/revoke")
+async def revoke_mcp_oauth(
+    integration_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """Revoke OAuth credentials for the current user for a specific MCP integration"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Get integration
+    result = await db.execute(
+        select(IntegrationModel)
+        .where(
+            IntegrationModel.id == integration_id,
+            IntegrationModel.tenant_id == tenant_id,
+            IntegrationModel.service_type == "mcp_server"
+        )
+    )
+    integration = result.scalar_one_or_none()
+    
+    if not integration:
+        raise HTTPException(status_code=404, detail="MCP integration not found")
+    
+    session_metadata = integration.session_metadata or {}
+    user_id_str = str(current_user.id)
+    
+    # Remove OAuth credentials for this user
+    if "oauth_credentials" in session_metadata:
+        oauth_credentials = session_metadata.get("oauth_credentials", {})
+        if user_id_str in oauth_credentials:
+            del oauth_credentials[user_id_str]
+            session_metadata["oauth_credentials"] = oauth_credentials
+            integration.session_metadata = session_metadata
+            flag_modified(integration, "session_metadata")
+            await db.commit()
+            await db.refresh(integration)
+            logger.info(f"✅ OAuth credentials revoked for user {current_user.email} (id: {user_id_str})")
+            return {"message": "OAuth credentials revoked successfully"}
+        else:
+            logger.warning(f"No OAuth credentials found for user {current_user.email}")
+            return {"message": "No OAuth credentials found for this user"}
+    else:
+        logger.warning(f"No OAuth credentials stored for this integration")
+        return {"message": "No OAuth credentials found"}
 
 
 @router.get("/oauth/callback")
