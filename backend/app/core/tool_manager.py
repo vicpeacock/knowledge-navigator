@@ -1051,6 +1051,7 @@ class ToolManager:
             
             if is_oauth and current_user_for_oauth:
                 from app.services.oauth_token_manager import OAuthTokenManager
+                from app.core.exceptions import OAuthAuthenticationRequiredError
                 try:
                     oauth_token = await OAuthTokenManager.get_valid_token(
                         integration=integration,
@@ -1058,7 +1059,17 @@ class ToolManager:
                         db=db,
                         auto_refresh=True
                     )
-                    logger.info(f"   ✅ Retrieved OAuth token with refresh capability for user {current_user_for_oauth.id}")
+                    logger.info(f"   ✅ Retrieved OAuth token with refresh capability for user {current_user_for_oauth.id} ({current_user_for_oauth.email})")
+                except OAuthAuthenticationRequiredError as oauth_auth_error:
+                    logger.error(f"   ❌ OAuth authentication required for user {current_user_for_oauth.id} ({current_user_for_oauth.email})")
+                    logger.error(f"   Error: {oauth_auth_error}")
+                    # Return error immediately instead of continuing without token
+                    return {
+                        "error": f"OAuth authentication required. Please go to your Profile page and click 'Authorize OAuth' for the Google Workspace integration to authenticate with your Google account.",
+                        "oauth_required": True,
+                        "integration_id": str(integration.id),
+                        "user_email": current_user_for_oauth.email
+                    }
                 except Exception as oauth_error:
                     logger.warning(f"   ⚠️  Could not retrieve OAuth token: {oauth_error}")
                     # Continue without token - user may need to authenticate
