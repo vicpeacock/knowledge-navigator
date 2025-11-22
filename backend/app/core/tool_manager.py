@@ -461,6 +461,14 @@ class ToolManager:
                 sample_tool = mcp_tools[0]
                 logger.info(f"   Sample tool keys: {list(sample_tool.keys())}")
                 logger.info(f"   Sample tool: name={sample_tool.get('name')}, mcp_integration_id={sample_tool.get('mcp_integration_id')}, mcp_server_name={sample_tool.get('mcp_server_name')}")
+                # Log Drive tools specifically
+                drive_tools = [t for t in mcp_tools if 'drive' in t.get('name', '').lower()]
+                if drive_tools:
+                    logger.info(f"   📁 Found {len(drive_tools)} Drive tools:")
+                    for dt in drive_tools[:5]:
+                        logger.info(f"      - {dt.get('name')}: {dt.get('description', '')[:60]}")
+                else:
+                    logger.warning(f"   ⚠️  No Drive tools found in MCP tools list!")
             return mcp_tools
         except Exception as e:
             import logging
