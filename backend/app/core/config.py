@@ -144,6 +144,10 @@ class Settings(BaseSettings):
     # Google Maps API Key (for MCP Gateway)
     google_maps_api_key: Optional[str] = None
     
+    # Google Custom Search Engine (for web search with Gemini)
+    google_pse_api_key: Optional[str] = None  # Google Programmable Search Engine API key
+    google_pse_cx: Optional[str] = None  # Custom Search Engine ID
+    
     # Email sending (SMTP) - for invitation emails, password reset, etc.
     smtp_enabled: bool = False  # Set to True to enable email sending
     smtp_host: Optional[str] = None  # e.g., "smtp.gmail.com"
