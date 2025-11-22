@@ -46,11 +46,15 @@ class CalendarService:
             raise ValueError("Google OAuth credentials not configured")
 
         scope_list = list(scopes or [
+            "openid",  # Required for ID token with email
+            "email",  # Required for email in ID token
             "https://www.googleapis.com/auth/calendar.readonly",
             "https://www.googleapis.com/auth/calendar.events",
         ])
-        # Ensure calendar scopes are always included
+        # Ensure required scopes are always included
         for mandatory_scope in (
+            "openid",
+            "email",
             "https://www.googleapis.com/auth/calendar.readonly",
             "https://www.googleapis.com/auth/calendar.events",
         ):

@@ -66,6 +66,7 @@ function ProfileContent() {
     provider: string
     enabled: boolean
     purpose: string
+    google_email?: string | null
   }>>([])
   const [emailIntegrationsError, setEmailIntegrationsError] = useState<string | null>(null)
   const [emailIntegrationsSuccess, setEmailIntegrationsSuccess] = useState<string | null>(null)
@@ -75,6 +76,7 @@ function ProfileContent() {
     provider: string
     enabled: boolean
     purpose: string
+    google_email?: string | null
   }>>([])
   const [calendarIntegrationsError, setCalendarIntegrationsError] = useState<string | null>(null)
   const [calendarIntegrationsSuccess, setCalendarIntegrationsSuccess] = useState<string | null>(null)
@@ -724,6 +726,11 @@ function ProfileContent() {
                           </span>
                         )}
                       </div>
+                      {integration.google_email && (
+                        <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                          Authorized as: <span className="font-medium">{integration.google_email}</span>
+                        </p>
+                      )}
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         ID: {integration.id.substring(0, 8)}...
                       </p>
@@ -806,6 +813,11 @@ function ProfileContent() {
                           </span>
                         )}
                       </div>
+                      {integration.google_email && (
+                        <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                          Authorized as: <span className="font-medium">{integration.google_email}</span>
+                        </p>
+                      )}
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         ID: {integration.id.substring(0, 8)}...
                       </p>

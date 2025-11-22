@@ -52,6 +52,8 @@ class EmailService:
                 }
             },
                 scopes=[
+                    "openid",  # Required for ID token with email
+                    "email",  # Required for email in ID token
                     "https://www.googleapis.com/auth/gmail.readonly",
                     "https://www.googleapis.com/auth/gmail.modify",  # Per archiviare/modificare email
                     "https://www.googleapis.com/auth/gmail.send",  # Per inviare email
