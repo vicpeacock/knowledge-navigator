@@ -1476,21 +1476,26 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     except Exception as tool_error:
                         logger.error(f"❌ Tool {tool_name} failed: {tool_error}", exc_info=True)
                         tools_used.append(tool_name)
+                        error_msg = str(tool_error)[:200]  # Limit error message length
                         tool_results.append({
                             "tool": tool_name,
                             "parameters": tool_params,
-                            "result": {"error": str(tool_error)},
+                            "result": {"error": error_msg},
                         })
                         # Publish tool execution error event
                         log_agent_activity(
                             state,
                             agent_id="tool_execution",
                             status="error",
-                            message=f"Tool {tool_name} errore: {str(tool_error)[:100]}",
+                            message=f"Tool {tool_name} errore: {error_msg}",
                             agent_name="Tool Execution",
                         )
+                        # IMPORTANT: Continue execution even after tool error
+                        # Don't break the flow - let the LLM handle the error in the response
+                        logger.info(f"⚠️  Tool {tool_name} errore, ma continuo l'esecuzione per generare risposta")
             
             # After executing tools, generate final response
+            # IMPORTANT: Always generate a response, even if some tools failed
             if tool_results:
                 logger.info(f"Generating final response after {len(tool_results)} tool execution(s)")
                 try:
