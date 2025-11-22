@@ -160,8 +160,12 @@ class LlamaCppClient:
         
         # Return in Ollama-compatible format
         return {
-            "response": response_text,
+            "message": {
+                "content": response_text,
+                "role": "assistant"
+            },
             "model": self.model,
+            "response": response_text,  # Keep for backward compatibility
         }
     
     async def __aenter__(self):
