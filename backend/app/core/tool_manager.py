@@ -1142,11 +1142,33 @@ class ToolManager:
                             except Exception:
                                 pass  # Ignore if this also fails
                     
+                    # Check if result contains an error (isError flag or error in content)
+                    is_error = False
+                    error_message = None
+                    if isinstance(result, dict):
+                        if result.get("isError", False):
+                            is_error = True
+                            error_message = result.get("content", "Unknown error")
+                        elif "error" in result:
+                            is_error = True
+                            error_message = result.get("error", "Unknown error")
+                        elif "content" in result and isinstance(result["content"], str):
+                            # Check if content contains error indicators
+                            content_lower = result["content"].lower()
+                            if "error" in content_lower or "not enabled" in content_lower or "api error" in content_lower:
+                                is_error = True
+                                error_message = result["content"]
+                    
                     tool_result = {
-                        "success": True,
+                        "success": not is_error,
                         "result": result,
                         "tool": actual_tool_name,
                     }
+                    
+                    if is_error:
+                        logger.warning(f"   ⚠️  Tool {actual_tool_name} returned an error: {error_message}")
+                        # Add error to result for better error handling
+                        tool_result["error"] = error_message
                     
                     # Auto-index browser content if enabled
                     if auto_index and session_id and actual_tool_name in ["browser_navigate", "browser_snapshot"]:
