@@ -184,6 +184,25 @@ class ToolManager:
                     "required": ["url"]
                 }
             },
+            {
+                "name": "customsearch_search",
+                "description": "Esegue una ricerca sul web usando Google Custom Search API. Usa questo tool SOLO per informazioni generali che NON sono email o calendario dell'utente. Esempi: 'cerca informazioni su X', 'notizie su Y', 'cosa è Z'. NON usare per domande su email ('ci sono email non lette?' → usa get_emails) o calendario ('cosa ho domani?' → usa get_calendar_events). Richiede GOOGLE_PSE_API_KEY e GOOGLE_PSE_CX configurati.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "La query di ricerca da eseguire sul web"
+                        },
+                        "num": {
+                            "type": "integer",
+                            "default": 10,
+                            "description": "Numero di risultati da restituire (max 10)"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            },
             # WhatsApp integration temporarily disabled - will be re-enabled with Business API
             # {
             #     "name": "get_whatsapp_messages",
