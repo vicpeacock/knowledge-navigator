@@ -84,6 +84,8 @@ class Settings(BaseSettings):
     google_oauth_client_secret: Optional[str] = None
     # OAuth scopes for Google Workspace MCP
     google_workspace_oauth_scopes: List[str] = [
+        "openid",  # Required for ID token
+        "email",   # Required for user email in ID token
         "https://www.googleapis.com/auth/calendar",
         "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/gmail.readonly",
