@@ -749,6 +749,9 @@ async def get_oauth_integrations(
                         logger.debug(f"      ⚠️  Could not retrieve Google email: {email_error}")
             
             logger.info(f"      ✅ Adding to OAuth integrations list (authorized: {oauth_authorized}, email: {google_email})")
+            logger.info(f"      📋 Session metadata keys: {list(session_metadata.keys())}")
+            if "oauth_user_emails" in session_metadata:
+                logger.info(f"      📋 OAuth user emails: {session_metadata.get('oauth_user_emails', {})}")
             
             oauth_integrations.append(
                 OAuthIntegrationStatus(

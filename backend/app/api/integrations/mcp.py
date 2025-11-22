@@ -656,6 +656,8 @@ async def mcp_oauth_callback(
         
         flow.fetch_token(code=code)
         
+        from datetime import datetime, timezone
+        
         credentials = {
             "token": flow.credentials.token,
             "refresh_token": flow.credentials.refresh_token,
@@ -663,6 +665,7 @@ async def mcp_oauth_callback(
             "client_id": flow.credentials.client_id,
             "client_secret": flow.credentials.client_secret,
             "scopes": flow.credentials.scopes,
+            "token_created_at": datetime.now(timezone.utc).isoformat(),  # Track when token was created
         }
         
         # Get Google user email from token (save it for later display)
