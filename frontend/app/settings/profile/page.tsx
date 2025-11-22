@@ -84,6 +84,12 @@ function ProfileContent() {
       })
     } catch (err: any) {
       const errorDetail = err.response?.data?.detail
+      // Check if it's an authentication error
+      if (err.response?.status === 401 || (typeof errorDetail === 'string' && errorDetail.includes('Authorization header missing'))) {
+        // Redirect to login - token expired or missing
+        window.location.href = '/auth/login?redirect=/settings/profile'
+        return
+      }
       if (Array.isArray(errorDetail)) {
         // Pydantic validation errors
         setProfileError(errorDetail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', '))
@@ -107,6 +113,12 @@ function ProfileContent() {
       })
     } catch (err: any) {
       const errorDetail = err.response?.data?.detail
+      // Check if it's an authentication error
+      if (err.response?.status === 401 || (typeof errorDetail === 'string' && errorDetail.includes('Authorization header missing'))) {
+        // Don't redirect here - let the profile error handle it
+        setBackgroundServicesError('Authentication required. Please refresh the page or log in again.')
+        return
+      }
       if (Array.isArray(errorDetail)) {
         setBackgroundServicesError(errorDetail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', '))
       } else if (typeof errorDetail === 'string') {
@@ -127,6 +139,12 @@ function ProfileContent() {
       setOAuthIntegrations(response.data.integrations || [])
     } catch (err: any) {
       const errorDetail = err.response?.data?.detail
+      // Check if it's an authentication error
+      if (err.response?.status === 401 || (typeof errorDetail === 'string' && errorDetail.includes('Authorization header missing'))) {
+        // Don't redirect here - let the profile error handle it
+        setOAuthIntegrationsError('Authentication required. Please refresh the page or log in again.')
+        return
+      }
       if (Array.isArray(errorDetail)) {
         setOAuthIntegrationsError(errorDetail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', '))
       } else if (typeof errorDetail === 'string') {
