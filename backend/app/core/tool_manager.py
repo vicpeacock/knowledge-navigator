@@ -2067,7 +2067,32 @@ Riassunto:"""
             }
             
             async with httpx.AsyncClient(timeout=30.0) as client:
+                logger.info(f"   Calling Google Custom Search API: {url}")
+                logger.info(f"   Query: {query}, num: {min(num_results, 10)}")
                 response = await client.get(url, params=params)
+                
+                # Log response status
+                logger.info(f"   Response status: {response.status_code}")
+                
+                # Check for errors before raising
+                if response.status_code != 200:
+                    error_text = response.text[:500] if hasattr(response, 'text') else "No error details"
+                    logger.error(f"❌ Google Custom Search API error: {response.status_code}")
+                    logger.error(f"   Error response: {error_text}")
+                    
+                    # Try to parse error details
+                    try:
+                        error_data = response.json()
+                        error_message = error_data.get("error", {}).get("message", "Unknown error")
+                        logger.error(f"   Error message: {error_message}")
+                        return {
+                            "error": f"Google Custom Search API error ({response.status_code}): {error_message}"
+                        }
+                    except:
+                        return {
+                            "error": f"Google Custom Search API error ({response.status_code}): {error_text}"
+                        }
+                
                 response.raise_for_status()
                 data = response.json()
             
@@ -2127,11 +2152,41 @@ Riassunto:"""
             return result_dict
             
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error calling Google Custom Search API: {e.response.status_code} - {e.response.text}")
-            return {"error": f"HTTP error from Google Custom Search API: {e.response.status_code}"}
+            error_text = e.response.text[:500] if hasattr(e.response, 'text') else "No error details"
+            logger.error(f"❌ HTTP error calling Google Custom Search API: {e.response.status_code}")
+            logger.error(f"   Error response: {error_text}")
+            
+            # Try to parse error details
+            try:
+                error_data = e.response.json()
+                error_message = error_data.get("error", {}).get("message", "Unknown error")
+                error_reason = error_data.get("error", {}).get("errors", [{}])[0].get("reason", "")
+                logger.error(f"   Error message: {error_message}")
+                logger.error(f"   Error reason: {error_reason}")
+                
+                # Provide helpful error messages based on common issues
+                if "invalid" in error_reason.lower() or "invalid" in error_message.lower():
+                    return {
+                        "error": f"Invalid request to Google Custom Search API. Please check your API key and Search Engine ID. Error: {error_message}"
+                    }
+                elif "quota" in error_reason.lower() or "quota" in error_message.lower():
+                    return {
+                        "error": f"Google Custom Search API quota exceeded. You've reached the daily limit of 100 free searches. Error: {error_message}"
+                    }
+                else:
+                    return {
+                        "error": f"Google Custom Search API error ({e.response.status_code}): {error_message}"
+                    }
+            except:
+                return {
+                    "error": f"HTTP error from Google Custom Search API ({e.response.status_code}): {error_text}"
+                }
+        except httpx.RequestError as e:
+            logger.error(f"❌ Request error calling Google Custom Search API: {e}", exc_info=True)
+            return {"error": f"Network error connecting to Google Custom Search API: {str(e)}"}
         except Exception as e:
-            logger.error(f"Error calling Google Custom Search API: {e}", exc_info=True)
-            return {"error": str(e)}
+            logger.error(f"❌ Unexpected error calling Google Custom Search API: {e}", exc_info=True)
+            return {"error": f"Unexpected error: {str(e)}"}
     
     async def _execute_web_fetch(
         self,
