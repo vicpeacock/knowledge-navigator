@@ -146,18 +146,54 @@ def build_tool_catalog(tools: List[Dict[str, Any]]) -> str:
 
 def _format_tool_results_for_llm(tool_results: List[Dict[str, Any]]) -> str:
     """Format tool results for LLM with clear context, especially for emails"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     formatted_lines = ["=== Risultati Tool Eseguiti ===\n"]
     
     for tr in tool_results:
         tool_name = tr.get('tool', 'unknown')
         tool_result = tr.get('result', {})
         
+        logger.info(f"🔍 Formatting tool result for LLM: tool={tool_name}, result_type={type(tool_result)}")
+        if isinstance(tool_result, dict):
+            logger.info(f"   Result keys: {list(tool_result.keys())}")
+            if "success" in tool_result:
+                logger.info(f"   Success flag: {tool_result.get('success')}")
+            if "error" in tool_result:
+                logger.warning(f"   ⚠️  Error in result: {tool_result.get('error')}")
+            if "result" in tool_result:
+                inner_result = tool_result.get("result", {})
+                if isinstance(inner_result, dict):
+                    logger.info(f"   Inner result keys: {list(inner_result.keys())}")
+                    if "isError" in inner_result:
+                        logger.info(f"   Inner isError flag: {inner_result.get('isError')}")
+        
         formatted_lines.append(f"Tool: {tool_name}")
         
         if isinstance(tool_result, dict):
-            # Check for errors first
+            # Check for errors first - look in both outer and inner result
+            has_error = False
+            error_msg = None
+            
+            # Check outer result
             if "error" in tool_result:
-                formatted_lines.append(f"ERRORE: {tool_result['error']}\n")
+                has_error = True
+                error_msg = tool_result['error']
+            # Check inner result (from MCP tools)
+            elif "result" in tool_result:
+                inner_result = tool_result.get("result", {})
+                if isinstance(inner_result, dict):
+                    if inner_result.get("isError", False):
+                        has_error = True
+                        error_msg = inner_result.get("content", "Unknown error")
+                    elif "error" in inner_result:
+                        has_error = True
+                        error_msg = inner_result.get("error", "Unknown error")
+            
+            if has_error:
+                logger.warning(f"   ❌ Tool {tool_name} has error: {error_msg}")
+                formatted_lines.append(f"ERRORE: {error_msg}\n")
             elif tool_name == "get_emails":
                 # Special formatting for emails to make it clear these are received emails
                 emails = tool_result.get("emails", [])
