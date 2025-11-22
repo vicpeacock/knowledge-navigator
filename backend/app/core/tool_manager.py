@@ -363,30 +363,50 @@ class ToolManager:
                         
                         # Pattern matching for known MCP servers (order matters - more specific first)
                         # Google Workspace MCP tools (check first before generic "google")
-                        if "gmail" in tool_lower:
-                            return "Gmail"
-                        elif "calendar" in tool_lower:
+                        # Calendar tools - check for various patterns
+                        if ("calendar" in tool_lower or 
+                            "event" in tool_lower and ("create" in tool_lower or "update" in tool_lower or "delete" in tool_lower or "list" in tool_lower) or
+                            tool_lower.startswith("list_calendar") or
+                            tool_lower.startswith("create_calendar") or
+                            tool_lower.startswith("update_calendar") or
+                            tool_lower.startswith("delete_calendar") or
+                            tool_lower.startswith("get_calendar") or
+                            tool_lower.startswith("search_calendar")):
                             return "Calendar"
-                        elif "drive" in tool_lower:
+                        # Gmail tools
+                        elif ("gmail" in tool_lower or 
+                              "email" in tool_lower and ("send" in tool_lower or "search" in tool_lower or "list" in tool_lower or "get" in tool_lower)):
+                            return "Gmail"
+                        # Drive tools
+                        elif ("drive" in tool_lower or 
+                              "file" in tool_lower and ("create" in tool_lower or "upload" in tool_lower or "download" in tool_lower or "list" in tool_lower or "get" in tool_lower or "delete" in tool_lower or "copy" in tool_lower or "move" in tool_lower or "share" in tool_lower or "update" in tool_lower) or
+                              "folder" in tool_lower):
                             return "Drive"
-                        elif "docs" in tool_lower and "sheets" not in tool_lower:
+                        # Docs tools
+                        elif ("docs" in tool_lower and "sheets" not in tool_lower):
                             return "Docs"
-                        elif "sheets" in tool_lower:
+                        # Sheets tools
+                        elif ("sheets" in tool_lower or "spreadsheet" in tool_lower):
                             return "Sheets"
-                        elif "forms" in tool_lower:
+                        # Forms tools
+                        elif ("forms" in tool_lower or "form" in tool_lower):
                             return "Forms"
-                        elif "slides" in tool_lower:
+                        # Slides tools
+                        elif ("slides" in tool_lower or "presentation" in tool_lower):
                             return "Slides"
-                        elif "chat" in tool_lower:
+                        # Chat tools
+                        elif ("chat" in tool_lower or "space" in tool_lower):
                             return "Chat"
-                        elif "tasks" in tool_lower:
+                        # Tasks tools
+                        elif ("tasks" in tool_lower or "task" in tool_lower):
                             return "Tasks"
-                        elif "customsearch" in tool_lower or "custom_search" in tool_lower:
+                        # Custom Search tools
+                        elif ("customsearch" in tool_lower or "custom_search" in tool_lower):
                             return "Custom Search"
                         # Other MCP servers
-                        elif "wikipedia" in tool_lower or "wiki" in tool_lower:
+                        elif ("wikipedia" in tool_lower or "wiki" in tool_lower):
                             return "Wikipedia"
-                        elif "playwright" in tool_lower or "browser" in tool_lower or "navigate" in tool_lower or "screenshot" in tool_lower:
+                        elif ("playwright" in tool_lower or "browser" in tool_lower or "navigate" in tool_lower or "screenshot" in tool_lower):
                             return "Playwright"
                         elif ("paper" in tool_lower or "arxiv" in tool_lower or "research" in tool_lower or "pubmed" in tool_lower or
                               "biorxiv" in tool_lower or "crossref" in tool_lower or "iacr" in tool_lower or 
@@ -395,7 +415,7 @@ class ToolManager:
                               "download_semantic" in tool_lower or "search_biorxiv" in tool_lower or "search_crossref" in tool_lower or
                               "search_iacr" in tool_lower or "search_medrxiv" in tool_lower or "search_semantic" in tool_lower):
                             return "Paper Search"
-                        elif "maps" in tool_lower or "geocod" in tool_lower or "places" in tool_lower:
+                        elif ("maps" in tool_lower or "geocod" in tool_lower or "places" in tool_lower):
                             return "Google Maps"
                         else:
                             # Default: use integration name or "Unknown"
@@ -419,6 +439,13 @@ class ToolManager:
                             if should_include:
                                 # Detect server name from tool name
                                 detected_server = detect_server_from_tool_name(tool_name)
+                                
+                                # Log detection for debugging
+                                if detected_server == integration_name:
+                                    # Tool was not detected as a specific server, using integration name
+                                    logger.debug(f"   Tool '{tool_name}' -> server: '{detected_server}' (using integration name)")
+                                else:
+                                    logger.debug(f"   Tool '{tool_name}' -> server: '{detected_server}' (detected)")
                                 
                                 # Convert MCP tool format to our format
                                 original_description = tool_info.get("description", f"MCP tool: {tool_name}")

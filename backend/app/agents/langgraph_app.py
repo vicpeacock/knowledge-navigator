@@ -1377,6 +1377,10 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 if tool_calls_found and tool_calls_raw:
                     logger.error(f"🔧🔧🔧 Found tool_calls in response_data: {len(tool_calls_raw)} call(s)")
                     tool_calls = []
+                    # Get available tool names for validation
+                    available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
+                    logger.info(f"🔍 Available tool names for validation: {len(available_tool_names)} tools")
+                    
                     for tc in tool_calls_raw:
                         if isinstance(tc, dict):
                             # Handle OpenAI-style format: {"function": {"name": "...", "arguments": {...}}}
@@ -1384,6 +1388,13 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                                 func = tc.get("function", {})
                                 tool_name = func.get("name")
                                 arguments = func.get("arguments", {})
+                                
+                                # Validate tool name exists in available tools
+                                if tool_name and tool_name not in available_tool_names:
+                                    logger.warning(f"⚠️  Invalid tool name from LLM: '{tool_name}' (not in available tools)")
+                                    logger.warning(f"   Available tools: {available_tool_names[:20]}{'...' if len(available_tool_names) > 20 else ''}")
+                                    # Skip invalid tool calls
+                                    continue
                                 
                                 # Parse arguments if it's a JSON string (OpenAI format)
                                 if isinstance(arguments, str):
@@ -1399,8 +1410,16 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                                 })
                             # Handle direct format: {"name": "...", "parameters": {...}}
                             elif "name" in tc:
+                                tool_name = tc.get("name")
+                                # Validate tool name exists in available tools
+                                if tool_name and tool_name not in available_tool_names:
+                                    logger.warning(f"⚠️  Invalid tool name from LLM: '{tool_name}' (not in available tools)")
+                                    logger.warning(f"   Available tools: {available_tool_names[:20]}{'...' if len(available_tool_names) > 20 else ''}")
+                                    # Skip invalid tool calls
+                                    continue
+                                
                                 tool_calls.append({
-                                    "name": tc.get("name"),
+                                    "name": tool_name,
                                     "parameters": tc.get("parameters", {}),
                                 })
         else:

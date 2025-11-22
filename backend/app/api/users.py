@@ -548,13 +548,54 @@ async def update_user_tools_preferences(
     all_available_tools = base_tools + mcp_tools
     available_tool_names = {tool.get("name") for tool in all_available_tools if tool.get("name")}
     
+    logger.info(f"🔍 Validating tool preferences for user {current_user.email}")
+    logger.info(f"   Requested tools: {len(preferences.enabled_tools)} tools")
+    logger.info(f"   Available tools: {len(available_tool_names)} tools")
+    
+    # Log some examples for debugging
+    if preferences.enabled_tools:
+        logger.info(f"   First 10 requested: {preferences.enabled_tools[:10]}")
+    if available_tool_names:
+        sample_available = list(available_tool_names)[:10]
+        logger.info(f"   First 10 available: {sample_available}")
+    
     # Validate requested tools
     invalid_tools = set(preferences.enabled_tools) - available_tool_names
     if invalid_tools:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid tool names: {', '.join(invalid_tools)}"
-        )
+        logger.error(f"❌ Invalid tool names detected: {invalid_tools}")
+        logger.error(f"   Total requested: {len(preferences.enabled_tools)}")
+        logger.error(f"   Total available: {len(available_tool_names)}")
+        logger.error(f"   Invalid count: {len(invalid_tools)}")
+        
+        # Check if invalid tools are MCP tools that might not be loaded
+        mcp_invalid = [t for t in invalid_tools if t.startswith("mcp_")]
+        if mcp_invalid:
+            logger.warning(f"   ⚠️  {len(mcp_invalid)} invalid MCP tools - MCP server might be unavailable or tools not loaded")
+            logger.warning(f"   Invalid MCP tools: {mcp_invalid[:10]}")
+            
+            # For MCP tools, be more permissive: filter them out instead of raising error
+            # This allows saving preferences even if MCP server is temporarily unavailable
+            valid_tools = [t for t in preferences.enabled_tools if t in available_tool_names]
+            non_mcp_invalid = [t for t in invalid_tools if not t.startswith("mcp_")]
+            
+            if non_mcp_invalid:
+                # Only raise error for non-MCP invalid tools
+                logger.error(f"   ❌ Non-MCP invalid tools: {non_mcp_invalid}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid tool names: {', '.join(sorted(non_mcp_invalid))}. Available tools: {len(available_tool_names)}. Please refresh the page and try again."
+                )
+            else:
+                # Only MCP tools are invalid - filter them out and continue
+                logger.warning(f"   ⚠️  Filtering out {len(mcp_invalid)} MCP tools that are not currently available")
+                logger.warning(f"   Will save {len(valid_tools)} valid tools (filtered from {len(preferences.enabled_tools)} requested)")
+                preferences.enabled_tools = valid_tools
+        else:
+            # Non-MCP invalid tools - raise error
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid tool names: {', '.join(sorted(invalid_tools))}. Available tools: {len(available_tool_names)}. Please refresh the page and try again."
+            )
     
     # Update user metadata - use explicit UPDATE to ensure JSONB is saved correctly
     user_metadata = current_user.user_metadata or {}
