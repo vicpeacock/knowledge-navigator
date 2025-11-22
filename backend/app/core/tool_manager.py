@@ -1119,12 +1119,27 @@ class ToolManager:
                 try:
                     # Call the MCP tool with timeout to prevent blocking
                     logger.info(f"   Calling tool '{actual_tool_name}' on MCP server")
+                    logger.info(f"   Parameters: {parameters}")
+                    logger.info(f"   OAuth token present: {bool(oauth_token)}")
+                    if oauth_token:
+                        logger.info(f"   OAuth token length: {len(oauth_token)}")
+                    logger.info(f"   Current user: {current_user_for_oauth.email if current_user_for_oauth else 'None'}")
                     try:
                         result = await asyncio.wait_for(
                             client.call_tool(actual_tool_name, parameters, stream=False),
                             timeout=60.0  # 60 seconds timeout for MCP tool calls
                         )
                         logger.info(f"   ✅ Tool call successful")
+                        logger.info(f"   Result type: {type(result)}")
+                        if isinstance(result, dict):
+                            logger.info(f"   Result keys: {list(result.keys())}")
+                            if "isError" in result:
+                                logger.warning(f"   ⚠️  Result has isError flag: {result.get('isError')}")
+                            if "error" in result:
+                                logger.error(f"   ❌ Result contains error: {result.get('error')}")
+                            if "content" in result:
+                                content_preview = str(result.get("content", ""))[:200]
+                                logger.info(f"   Content preview: {content_preview}")
                     except asyncio.TimeoutError:
                         logger.error(f"   ❌ Tool call timed out after 60 seconds")
                         return {
