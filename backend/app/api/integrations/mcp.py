@@ -673,10 +673,13 @@ async def mcp_oauth_callback(
         try:
             # First, try to get email from ID token (more reliable)
             id_token = getattr(flow.credentials, 'id_token', None)
+            logger.info(f"🔍 Checking for ID token: {id_token is not None} (has attr: {hasattr(flow.credentials, 'id_token')})")
             if id_token:
+                logger.info(f"🔑 ID token found, length: {len(id_token)}")
                 try:
                     # Decode JWT ID token (format: header.payload.signature)
                     parts = id_token.split('.')
+                    logger.info(f"🔑 ID token parts: {len(parts)}")
                     if len(parts) >= 2:
                         # Decode payload (base64url)
                         payload_b64 = parts[1]
@@ -686,11 +689,16 @@ async def mcp_oauth_callback(
                             payload_b64 += '=' * padding
                         payload_bytes = base64.urlsafe_b64decode(payload_b64)
                         payload = json.loads(payload_bytes.decode('utf-8'))
+                        logger.info(f"🔑 ID token payload keys: {list(payload.keys())}")
                         google_email = payload.get("email")
                         if google_email:
                             logger.info(f"📧 Retrieved Google email from ID token: {google_email}")
+                        else:
+                            logger.warning(f"⚠️  ID token payload does not contain 'email' field")
                 except Exception as id_token_error:
-                    logger.debug(f"Could not decode ID token: {id_token_error}")
+                    logger.warning(f"⚠️  Could not decode ID token: {id_token_error}", exc_info=True)
+            else:
+                logger.info(f"⚠️  No ID token available in flow.credentials")
             
             # Fallback: try to get email from access token via API
             if not google_email:
@@ -752,6 +760,9 @@ async def mcp_oauth_callback(
                 session_metadata["oauth_user_emails"] = {}
             session_metadata["oauth_user_emails"][user_id_str] = google_email
             logger.info(f"📧 Storing Google email for user {user_id_str}: {google_email}")
+            logger.info(f"📧 oauth_user_emails after storing: {session_metadata.get('oauth_user_emails', {})}")
+        else:
+            logger.warning(f"⚠️  No Google email to store for user {user_id_str}")
         
         logger.info(f"📝 Storing credentials in session_metadata['oauth_credentials']['{user_id_str}']")
         logger.info(f"   Total OAuth users: {list(session_metadata['oauth_credentials'].keys())}")
