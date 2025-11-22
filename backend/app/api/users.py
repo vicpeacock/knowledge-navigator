@@ -695,48 +695,57 @@ async def get_oauth_integrations(
             oauth_credentials = session_metadata.get("oauth_credentials", {})
             oauth_authorized = user_id_str in oauth_credentials
             
-            # Try to get Google email from OAuth credentials
+            # Get Google email from stored metadata (saved during OAuth callback)
             google_email = None
             if oauth_authorized:
-                try:
-                    from app.services.oauth_token_manager import OAuthTokenManager
-                    from app.core.exceptions import OAuthAuthenticationRequiredError, OAuthTokenExpiredError
-                    
-                    # Use OAuthTokenManager to get a valid token (handles refresh automatically)
+                # Try to get email from stored metadata first (more reliable)
+                oauth_user_emails = session_metadata.get("oauth_user_emails", {})
+                google_email = oauth_user_emails.get(user_id_str)
+                
+                if google_email:
+                    logger.info(f"      📧 Retrieved Google email from stored metadata: {google_email}")
+                else:
+                    # Fallback: try to get email from API (if token is still valid)
+                    logger.debug(f"      No stored email, attempting to retrieve from API...")
                     try:
-                        valid_token = await OAuthTokenManager.get_valid_token(
-                            integration=integration,
-                            user=current_user,
-                            db=db,
-                            auto_refresh=True
-                        )
+                        from app.services.oauth_token_manager import OAuthTokenManager
+                        from app.core.exceptions import OAuthAuthenticationRequiredError, OAuthTokenExpiredError
                         
-                        if not valid_token:
-                            logger.warning(f"      ⚠️  OAuthTokenManager returned None token")
-                        else:
-                            logger.info(f"      🔑 Got token from OAuthTokenManager (length: {len(valid_token) if valid_token else 0})")
+                        try:
+                            valid_token = await OAuthTokenManager.get_valid_token(
+                                integration=integration,
+                                user=current_user,
+                                db=db,
+                                auto_refresh=True
+                            )
                             
-                            # Call Google API to get user info
-                            import httpx
-                            async with httpx.AsyncClient() as client:
-                                response = await client.get(
-                                    "https://www.googleapis.com/oauth2/v2/userinfo",
-                                    headers={"Authorization": f"Bearer {valid_token}"},
-                                    timeout=5.0
-                                )
-                                if response.status_code == 200:
-                                    user_info = response.json()
-                                    google_email = user_info.get("email")
-                                    logger.info(f"      📧 Retrieved Google email: {google_email}")
-                                else:
-                                    logger.warning(f"      ⚠️  Failed to get Google user info: {response.status_code}")
-                                    logger.warning(f"      ⚠️  Response: {response.text[:500]}")
-                    except OAuthAuthenticationRequiredError as oauth_err:
-                        logger.warning(f"      ⚠️  OAuth authentication required: {oauth_err}")
-                    except OAuthTokenExpiredError as token_err:
-                        logger.warning(f"      ⚠️  OAuth token expired: {token_err}")
-                except Exception as email_error:
-                    logger.warning(f"      ⚠️  Could not retrieve Google email: {email_error}", exc_info=True)
+                            if valid_token:
+                                # Call Google API to get user info
+                                import httpx
+                                async with httpx.AsyncClient() as client:
+                                    response = await client.get(
+                                        "https://www.googleapis.com/oauth2/v2/userinfo",
+                                        headers={"Authorization": f"Bearer {valid_token}"},
+                                        timeout=5.0
+                                    )
+                                    if response.status_code == 200:
+                                        user_info = response.json()
+                                        google_email = user_info.get("email")
+                                        logger.info(f"      📧 Retrieved Google email from API: {google_email}")
+                                        
+                                        # Save it for next time
+                                        if "oauth_user_emails" not in session_metadata:
+                                            session_metadata["oauth_user_emails"] = {}
+                                        session_metadata["oauth_user_emails"][user_id_str] = google_email
+                                        integration.session_metadata = session_metadata
+                                        flag_modified(integration, "session_metadata")
+                                        await db.commit()
+                                    else:
+                                        logger.debug(f"      ⚠️  Failed to get Google user info: {response.status_code}")
+                        except (OAuthAuthenticationRequiredError, OAuthTokenExpiredError) as oauth_err:
+                            logger.debug(f"      ⚠️  Could not retrieve email from API: {oauth_err}")
+                    except Exception as email_error:
+                        logger.debug(f"      ⚠️  Could not retrieve Google email: {email_error}")
             
             logger.info(f"      ✅ Adding to OAuth integrations list (authorized: {oauth_authorized}, email: {google_email})")
             

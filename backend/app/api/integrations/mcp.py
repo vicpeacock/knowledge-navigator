@@ -665,6 +665,23 @@ async def mcp_oauth_callback(
             "scopes": flow.credentials.scopes,
         }
         
+        # Get Google user email from token (save it for later display)
+        google_email = None
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://www.googleapis.com/oauth2/v2/userinfo",
+                    headers={"Authorization": f"Bearer {credentials['token']}"},
+                    timeout=5.0
+                )
+                if response.status_code == 200:
+                    user_info = response.json()
+                    google_email = user_info.get("email")
+                    logger.info(f"📧 Retrieved Google email during OAuth callback: {google_email}")
+        except Exception as email_error:
+            logger.warning(f"⚠️  Could not retrieve Google email during OAuth callback: {email_error}")
+        
         # Save credentials (encrypted) in session_metadata per user
         session_metadata = integration.session_metadata or {}
         
@@ -694,6 +711,14 @@ async def mcp_oauth_callback(
         if "oauth_credentials" not in session_metadata:
             session_metadata["oauth_credentials"] = {}
         session_metadata["oauth_credentials"][user_id_str] = encrypted_credentials
+        
+        # Store Google email for display (if available)
+        if google_email:
+            if "oauth_user_emails" not in session_metadata:
+                session_metadata["oauth_user_emails"] = {}
+            session_metadata["oauth_user_emails"][user_id_str] = google_email
+            logger.info(f"📧 Storing Google email for user {user_id_str}: {google_email}")
+        
         logger.info(f"📝 Storing credentials in session_metadata['oauth_credentials']['{user_id_str}']")
         logger.info(f"   Total OAuth users: {list(session_metadata['oauth_credentials'].keys())}")
         
