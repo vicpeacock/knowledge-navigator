@@ -61,17 +61,37 @@ function ProfileContent() {
   const [oauthIntegrationsSuccess, setOAuthIntegrationsSuccess] = useState<string | null>(null)
 
   useEffect(() => {
-    loadProfile()
-    loadBackgroundServicesPreferences()
-    loadOAuthIntegrations()
-    
-    // Check if we're returning from OAuth callback
+    // Check if we're returning from OAuth callback FIRST
     const urlParams = new URLSearchParams(window.location.search)
     if (urlParams.get('oauth_success') === 'true') {
-      // OAuth authorization completed - reload integrations
-      loadOAuthIntegrations()
-      // Clean URL
+      // OAuth authorization completed - verify we still have auth token
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        // Token lost during OAuth redirect - try to restore from sessionStorage
+        const redirectBack = sessionStorage.getItem('oauth_redirect_back')
+        sessionStorage.removeItem('oauth_redirect_back')
+        sessionStorage.removeItem('oauth_integration_id')
+        
+        // Redirect to login with return URL
+        const loginUrl = redirectBack 
+          ? `/auth/login?redirect=${encodeURIComponent(redirectBack)}&oauth_success=true`
+          : '/auth/login?redirect=/settings/profile&oauth_success=true'
+        window.location.href = loginUrl
+        return
+      }
+      // Clean URL first to avoid issues
       window.history.replaceState({}, document.title, '/settings/profile')
+      // Clean up sessionStorage
+      sessionStorage.removeItem('oauth_redirect_back')
+      sessionStorage.removeItem('oauth_integration_id')
+      // Then reload integrations
+      loadOAuthIntegrations()
+      setOAuthIntegrationsSuccess('OAuth authorization completed successfully!')
+    } else {
+      // Normal page load
+      loadProfile()
+      loadBackgroundServicesPreferences()
+      loadOAuthIntegrations()
     }
   }, [])
 
@@ -160,6 +180,10 @@ function ProfileContent() {
 
   const handleAuthorizeOAuth = async (integrationId: string) => {
     try {
+      // Store current URL in sessionStorage before redirect (in case token is lost)
+      sessionStorage.setItem('oauth_redirect_back', '/settings/profile')
+      sessionStorage.setItem('oauth_integration_id', integrationId)
+      
       const response = await integrationsApi.mcp.authorize(integrationId)
       // Redirect to OAuth authorization URL
       if (response.data.authorization_url) {
@@ -170,6 +194,9 @@ function ProfileContent() {
     } catch (error: any) {
       console.error('OAuth authorization failed:', error.response?.data?.detail || error.message)
       setOAuthIntegrationsError(`OAuth authorization failed: ${error.response?.data?.detail || error.message}`)
+      // Clean up sessionStorage on error
+      sessionStorage.removeItem('oauth_redirect_back')
+      sessionStorage.removeItem('oauth_integration_id')
     }
   }
 
