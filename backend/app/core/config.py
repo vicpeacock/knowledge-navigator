@@ -161,10 +161,26 @@ class Settings(BaseSettings):
     def model_post_init(self, __context):
         """Load API keys from environment if not set, supporting both naming conventions"""
         import os
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if not self.google_pse_api_key:
             self.google_pse_api_key = os.getenv("GOOGLE_PSE_API_KEY") or os.getenv("GOOGLE_CSE_API_KEY")
+            if self.google_pse_api_key:
+                logger.info(f"✅ Loaded Google Custom Search API key (length: {len(self.google_pse_api_key)})")
+            else:
+                logger.warning("⚠️  GOOGLE_PSE_API_KEY and GOOGLE_CSE_API_KEY not found in environment")
+        else:
+            logger.info(f"✅ Google Custom Search API key already set (length: {len(self.google_pse_api_key)})")
+        
         if not self.google_pse_cx:
             self.google_pse_cx = os.getenv("GOOGLE_PSE_CX") or os.getenv("GOOGLE_CSE_CX")
+            if self.google_pse_cx:
+                logger.info(f"✅ Loaded Google Custom Search CX: {self.google_pse_cx[:10]}...")
+            else:
+                logger.warning("⚠️  GOOGLE_PSE_CX and GOOGLE_CSE_CX not found in environment")
+        else:
+            logger.info(f"✅ Google Custom Search CX already set: {self.google_pse_cx[:10]}...")
     
     # Email sending (SMTP) - for invitation emails, password reset, etc.
     smtp_enabled: bool = False  # Set to True to enable email sending

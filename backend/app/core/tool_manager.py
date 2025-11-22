@@ -2005,24 +2005,35 @@ Riassunto:"""
         import logging
         logger = logging.getLogger(__name__)
         
+        logger.info("🔍 customsearch_search tool called")
+        logger.info(f"   Parameters: {parameters}")
+        
         query = parameters.get("query")
         num_results = parameters.get("num", 10)
         
         if not query:
+            logger.error("❌ Query parameter missing")
             return {"error": "Query parameter is required for customsearch_search"}
         
         # Check if API key and CX are configured
+        logger.info(f"   Checking API key: {'✅ SET' if settings.google_pse_api_key else '❌ NOT SET'}")
+        logger.info(f"   Checking CX: {'✅ SET' if settings.google_pse_cx else '❌ NOT SET'}")
+        
         if not settings.google_pse_api_key:
-            logger.error("GOOGLE_PSE_API_KEY not configured. Google Custom Search requires an API key.")
+            logger.error("❌ GOOGLE_PSE_API_KEY or GOOGLE_CSE_API_KEY not configured. Google Custom Search requires an API key.")
+            logger.error(f"   Current value: {settings.google_pse_api_key}")
             return {
-                "error": "GOOGLE_PSE_API_KEY not configured. Please set it in your .env file or environment variables. Get an API key from https://developers.google.com/custom-search/v1/overview"
+                "error": "GOOGLE_PSE_API_KEY (or GOOGLE_CSE_API_KEY) not configured. Please set it in your .env file or environment variables. Get an API key from https://developers.google.com/custom-search/v1/overview"
             }
         
         if not settings.google_pse_cx:
-            logger.error("GOOGLE_PSE_CX not configured. Google Custom Search requires a Custom Search Engine ID.")
+            logger.error("❌ GOOGLE_PSE_CX or GOOGLE_CSE_CX not configured. Google Custom Search requires a Custom Search Engine ID.")
+            logger.error(f"   Current value: {settings.google_pse_cx}")
             return {
-                "error": "GOOGLE_PSE_CX not configured. Please set it in your .env file or environment variables. Create a Custom Search Engine at https://programmablesearchengine.google.com/"
+                "error": "GOOGLE_PSE_CX (or GOOGLE_CSE_CX) not configured. Please set it in your .env file or environment variables. Create a Custom Search Engine at https://programmablesearchengine.google.com/"
             }
+        
+        logger.info(f"✅ API key and CX configured, proceeding with search for: '{query}'")
         
         try:
             import httpx
