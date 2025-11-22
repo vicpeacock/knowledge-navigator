@@ -56,6 +56,7 @@ function ProfileContent() {
     server_url: string
     oauth_required: boolean
     oauth_authorized: boolean
+    google_email?: string | null
   }>>([])
   const [oauthIntegrationsError, setOAuthIntegrationsError] = useState<string | null>(null)
   const [oauthIntegrationsSuccess, setOAuthIntegrationsSuccess] = useState<string | null>(null)
@@ -547,6 +548,11 @@ function ProfileContent() {
                     <p className="text-xs text-gray-500 dark:text-gray-400">
                       {integration.server_url}
                     </p>
+                    {integration.oauth_authorized && integration.google_email && (
+                      <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                        Authorized as: <span className="font-medium">{integration.google_email}</span>
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {integration.oauth_authorized && (
