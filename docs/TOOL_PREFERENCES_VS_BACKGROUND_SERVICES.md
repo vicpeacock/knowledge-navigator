@@ -19,8 +19,9 @@ Le **preferenze tool** (`enabled_tools` in `user_metadata`) controllano quali to
 - `get_emails`: Recupera email da Gmail
 - `get_calendar_events`: Recupera eventi dal calendario
 - `send_email`: Invia email
-- `web_search`: Cerca sul web
-- `web_fetch`: Recupera contenuto web
+- `web_search`: Cerca sul web (solo per Ollama, richiede OLLAMA_API_KEY)
+- `web_fetch`: Recupera contenuto web (solo per Ollama, richiede OLLAMA_API_KEY)
+- `customsearch_search`: Cerca sul web (solo per Gemini, richiede GOOGLE_PSE_API_KEY e GOOGLE_PSE_CX)
 - Altri tool built-in...
 
 ### Tool MCP Affetti

@@ -353,6 +353,13 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 # Log customsearch_search specifically
                 if "customsearch_search" in tool_names:
                     logger.info(f"   ✅ customsearch_search is available to Gemini")
+                    # Find and log the tool details
+                    for tool in gemini_tools:
+                        func_decl = tool.get("function_declarations", [{}])[0]
+                        if func_decl.get("name") == "customsearch_search":
+                            logger.info(f"   📋 customsearch_search details: name={func_decl.get('name')}, description length={len(func_decl.get('description', ''))}")
+                            logger.info(f"   📋 customsearch_search description preview: {func_decl.get('description', '')[:100]}...")
+                            break
                 else:
                     logger.warning(f"   ⚠️  customsearch_search NOT in tools passed to Gemini!")
                     logger.warning(f"   Available tools: {', '.join(tool_names[:20])}{'...' if len(tool_names) > 20 else ''}")
