@@ -131,23 +131,40 @@ class HealthCheckService:
     async def _check_chromadb(self) -> Dict[str, Any]:
         """Check ChromaDB connection"""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                heartbeat_url = f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v2/heartbeat"
-                response = await client.get(heartbeat_url)
-
-                if response.status_code == 404:
-                    # Older Chroma versions only expose v1 heartbeat
-                    fallback_url = f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v1/heartbeat"
-                    response = await client.get(fallback_url)
-                    heartbeat_url = fallback_url
-
-                if response.status_code == 200:
+            if settings.chromadb_use_cloud and settings.chromadb_cloud_api_key:
+                # ChromaDB Cloud - test connection by trying to list collections
+                from app.core.memory_manager import MemoryManager
+                memory_manager = MemoryManager()
+                # Try to access a collection (this will fail if connection is bad)
+                try:
+                    _ = memory_manager.long_term_memory_collection
                     return {
                         "healthy": True,
-                        "message": f"ChromaDB connection successful ({heartbeat_url})",
-                        "heartbeat_url": heartbeat_url,
+                        "message": "ChromaDB Cloud connection successful",
+                        "type": "cloud",
                     }
-                return {"healthy": False, "error": f"ChromaDB returned status {response.status_code}"}
+                except Exception as e:
+                    return {"healthy": False, "error": f"ChromaDB Cloud connection failed: {str(e)}"}
+            else:
+                # ChromaDB HttpClient (local)
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    heartbeat_url = f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v2/heartbeat"
+                    response = await client.get(heartbeat_url)
+
+                    if response.status_code == 404:
+                        # Older Chroma versions only expose v1 heartbeat
+                        fallback_url = f"http://{settings.chromadb_host}:{settings.chromadb_port}/api/v1/heartbeat"
+                        response = await client.get(fallback_url)
+                        heartbeat_url = fallback_url
+
+                    if response.status_code == 200:
+                        return {
+                            "healthy": True,
+                            "message": f"ChromaDB connection successful ({heartbeat_url})",
+                            "heartbeat_url": heartbeat_url,
+                            "type": "http",
+                        }
+                    return {"healthy": False, "error": f"ChromaDB returned status {response.status_code}"}
         except Exception as e:
             logger.error("❌ ChromaDB health check failed: %s", e)
             return {"healthy": False, "error": str(e)}
