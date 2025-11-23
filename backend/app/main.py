@@ -5,6 +5,10 @@ from contextlib import asynccontextmanager
 import asyncio
 import logging
 import time
+import os
+import subprocess
+import sys
+from pathlib import Path
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
@@ -62,30 +66,38 @@ async def lifespan(app: FastAPI):
     # Run database migrations (for Cloud Run deployment)
     logging.info("🔄 Running database migrations...")
     try:
-        from alembic.config import Config
-        from alembic import command
+        # Use subprocess to run alembic upgrade (most reliable method)
+        import subprocess
+        import sys
         from pathlib import Path
-        from app.core.config import settings
         
-        # Find alembic.ini (it's in backend/ directory)
+        # Change to backend directory where alembic.ini is located
         backend_dir = Path(__file__).parent.parent
-        alembic_ini_path = backend_dir / "alembic.ini"
+        original_cwd = Path.cwd()
         
-        if not alembic_ini_path.exists():
-            # Try current directory (for Cloud Run)
-            alembic_ini_path = Path("alembic.ini")
-        
-        if alembic_ini_path.exists():
-            # Run migrations using Alembic
-            alembic_cfg = Config(str(alembic_ini_path))
-            # Override database URL for Alembic (it needs sync URL)
-            alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+        try:
+            os.chdir(backend_dir)
             
-            # Run migrations
-            command.upgrade(alembic_cfg, "head")
-            logging.info("✅ Database migrations completed")
-        else:
-            logging.warning(f"⚠️  alembic.ini not found at {alembic_ini_path}. Skipping migrations.")
+            # Run alembic upgrade (settings is already imported at module level)
+            result = subprocess.run(
+                [sys.executable, "-m", "alembic", "upgrade", "head"],
+                env={**os.environ, "DATABASE_URL": settings.database_url},
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False
+            )
+            
+            if result.returncode == 0:
+                logging.info("✅ Database migrations completed")
+                if result.stdout:
+                    logging.info(f"Migration output: {result.stdout[:200]}")
+            else:
+                logging.error(f"❌ Migration failed with code {result.returncode}")
+                if result.stderr:
+                    logging.error(f"Error: {result.stderr[:500]}")
+        finally:
+            os.chdir(original_cwd)
     except Exception as e:
         logging.error(f"❌ Failed to run database migrations: {e}", exc_info=True)
         logging.error("⚠️  Database might not be properly initialized. Some features may not work.")
