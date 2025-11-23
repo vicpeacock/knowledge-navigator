@@ -73,32 +73,27 @@ async def lifespan(app: FastAPI):
         import subprocess
         from pathlib import Path
         
-        # In Cloud Run, we're in /app, alembic.ini should be in /app/alembic.ini or /app/backend/alembic.ini
-        # Try multiple locations
-        possible_paths = [
-            Path("/app/alembic.ini"),  # Copied to root in Dockerfile
-            Path("/app/backend/alembic.ini"),  # Original location
-            Path("alembic.ini"),  # Current directory
-            Path(__file__).parent.parent / "alembic.ini",  # Relative to this file
-        ]
+        # In Cloud Run, we're in /app/backend (from CMD in Dockerfile)
+        # alembic.ini and alembic/ directory are both in /app/backend
+        # We need to run from /app/backend where both exist
+        backend_dir = Path("/app/backend")
+        alembic_ini = backend_dir / "alembic.ini"
+        alembic_dir = backend_dir / "alembic"
         
-        alembic_ini = None
-        for path in possible_paths:
-            if path.exists():
-                alembic_ini = path
-                logging.info(f"✅ Found alembic.ini at: {alembic_ini}")
-                break
-        
-        if not alembic_ini:
-            logging.warning("⚠️  alembic.ini not found in any of these locations:")
-            for path in possible_paths:
-                logging.warning(f"   - {path}")
+        if not alembic_ini.exists():
+            logging.warning(f"⚠️  alembic.ini not found at: {alembic_ini}")
+            logging.warning("⚠️  Skipping migrations. Database might not be properly initialized.")
+        elif not alembic_dir.exists():
+            logging.warning(f"⚠️  alembic directory not found at: {alembic_dir}")
             logging.warning("⚠️  Skipping migrations. Database might not be properly initialized.")
         else:
-            # Change to directory containing alembic.ini
+            logging.info(f"✅ Found alembic.ini at: {alembic_ini}")
+            logging.info(f"✅ Found alembic directory at: {alembic_dir}")
+            
+            # Change to backend directory where both alembic.ini and alembic/ exist
             original_cwd = Path.cwd()
             try:
-                os.chdir(alembic_ini.parent)
+                os.chdir(backend_dir)
                 logging.info(f"Changed to directory: {os.getcwd()}")
                 
                 # Prepare environment
