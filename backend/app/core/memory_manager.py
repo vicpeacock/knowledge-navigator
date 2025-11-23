@@ -80,15 +80,23 @@ class MemoryManager:
             return self._collections_cache[collection_name]
         
         # Create or get collection with optimized HNSW index parameters
-        # Increased ef_construction and M to prevent "Cannot return the results in a contigious 2D array" errors
-        collection = self.chroma_client.get_or_create_collection(
-            name=collection_name,
-            metadata={
+        # Note: ChromaDB Cloud might not support custom HNSW parameters, so we only use them for local
+        metadata = {
+            "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "default"
+        }
+        
+        # Only add HNSW parameters for local ChromaDB (HttpClient)
+        # ChromaDB Cloud manages these automatically
+        if not settings.chromadb_use_cloud:
+            metadata.update({
                 "hnsw:space": "cosine",
                 "hnsw:ef_construction": "400",  # Increased from default 200 for better index quality
                 "hnsw:M": "32",  # Increased from default 16 for larger collections
-                "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "default"
-            },
+            })
+        
+        collection = self.chroma_client.get_or_create_collection(
+            name=collection_name,
+            metadata=metadata,
         )
         
         # Cache it
