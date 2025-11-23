@@ -249,7 +249,6 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 if frontend_trace_id:
                     set_trace_attribute("frontend.trace_id", frontend_trace_id)
                     # Log correlation for debugging
-                    import logging
                     logger = logging.getLogger(__name__)
                     logger.debug(f"Frontend trace ID received: {frontend_trace_id}")
                 
