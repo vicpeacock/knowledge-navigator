@@ -133,7 +133,8 @@ function configure_docker() {
 function build_env_vars_string() {
     # Build environment variables string for Cloud Run
     # Exclude sensitive/complex vars that should be secrets
-    ENV_VARS="PORT=8000"
+    # Note: PORT is automatically set by Cloud Run, don't include it
+    ENV_VARS=""
     
     # LLM Provider (required)
     if [ -n "$LLM_PROVIDER" ]; then
