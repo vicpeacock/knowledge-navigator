@@ -375,6 +375,10 @@ export const integrationsApi = {
           const params = provider ? { provider } : {}
           return api.get('/api/integrations/emails/integrations', { params })
         },
+        listServiceIntegrations: (provider?: string) => {
+          const params = provider ? { provider } : {}
+          return api.get('/api/integrations/emails/admin/integrations', { params })
+        },
         deleteIntegration: (integrationId: string) =>
           api.delete(`/api/integrations/emails/integrations/${integrationId}`),
       },
