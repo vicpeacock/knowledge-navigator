@@ -65,39 +65,73 @@ async def lifespan(app: FastAPI):
     
     # Run database migrations (for Cloud Run deployment)
     logging.info("🔄 Running database migrations...")
+    logging.info(f"Current working directory: {os.getcwd()}")
+    logging.info(f"Python executable: {sys.executable}")
+    
     try:
         # Use subprocess to run alembic upgrade (most reliable method)
         import subprocess
-        import sys
         from pathlib import Path
         
-        # Change to backend directory where alembic.ini is located
-        backend_dir = Path(__file__).parent.parent
-        original_cwd = Path.cwd()
+        # In Cloud Run, we're in /app, alembic.ini should be in /app/alembic.ini or /app/backend/alembic.ini
+        # Try multiple locations
+        possible_paths = [
+            Path("/app/alembic.ini"),  # Copied to root in Dockerfile
+            Path("/app/backend/alembic.ini"),  # Original location
+            Path("alembic.ini"),  # Current directory
+            Path(__file__).parent.parent / "alembic.ini",  # Relative to this file
+        ]
         
-        try:
-            os.chdir(backend_dir)
-            
-            # Run alembic upgrade (settings is already imported at module level)
-            result = subprocess.run(
-                [sys.executable, "-m", "alembic", "upgrade", "head"],
-                env={**os.environ, "DATABASE_URL": settings.database_url},
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False
-            )
-            
-            if result.returncode == 0:
-                logging.info("✅ Database migrations completed")
+        alembic_ini = None
+        for path in possible_paths:
+            if path.exists():
+                alembic_ini = path
+                logging.info(f"✅ Found alembic.ini at: {alembic_ini}")
+                break
+        
+        if not alembic_ini:
+            logging.warning("⚠️  alembic.ini not found in any of these locations:")
+            for path in possible_paths:
+                logging.warning(f"   - {path}")
+            logging.warning("⚠️  Skipping migrations. Database might not be properly initialized.")
+        else:
+            # Change to directory containing alembic.ini
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(alembic_ini.parent)
+                logging.info(f"Changed to directory: {os.getcwd()}")
+                
+                # Prepare environment
+                env = os.environ.copy()
+                env["DATABASE_URL"] = settings.database_url
+                logging.info(f"Using DATABASE_URL: {settings.database_url[:50]}...")
+                
+                # Run alembic upgrade
+                logging.info("Executing: python -m alembic upgrade head")
+                result = subprocess.run(
+                    [sys.executable, "-m", "alembic", "upgrade", "head"],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    check=False
+                )
+                
+                logging.info(f"Migration process exited with code: {result.returncode}")
+                
                 if result.stdout:
-                    logging.info(f"Migration output: {result.stdout[:200]}")
-            else:
-                logging.error(f"❌ Migration failed with code {result.returncode}")
+                    logging.info(f"Migration stdout (first 500 chars):\n{result.stdout[:500]}")
                 if result.stderr:
-                    logging.error(f"Error: {result.stderr[:500]}")
-        finally:
-            os.chdir(original_cwd)
+                    logging.warning(f"Migration stderr (first 500 chars):\n{result.stderr[:500]}")
+                
+                if result.returncode == 0:
+                    logging.info("✅ Database migrations completed successfully")
+                else:
+                    logging.error(f"❌ Migration failed with code {result.returncode}")
+                    if result.stderr:
+                        logging.error(f"Full stderr:\n{result.stderr}")
+            finally:
+                os.chdir(original_cwd)
     except Exception as e:
         logging.error(f"❌ Failed to run database migrations: {e}", exc_info=True)
         logging.error("⚠️  Database might not be properly initialized. Some features may not work.")
