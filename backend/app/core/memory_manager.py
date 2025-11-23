@@ -34,10 +34,23 @@ class MemoryManager:
     
     def __init__(self, tenant_id: Optional[UUID] = None):
         # ChromaDB client (shared across tenants)
-        self.chroma_client = chromadb.HttpClient(
-            host=settings.chromadb_host,
-            port=settings.chromadb_port,
-        )
+        # Use CloudClient for cloud deployment, HttpClient for local
+        if settings.chromadb_use_cloud and settings.chromadb_cloud_api_key:
+            # ChromaDB Cloud (for cloud deployment)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("Using ChromaDB Cloud client for cloud deployment")
+            self.chroma_client = chromadb.CloudClient(
+                api_key=settings.chromadb_cloud_api_key,
+                tenant=settings.chromadb_cloud_tenant,
+                database=settings.chromadb_cloud_database,
+            )
+        else:
+            # ChromaDB HttpClient (for local development)
+            self.chroma_client = chromadb.HttpClient(
+                host=settings.chromadb_host,
+                port=settings.chromadb_port,
+            )
         
         # Store tenant_id for collection naming
         self.tenant_id = tenant_id
