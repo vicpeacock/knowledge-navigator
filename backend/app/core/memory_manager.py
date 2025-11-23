@@ -79,21 +79,15 @@ class MemoryManager:
         if collection_name in self._collections_cache:
             return self._collections_cache[collection_name]
         
-        # Create or get collection with optimized HNSW index parameters
-        # Note: ChromaDB Cloud might not support custom HNSW parameters, so we only use them for local
+        # Create or get collection
+        # Note: ChromaDB 0.5.0+ changed how HNSW parameters work
+        # We no longer pass them in metadata - ChromaDB uses optimized defaults
         metadata = {
             "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "default"
         }
         
-        # Only add HNSW parameters for local ChromaDB (HttpClient)
-        # ChromaDB Cloud manages these automatically
-        if not settings.chromadb_use_cloud:
-            metadata.update({
-                "hnsw:space": "cosine",
-                "hnsw:ef_construction": "400",  # Increased from default 200 for better index quality
-                "hnsw:M": "32",  # Increased from default 16 for larger collections
-            })
-        
+        # ChromaDB 0.6.0+ doesn't support HNSW parameters in metadata the same way
+        # Let ChromaDB use its optimized defaults
         collection = self.chroma_client.get_or_create_collection(
             name=collection_name,
             metadata=metadata,
