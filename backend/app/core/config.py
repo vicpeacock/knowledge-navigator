@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # ChromaDB
     chromadb_host: str = "localhost"
     chromadb_port: int = 8001  # Changed from 8000 to avoid conflict with FastAPI backend
+    # ChromaDB Cloud (for cloud deployment only)
+    chromadb_cloud_api_key: Optional[str] = None  # API key for ChromaDB Cloud
+    chromadb_cloud_tenant: Optional[str] = None  # Tenant ID for ChromaDB Cloud
+    chromadb_cloud_database: Optional[str] = None  # Database name for ChromaDB Cloud
+    chromadb_use_cloud: bool = False  # Set to True to use ChromaDB Cloud instead of HttpClient
 
     # LLM Provider Selection
     llm_provider: str = "ollama"  # Options: "ollama", "gemini"
