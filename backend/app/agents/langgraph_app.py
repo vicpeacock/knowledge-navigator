@@ -674,7 +674,8 @@ async def analyze_message_for_plan(
             return {"needs_plan": False, "reason": "planner_unavailable", "steps": []}
         
         logger.info(f"🔍 Calling planner client: {type(client).__name__}, URL: {getattr(client, 'base_url', 'N/A')}")
-        logger.info(f"   Prompt length: {len(analysis_prompt + f'\\n\\nRichiesta utente:\\n{request.message}')}")
+        user_request_section = f'\n\nRichiesta utente:\n{request.message}'
+        logger.info(f"   Prompt length: {len(analysis_prompt + user_request_section)}")
         logger.info(f"   Context messages: {len(session_context[-3:]) if session_context else 0}")
         
         response = await client.generate(
