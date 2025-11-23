@@ -61,10 +61,28 @@ function load_env_file() {
         exit 1
     fi
     
-    # Load .env.cloud-run file
-    set -a
-    source "$ENV_FILE"
-    set +a
+    # Load .env.cloud-run file, handling values with spaces
+    # Use eval to properly handle quoted values
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        
+        # Skip lines without =
+        [[ ! "$line" =~ = ]] && continue
+        
+        # Remove leading/trailing whitespace
+        line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        
+        # Extract key and value
+        key=$(echo "$line" | cut -d'=' -f1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        value=$(echo "$line" | cut -d'=' -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        
+        # Remove quotes if present
+        value=$(echo "$value" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+        
+        # Export the variable
+        export "$key=$value" 2>/dev/null || true
+    done < "$ENV_FILE"
     
     log_info "✅ Environment variables loaded"
 }
