@@ -53,6 +53,25 @@ function check_prerequisites() {
     log_info "✅ Prerequisites check passed"
 }
 
+function check_syntax() {
+    log_info "Checking Python syntax before deployment..."
+    
+    ERRORS=0
+    while IFS= read -r -d '' file; do
+        if ! python3 -m py_compile "$file" 2>/dev/null; then
+            log_error "Syntax error in: $file"
+            ERRORS=$((ERRORS + 1))
+        fi
+    done < <(find "$PROJECT_ROOT/backend/app" -name "*.py" -type f -print0 2>/dev/null)
+    
+    if [ $ERRORS -gt 0 ]; then
+        log_error "Found $ERRORS file(s) with syntax errors. Fix them before deploying."
+        exit 1
+    fi
+    
+    log_info "✅ All Python files have valid syntax"
+}
+
 function load_env_file() {
     log_info "Loading environment variables from .env.cloud-run..."
     
@@ -324,6 +343,7 @@ function main() {
     log_info "🚀 Starting Cloud Run deployment..."
     
     check_prerequisites
+    check_syntax
     load_env_file
     check_gcp_project
     enable_apis
