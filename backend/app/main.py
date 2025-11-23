@@ -59,6 +59,38 @@ async def lifespan(app: FastAPI):
     init_metrics()
     logging.info("✅ Observability initialized")
     
+    # Run database migrations (for Cloud Run deployment)
+    logging.info("🔄 Running database migrations...")
+    try:
+        from alembic.config import Config
+        from alembic import command
+        from pathlib import Path
+        from app.core.config import settings
+        
+        # Find alembic.ini (it's in backend/ directory)
+        backend_dir = Path(__file__).parent.parent
+        alembic_ini_path = backend_dir / "alembic.ini"
+        
+        if not alembic_ini_path.exists():
+            # Try current directory (for Cloud Run)
+            alembic_ini_path = Path("alembic.ini")
+        
+        if alembic_ini_path.exists():
+            # Run migrations using Alembic
+            alembic_cfg = Config(str(alembic_ini_path))
+            # Override database URL for Alembic (it needs sync URL)
+            alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+            
+            # Run migrations
+            command.upgrade(alembic_cfg, "head")
+            logging.info("✅ Database migrations completed")
+        else:
+            logging.warning(f"⚠️  alembic.ini not found at {alembic_ini_path}. Skipping migrations.")
+    except Exception as e:
+        logging.error(f"❌ Failed to run database migrations: {e}", exc_info=True)
+        logging.error("⚠️  Database might not be properly initialized. Some features may not work.")
+        # Don't fail startup - let the app start and log the error
+    
     # Initialize clients
     init_clients()
     

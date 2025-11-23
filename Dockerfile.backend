@@ -41,6 +41,8 @@ WORKDIR /app
 # Copia codice applicazione
 # alembic.ini è già incluso in backend/
 COPY backend/ ./backend/
+# Copia anche alembic.ini nella root per accesso diretto
+COPY backend/alembic.ini ./alembic.ini
 
 # Crea directory necessarie
 RUN mkdir -p logs uploads
