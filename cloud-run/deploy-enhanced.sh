@@ -138,84 +138,57 @@ function build_env_vars_string() {
     
     # LLM Provider (required)
     if [ -n "$LLM_PROVIDER" ]; then
-        ENV_VARS="${ENV_VARS},LLM_PROVIDER=${LLM_PROVIDER}"
+        ENV_VARS="LLM_PROVIDER=${LLM_PROVIDER}"
     else
-        ENV_VARS="${ENV_VARS},LLM_PROVIDER=gemini"
+        ENV_VARS="LLM_PROVIDER=gemini"
     fi
+    
+    # Helper function to add env var
+    add_env_var() {
+        local key="$1"
+        local value="$2"
+        if [ -n "$value" ]; then
+            if [ -n "$ENV_VARS" ]; then
+                ENV_VARS="${ENV_VARS},${key}=${value}"
+            else
+                ENV_VARS="${key}=${value}"
+            fi
+        fi
+    }
     
     # Gemini
-    if [ -n "$GEMINI_API_KEY" ]; then
-        ENV_VARS="${ENV_VARS},GEMINI_API_KEY=${GEMINI_API_KEY}"
-    fi
-    if [ -n "$GEMINI_MODEL" ]; then
-        ENV_VARS="${ENV_VARS},GEMINI_MODEL=${GEMINI_MODEL}"
-    fi
+    add_env_var "GEMINI_API_KEY" "$GEMINI_API_KEY"
+    add_env_var "GEMINI_MODEL" "$GEMINI_MODEL"
     
     # Database
-    if [ -n "$DATABASE_URL" ]; then
-        ENV_VARS="${ENV_VARS},DATABASE_URL=${DATABASE_URL}"
-    fi
-    if [ -n "$POSTGRES_HOST" ]; then
-        ENV_VARS="${ENV_VARS},POSTGRES_HOST=${POSTGRES_HOST}"
-    fi
-    if [ -n "$POSTGRES_USER" ]; then
-        ENV_VARS="${ENV_VARS},POSTGRES_USER=${POSTGRES_USER}"
-    fi
-    if [ -n "$POSTGRES_PASSWORD" ]; then
-        ENV_VARS="${ENV_VARS},POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
-    fi
-    if [ -n "$POSTGRES_DB" ]; then
-        ENV_VARS="${ENV_VARS},POSTGRES_DB=${POSTGRES_DB}"
-    fi
-    if [ -n "$POSTGRES_PORT" ]; then
-        ENV_VARS="${ENV_VARS},POSTGRES_PORT=${POSTGRES_PORT}"
-    fi
+    add_env_var "DATABASE_URL" "$DATABASE_URL"
+    add_env_var "POSTGRES_HOST" "$POSTGRES_HOST"
+    add_env_var "POSTGRES_USER" "$POSTGRES_USER"
+    add_env_var "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+    add_env_var "POSTGRES_DB" "$POSTGRES_DB"
+    add_env_var "POSTGRES_PORT" "$POSTGRES_PORT"
     
     # ChromaDB Cloud
-    if [ -n "$CHROMADB_USE_CLOUD" ]; then
-        ENV_VARS="${ENV_VARS},CHROMADB_USE_CLOUD=${CHROMADB_USE_CLOUD}"
-    fi
-    if [ -n "$CHROMADB_CLOUD_API_KEY" ]; then
-        ENV_VARS="${ENV_VARS},CHROMADB_CLOUD_API_KEY=${CHROMADB_CLOUD_API_KEY}"
-    fi
-    if [ -n "$CHROMADB_CLOUD_TENANT" ]; then
-        ENV_VARS="${ENV_VARS},CHROMADB_CLOUD_TENANT=${CHROMADB_CLOUD_TENANT}"
-    fi
-    if [ -n "$CHROMADB_CLOUD_DATABASE" ]; then
-        ENV_VARS="${ENV_VARS},CHROMADB_CLOUD_DATABASE=${CHROMADB_CLOUD_DATABASE}"
-    fi
+    add_env_var "CHROMADB_USE_CLOUD" "$CHROMADB_USE_CLOUD"
+    add_env_var "CHROMADB_CLOUD_API_KEY" "$CHROMADB_CLOUD_API_KEY"
+    add_env_var "CHROMADB_CLOUD_TENANT" "$CHROMADB_CLOUD_TENANT"
+    add_env_var "CHROMADB_CLOUD_DATABASE" "$CHROMADB_CLOUD_DATABASE"
     
     # Security Keys
-    if [ -n "$SECRET_KEY" ]; then
-        ENV_VARS="${ENV_VARS},SECRET_KEY=${SECRET_KEY}"
-    fi
-    if [ -n "$ENCRYPTION_KEY" ]; then
-        ENV_VARS="${ENV_VARS},ENCRYPTION_KEY=${ENCRYPTION_KEY}"
-    fi
-    if [ -n "$JWT_SECRET_KEY" ]; then
-        ENV_VARS="${ENV_VARS},JWT_SECRET_KEY=${JWT_SECRET_KEY}"
-    fi
+    add_env_var "SECRET_KEY" "$SECRET_KEY"
+    add_env_var "ENCRYPTION_KEY" "$ENCRYPTION_KEY"
+    add_env_var "JWT_SECRET_KEY" "$JWT_SECRET_KEY"
     
     # Google OAuth
-    if [ -n "$GOOGLE_CLIENT_ID" ]; then
-        ENV_VARS="${ENV_VARS},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}"
-    fi
-    if [ -n "$GOOGLE_CLIENT_SECRET" ]; then
-        ENV_VARS="${ENV_VARS},GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}"
-    fi
+    add_env_var "GOOGLE_CLIENT_ID" "$GOOGLE_CLIENT_ID"
+    add_env_var "GOOGLE_CLIENT_SECRET" "$GOOGLE_CLIENT_SECRET"
     
     # Google Custom Search
-    if [ -n "$GOOGLE_PSE_API_KEY" ]; then
-        ENV_VARS="${ENV_VARS},GOOGLE_PSE_API_KEY=${GOOGLE_PSE_API_KEY}"
-    fi
-    if [ -n "$GOOGLE_PSE_CX" ]; then
-        ENV_VARS="${ENV_VARS},GOOGLE_PSE_CX=${GOOGLE_PSE_CX}"
-    fi
+    add_env_var "GOOGLE_PSE_API_KEY" "$GOOGLE_PSE_API_KEY"
+    add_env_var "GOOGLE_PSE_CX" "$GOOGLE_PSE_CX"
     
     # Other settings
-    if [ -n "$USE_LANGGRAPH_PROTOTYPE" ]; then
-        ENV_VARS="${ENV_VARS},USE_LANGGRAPH_PROTOTYPE=${USE_LANGGRAPH_PROTOTYPE}"
-    fi
+    add_env_var "USE_LANGGRAPH_PROTOTYPE" "$USE_LANGGRAPH_PROTOTYPE"
     
     echo "$ENV_VARS"
 }
@@ -233,6 +206,7 @@ function build_backend() {
     fi
     
     docker build \
+        --platform linux/amd64 \
         -f Dockerfile.backend \
         --build-arg REQUIREMENTS_FILE="$REQUIREMENTS_FILE" \
         -t gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:latest .
@@ -296,6 +270,7 @@ function build_frontend() {
     log_info "Using backend URL: $BACKEND_URL"
     
     docker build \
+        --platform linux/amd64 \
         -f Dockerfile.frontend \
         --build-arg NEXT_PUBLIC_API_URL="$BACKEND_URL" \
         -t gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-frontend:latest .
