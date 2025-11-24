@@ -304,7 +304,8 @@ async def connect_mcp_server(
             logger.error(f"   Server URL: {server_url}")
             
             # Check if this is an OAuth 2.1 server that requires authentication
-            from app.core.oauth_utils import is_oauth_server, is_oauth_error
+            # is_oauth_server is already imported at the top of the file
+            from app.core.oauth_utils import is_oauth_error
             is_oauth = is_oauth_server(server_url, oauth_required=False)
             
             # Check if it's an OAuth/authentication error
