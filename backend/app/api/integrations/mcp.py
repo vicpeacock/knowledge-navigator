@@ -530,8 +530,10 @@ async def revoke_mcp_oauth(
 
 @router.get("/oauth/callback")
 async def mcp_oauth_callback(
-    code: str,
+    code: Optional[str] = None,
     state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
     current_user: Optional[User] = Depends(get_current_user_optional),
@@ -541,13 +543,29 @@ async def mcp_oauth_callback(
     logger = logging.getLogger(__name__)
     
     # Force immediate logging to stdout for Cloud Run
-    print(f"🔵 OAuth callback called! Code length: {len(code)}, State: {state[:50] if state else 'None'}", flush=True)
+    print(f"🔵 OAuth callback called! Code: {'present' if code else 'missing'}, State: {state[:50] if state else 'None'}, Error: {error}", flush=True)
     logger.info(f"🔵 OAuth callback called!")
-    logger.info(f"   Code: {code[:20]}... (length: {len(code)})")
-    logger.info(f"   State: {state[:50] if state else 'None'}...")
+    logger.info(f"   Code: {code[:20] if code else 'None'}... (length: {len(code) if code else 0})")
+    logger.info(f"   State: {state[:50] if state else 'None'}... (full length: {len(state) if state else 0})")
+    logger.info(f"   Error: {error}")
+    logger.info(f"   Error description: {error_description}")
     logger.info(f"   Tenant ID: {tenant_id}")
     logger.info(f"   Current user from session: {current_user.email if current_user else 'None'} (ID: {current_user.id if current_user else 'None'})")
     print(f"   Tenant ID: {tenant_id}, User: {current_user.email if current_user else 'None'}", flush=True)
+    
+    # Handle OAuth errors from Google
+    if error:
+        error_msg = f"OAuth error from Google: {error}"
+        if error_description:
+            error_msg += f" - {error_description}"
+        logger.error(f"❌ {error_msg}")
+        print(f"❌ {error_msg}", flush=True)
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    if not code:
+        logger.error(f"❌ OAuth callback called without code parameter")
+        print(f"❌ OAuth callback called without code parameter", flush=True)
+        raise HTTPException(status_code=400, detail="Missing authorization code")
     
     if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
         raise HTTPException(
