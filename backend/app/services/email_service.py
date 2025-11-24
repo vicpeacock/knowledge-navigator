@@ -43,8 +43,14 @@ class EmailService:
         
         # Use BASE_URL from environment if available, otherwise use settings
         import os
-        base_url = os.getenv("BASE_URL") or settings.base_url or "http://localhost:8000"
+        base_url = os.getenv("BASE_URL") or getattr(settings, "base_url", None) or "http://localhost:8000"
         redirect_uri = f"{base_url}/api/integrations/emails/oauth/callback"
+        
+        # Log the redirect_uri being used for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔵 Email OAuth - Using redirect_uri: {redirect_uri}")
+        print(f"🔵 Email OAuth - Using redirect_uri: {redirect_uri}", flush=True)
         
         flow = Flow.from_client_config(
             {

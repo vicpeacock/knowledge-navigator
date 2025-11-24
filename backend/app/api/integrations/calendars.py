@@ -122,6 +122,13 @@ async def authorize_google_calendar(
             prompt='consent',
             state=state_str,  # Pass state directly to authorization_url
         )
+        
+        # Log the authorization URL for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔵 Calendar OAuth authorize - Authorization URL: {authorization_url[:200]}...")
+        print(f"🔵 Calendar OAuth authorize - Authorization URL: {authorization_url[:200]}...", flush=True)
+        
         return {"authorization_url": authorization_url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating OAuth flow: {str(e)}")

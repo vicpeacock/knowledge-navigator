@@ -46,8 +46,14 @@ class CalendarService:
             raise ValueError("Google OAuth credentials not configured")
 
         # Use BASE_URL from environment if available, otherwise use settings
-        base_url = os.getenv("BASE_URL") or settings.base_url or "http://localhost:8000"
+        base_url = os.getenv("BASE_URL") or getattr(settings, "base_url", None) or "http://localhost:8000"
         redirect_uri = f"{base_url}/api/integrations/calendars/oauth/callback"
+        
+        # Log the redirect_uri being used for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔵 Calendar OAuth - Using redirect_uri: {redirect_uri}")
+        print(f"🔵 Calendar OAuth - Using redirect_uri: {redirect_uri}", flush=True)
 
         scope_list = list(scopes or [
             "openid",  # Required for ID token with email
