@@ -242,14 +242,19 @@ class GeminiClient:
                 logger.error(f"Error calling Gemini API: {e}", exc_info=True)
                 raise
     
-    async def _generate_async(self, chat, message: str, generation_config: Optional[Dict[str, Any]] = None):
+    async def _generate_async(self, chat, message: str, generation_config: Optional[Dict[str, Any]] = None, safety_settings: Optional[List[Dict[str, Any]]] = None):
         """Helper to generate response asynchronously"""
         import asyncio
         loop = asyncio.get_event_loop()
         # Use run_in_executor to avoid blocking
         def _send():
+            kwargs = {}
             if generation_config:
-                return chat.send_message(message, generation_config=generation_config)
+                kwargs["generation_config"] = generation_config
+            if safety_settings:
+                kwargs["safety_settings"] = safety_settings
+            if kwargs:
+                return chat.send_message(message, **kwargs)
             else:
                 return chat.send_message(message)
         return await loop.run_in_executor(None, _send)
@@ -542,20 +547,17 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 # Send last message
                 last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
                 
-                # Pass generation_config and safety_settings to send_message
+                # Pass generation_config and safety_settings to _generate_async
                 # safety_settings should be passed to send_message if not already in model_config
-                send_kwargs = {}
-                if generation_config:
-                    send_kwargs["generation_config"] = generation_config
-                # Only pass safety_settings if not already in model_config
+                safety_settings_to_pass = None
                 if safety_settings and not (model_config and "safety_settings" in model_config):
-                    send_kwargs["safety_settings"] = safety_settings
+                    safety_settings_to_pass = safety_settings
                     if disable_safety_filters:
                         logger.info(f"🔓 Passing safety_settings (BLOCK_NONE) to send_message")
                     else:
                         logger.debug(f"✅ Passing safety_settings (BLOCK_ONLY_HIGH) to send_message")
                 
-                response = await self._generate_async(chat, last_msg, **send_kwargs)
+                response = await self._generate_async(chat, last_msg, generation_config=generation_config, safety_settings=safety_settings_to_pass)
                 
                 duration = time.time() - start_time
                 observe_histogram("llm_request_duration_seconds", duration, labels={"model": self.model_name, "provider": "gemini"})
