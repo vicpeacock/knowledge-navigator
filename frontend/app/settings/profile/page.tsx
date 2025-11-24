@@ -107,8 +107,13 @@ function ProfileContent() {
       // Clean up sessionStorage
       sessionStorage.removeItem('oauth_redirect_back')
       sessionStorage.removeItem('oauth_integration_id')
-      // Then reload integrations
+      // Then reload all data (not just OAuth integrations)
+      console.log('OAuth success detected, loading all profile data...')
+      loadProfile()
+      loadBackgroundServicesPreferences()
       loadOAuthIntegrations()
+      loadEmailIntegrations()
+      loadCalendarIntegrations()
       setOAuthIntegrationsSuccess('OAuth authorization completed successfully!')
     } 
     // Check if we're returning from email/calendar OAuth callback
