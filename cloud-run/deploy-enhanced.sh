@@ -217,6 +217,13 @@ function build_env_vars_string() {
     fi
     add_env_var "BASE_URL" "$BASE_URL"
     
+    # Frontend URL (for OAuth redirects after callback)
+    # Set to Cloud Run frontend URL if not already set
+    if [ -z "$FRONTEND_URL" ]; then
+        FRONTEND_URL="https://knowledge-navigator-frontend-osbdwu5a7q-uc.a.run.app"
+    fi
+    add_env_var "FRONTEND_URL" "$FRONTEND_URL"
+    
     # HuggingFace (optional, helps avoid rate limits)
     add_env_var "HUGGINGFACE_TOKEN" "$HUGGINGFACE_TOKEN"
     
