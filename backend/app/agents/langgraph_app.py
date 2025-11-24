@@ -1517,8 +1517,14 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     else:
                         response_text = str(final_response) if final_response else ""
                     
-                    if not response_text or not response_text.strip():
-                        logger.warning("Final response after tool execution is empty, using fallback with tool results summary")
+                    # Check if response is empty or is the generic safety block message
+                    is_safety_block = response_text and "bloccata dai filtri di sicurezza" in response_text
+                    if not response_text or not response_text.strip() or is_safety_block:
+                        if is_safety_block:
+                            logger.warning("Final response was blocked by safety filters, extracting results from tools")
+                        else:
+                            logger.warning("Final response after tool execution is empty, using fallback with tool results summary")
+                        
                         # Try to extract useful information from tool results for the fallback
                         summary_parts = []
                         for tr in tool_results:
@@ -1526,10 +1532,21 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                             tool_result = tr.get('result', {})
                             if isinstance(tool_result, dict):
                                 # For customsearch_search, extract search results
-                                if tool_name == 'customsearch_search' and 'results' in tool_result:
+                                if tool_name == 'customsearch_search':
+                                    # Check for results in the result dict
                                     results = tool_result.get('results', [])
                                     if results:
-                                        summary_parts.append(f"Ho trovato {len(results)} risultati nella ricerca. Primo risultato: {results[0].get('title', 'N/A')}")
+                                        # Extract first few results with details
+                                        result_texts = []
+                                        for i, r in enumerate(results[:3], 1):
+                                            title = r.get('title', 'N/A')
+                                            snippet = r.get('content', 'N/A')
+                                            url = r.get('url', 'N/A')
+                                            result_texts.append(f"{i}. {title}: {snippet[:150]}...")
+                                        summary_parts.append(f"Ho trovato {len(results)} risultati nella ricerca:\n" + "\n".join(result_texts))
+                                    # Also check for summary field
+                                    elif 'summary' in tool_result:
+                                        summary_parts.append(tool_result['summary'])
                                 # For other tools, try to extract useful info
                                 elif 'error' not in tool_result:
                                     # Try to extract a summary from the result
@@ -1540,7 +1557,12 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                                         summary_parts.append(content)
                         
                         if summary_parts:
-                            response_text = "Ho completato la ricerca. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
+                            # Create a more natural response based on the query
+                            if 'customsearch_search' in [tr.get('tool') for tr in tool_results]:
+                                # For search queries, provide a direct answer
+                                response_text = "".join(summary_parts[:2])  # Use first 2 summaries (usually just one for search)
+                            else:
+                                response_text = "Ho completato la ricerca. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
                         else:
                             response_text = f"Ho completato le azioni richieste. Ho eseguito {len(tool_results)} tool(s)."
                 except Exception as final_error:
