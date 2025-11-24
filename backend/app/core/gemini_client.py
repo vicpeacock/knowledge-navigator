@@ -424,10 +424,13 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
         # When synthesizing tool results, we can disable safety filters to avoid blocking legitimate content
         # For normal interactions, we use BLOCK_ONLY_HIGH to block only the most harmful content
         # NOTE: safety_settings must be passed to the model, NOT to GenerationConfig
+        logger.info(f"🔍 Safety settings configuration: disable_safety_filters={disable_safety_filters}")
         safety_settings = None
         try:
             import google.generativeai.types as genai_types
+            logger.info(f"🔍 Successfully imported genai_types")
             if disable_safety_filters:
+                logger.info(f"🔍 Configuring BLOCK_NONE safety settings...")
                 # Disable all safety filters for tool result synthesis
                 # This is safe because tool results come from trusted sources (our own tools)
                 safety_settings = [
@@ -448,8 +451,9 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                         "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
                     },
                 ]
-                logger.info("🔓 Disabled safety filters for tool result synthesis (BLOCK_NONE)")
+                logger.info(f"🔓 Disabled safety filters for tool result synthesis (BLOCK_NONE). Settings: {safety_settings}")
             else:
+                logger.info(f"🔍 Configuring BLOCK_ONLY_HIGH safety settings...")
                 # Block only the most harmful content (BLOCK_ONLY_HIGH) for normal interactions
                 safety_settings = [
                     {
@@ -471,7 +475,8 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 ]
                 logger.debug("✅ Configured Gemini safety settings to BLOCK_ONLY_HIGH")
         except Exception as e:
-            logger.warning(f"Could not configure safety settings: {e}, using defaults")
+            logger.error(f"❌ Could not configure safety settings: {e}", exc_info=True)
+            logger.warning(f"   Using default safety settings (may cause blocks)")
         
         with trace_span("llm.generate_with_context", {
             "llm.model": self.model_name,
