@@ -45,6 +45,10 @@ class CalendarService:
         if not settings.google_client_id or not settings.google_client_secret:
             raise ValueError("Google OAuth credentials not configured")
 
+        # Use BASE_URL from environment if available, otherwise use settings
+        base_url = os.getenv("BASE_URL") or settings.base_url or "http://localhost:8000"
+        redirect_uri = f"{base_url}/api/integrations/calendars/oauth/callback"
+
         scope_list = list(scopes or [
             "openid",  # Required for ID token with email
             "email",  # Required for email in ID token
@@ -68,11 +72,11 @@ class CalendarService:
                     "client_secret": settings.google_client_secret,
                     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                     "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [settings.google_redirect_uri_calendar],
+                    "redirect_uris": [redirect_uri],
                 }
             },
             scopes=scope_list,
-            redirect_uri=settings.google_redirect_uri_calendar,
+            redirect_uri=redirect_uri,
         )
         
         return flow
