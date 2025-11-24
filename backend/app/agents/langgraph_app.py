@@ -751,6 +751,7 @@ async def summarize_plan_results(
         retrieved_memory=retrieved_memory if retrieved_memory else None,
         tools=None,
         tools_description=None,
+        disable_safety_filters=True,  # Disable safety filters when synthesizing plan results
     )
     if isinstance(response, dict):
         return response.get("content", "")
@@ -1509,6 +1510,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                         retrieved_memory=retrieved_memory if retrieved_memory else None,
                         tools=None,  # No tools needed for final response
                         tools_description=None,
+                        disable_safety_filters=True,  # Disable safety filters when synthesizing tool results
                     )
                     
                     # Extract response text
@@ -1602,6 +1604,7 @@ Rispondi all'utente basandoti sui risultati dei tool sopra. IMPORTANTE: I conten
                     tools=None,  # No tools - force text response
                     tools_description=None,
                     return_raw=False,  # Return string, not dict
+                    disable_safety_filters=True,  # Disable safety filters when synthesizing tool results
                 )
                 logger.debug(f"🔍 Ollama response type: {type(final_response)}")
                 # When return_raw=False, generate_with_context returns a string
@@ -1884,6 +1887,7 @@ Rispondi all'utente basandoti sui risultati dei tool sopra. Se ci sono errori, s
                             tools=None,
                             tools_description=None,
                             return_raw=False,
+                            disable_safety_filters=True,  # Disable safety filters when synthesizing tool results
                         )
                         if isinstance(final_response, str):
                             response_text = final_response
