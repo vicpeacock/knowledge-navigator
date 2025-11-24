@@ -1528,15 +1528,19 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                             logger.warning("Final response after tool execution is empty, using fallback with tool results summary")
                         
                         # Try to extract useful information from tool results for the fallback
+                        logger.info(f"🔍 Extracting results from {len(tool_results)} tool results for fallback")
                         summary_parts = []
                         for tr in tool_results:
                             tool_name = tr.get('tool', 'unknown')
                             tool_result = tr.get('result', {})
+                            logger.info(f"   Tool: {tool_name}, result type: {type(tool_result)}")
                             if isinstance(tool_result, dict):
+                                logger.info(f"   Result keys: {list(tool_result.keys())}")
                                 # For customsearch_search, extract search results
                                 if tool_name == 'customsearch_search':
                                     # Check for results in the result dict
                                     results = tool_result.get('results', [])
+                                    logger.info(f"   Found {len(results)} results in customsearch_search")
                                     if results:
                                         # Extract first few results with details
                                         result_texts = []
@@ -1545,10 +1549,15 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                                             snippet = r.get('content', 'N/A')
                                             url = r.get('url', 'N/A')
                                             result_texts.append(f"{i}. {title}: {snippet[:150]}...")
-                                        summary_parts.append(f"Ho trovato {len(results)} risultati nella ricerca:\n" + "\n".join(result_texts))
+                                        summary_text = f"Ho trovato {len(results)} risultati nella ricerca:\n" + "\n".join(result_texts)
+                                        summary_parts.append(summary_text)
+                                        logger.info(f"   ✅ Extracted {len(results)} search results for fallback")
                                     # Also check for summary field
                                     elif 'summary' in tool_result:
                                         summary_parts.append(tool_result['summary'])
+                                        logger.info(f"   ✅ Using summary field from customsearch_search")
+                                    else:
+                                        logger.warning(f"   ⚠️  No 'results' or 'summary' found in customsearch_search result")
                                 # For other tools, try to extract useful info
                                 elif 'error' not in tool_result:
                                     # Try to extract a summary from the result
@@ -1559,13 +1568,16 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                                         summary_parts.append(content)
                         
                         if summary_parts:
+                            logger.info(f"   ✅ Generated {len(summary_parts)} summary parts from tool results")
                             # Create a more natural response based on the query
                             if 'customsearch_search' in [tr.get('tool') for tr in tool_results]:
                                 # For search queries, provide a direct answer
                                 response_text = "".join(summary_parts[:2])  # Use first 2 summaries (usually just one for search)
+                                logger.info(f"   ✅ Created fallback response for search query, length: {len(response_text)}")
                             else:
                                 response_text = "Ho completato la ricerca. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
                         else:
+                            logger.warning(f"   ⚠️  No summary parts extracted from tool results, using generic message")
                             response_text = f"Ho completato le azioni richieste. Ho eseguito {len(tool_results)} tool(s)."
                 except Exception as final_error:
                     logger.error(f"Error generating final response after tools: {final_error}", exc_info=True)
