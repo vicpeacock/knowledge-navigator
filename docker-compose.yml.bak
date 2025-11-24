@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: knowledge-navigator-postgres
+    environment:
+      POSTGRES_USER: knavigator
+      POSTGRES_PASSWORD: knavigator_pass
+      POSTGRES_DB: knowledge_navigator
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knavigator"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chromadb:
+    image: chromadb/chroma:0.6.0
+    container_name: knowledge-navigator-chromadb
+    ports:
+      - "8001:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+      - ./docker/chromadb/entrypoint.sh:/docker-entrypoint-override.sh:ro
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+    entrypoint: ["/bin/sh", "/docker-entrypoint-override.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  google-workspace-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.workspace-mcp
+    container_name: knowledge-navigator-workspace-mcp
+    ports:
+      - "8003:8000"  # Porta esterna 8003 (8000=backend locale, 8001=ChromaDB, 8002=backend Docker test)
+    environment:
+      # OAuth credentials (da .env) - Credenziali dell'applicazione (condivise)
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      - GOOGLE_OAUTH_REDIRECT_URI=http://localhost:8003/oauth2callback
+      # Server configuration
+      # WORKSPACE_MCP_BASE_URI: URL base senza porta (il server aggiunge WORKSPACE_MCP_PORT internamente)
+      - WORKSPACE_MCP_BASE_URI=http://localhost
+      # WORKSPACE_MCP_PORT: porta interna del container (8000) - gestita dal Dockerfile
+      # La porta esterna (8003) è gestita dal port mapping di Docker
+      # Enable OAuth 2.1 for multi-user support (ogni utente autentica con il proprio account Google)
+      - MCP_ENABLE_OAUTH21=true
+      # Enable external OAuth 2.1 provider mode (passiamo token OAuth dall'esterno via Authorization header)
+      # Questo permette al server di accettare bearer token invece di gestire il flusso OAuth internamente
+      - EXTERNAL_OAUTH21_PROVIDER=true
+      # Enable stateless mode (required when using external OAuth provider)
+      # In stateless mode, each request must include a valid bearer token
+      - WORKSPACE_MCP_STATELESS_MODE=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # ollama-background: Rimosso - ora usiamo llama.cpp nativo per il background agent
+  # Vedi scripts/start_llama_background.sh per avviare llama-server nativamente
+
+volumes:
+  postgres_data:
+  chromadb_data:
+
