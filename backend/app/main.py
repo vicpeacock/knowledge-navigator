@@ -416,6 +416,8 @@ app.include_router(emails.router, prefix="/api/integrations/emails", tags=["inte
 from app.api.integrations import mcp as mcp_integration
 app.include_router(mcp_integration.router, prefix="/api/integrations/mcp", tags=["integrations", "mcp"])
 app.include_router(metrics_api.router, tags=["observability"])
+from app.api import init as init_api
+app.include_router(init_api.router, tags=["init"])
 
 
 @app.get("/")
