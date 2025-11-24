@@ -210,6 +210,13 @@ function build_env_vars_string() {
     add_env_var "GOOGLE_PSE_API_KEY" "$GOOGLE_PSE_API_KEY"
     add_env_var "GOOGLE_PSE_CX" "$GOOGLE_PSE_CX"
     
+    # Backend base URL (for OAuth redirects)
+    # Set to Cloud Run backend URL if not already set
+    if [ -z "$BASE_URL" ]; then
+        BASE_URL="https://knowledge-navigator-backend-osbdwu5a7q-uc.a.run.app"
+    fi
+    add_env_var "BASE_URL" "$BASE_URL"
+    
     # Other settings
     add_env_var "USE_LANGGRAPH_PROTOTYPE" "$USE_LANGGRAPH_PROTOTYPE"
     
