@@ -891,7 +891,8 @@ async def get_mcp_tools(
             error_detail = error_message
             
             # Check if this is an OAuth 2.1 server
-            from app.core.oauth_utils import is_oauth_server, is_oauth_error
+            # is_oauth_server is already imported at the top of the file
+            from app.core.oauth_utils import is_oauth_error
             session_metadata_check = integration.session_metadata or {}
             oauth_required = session_metadata_check.get("oauth_required", False)
             is_oauth = is_oauth_server(server_url, oauth_required)
