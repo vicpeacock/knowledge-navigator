@@ -329,7 +329,7 @@ function deploy_frontend() {
         --cpu 1 \
         --timeout 60 \
         --max-instances 5 \
-        --set-env-vars "PORT=3000,NEXT_PUBLIC_API_URL=${BACKEND_URL}"
+        --set-env-vars "NEXT_PUBLIC_API_URL=${BACKEND_URL}"
     
     FRONTEND_URL=$(gcloud run services describe knowledge-navigator-frontend \
         --region "$REGION" \
