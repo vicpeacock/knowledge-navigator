@@ -848,9 +848,12 @@ async def mcp_oauth_callback(
             # Continue anyway - tools will be discovered when used
         
         # Redirect to frontend Profile page (where OAuth authorization is managed)
-        frontend_url = settings.frontend_url or "http://localhost:3003"
+        # Use FRONTEND_URL env var if available, otherwise use settings.frontend_url
+        import os
+        frontend_url = os.getenv("FRONTEND_URL") or settings.frontend_url or "http://localhost:3003"
         redirect_url = f"{frontend_url}/settings/profile?oauth_success=true&integration_id={integration_id}"
         logger.info(f"✅ OAuth callback completed successfully, redirecting to: {redirect_url}")
+        logger.info(f"   Using frontend_url: {frontend_url}")
         return RedirectResponse(url=redirect_url)
     except Exception as e:
         logger.error(f"❌ Error in OAuth callback: {e}", exc_info=True)
