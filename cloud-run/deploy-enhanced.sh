@@ -198,9 +198,13 @@ function build_env_vars_string() {
     add_env_var "ENCRYPTION_KEY" "$ENCRYPTION_KEY"
     add_env_var "JWT_SECRET_KEY" "$JWT_SECRET_KEY"
     
-    # Google OAuth
+    # Google OAuth (for Gmail/Calendar integrations)
     add_env_var "GOOGLE_CLIENT_ID" "$GOOGLE_CLIENT_ID"
     add_env_var "GOOGLE_CLIENT_SECRET" "$GOOGLE_CLIENT_SECRET"
+    
+    # Google OAuth for Workspace MCP (for Google Workspace MCP server OAuth)
+    add_env_var "GOOGLE_OAUTH_CLIENT_ID" "$GOOGLE_OAUTH_CLIENT_ID"
+    add_env_var "GOOGLE_OAUTH_CLIENT_SECRET" "$GOOGLE_OAUTH_CLIENT_SECRET"
     
     # Google Custom Search
     add_env_var "GOOGLE_PSE_API_KEY" "$GOOGLE_PSE_API_KEY"
