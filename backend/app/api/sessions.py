@@ -1963,72 +1963,92 @@ async def stream_agent_activity(
     
     logger = logging.getLogger(__name__)
     
-    logger.info(f"🔌 SSE connection request for session {session_id}")
-    logger.info(f"   Token provided: {bool(token)}")
-    logger.info(f"   Token length: {len(token) if token else 0}")
-    logger.info(f"   Tenant ID: {tenant_id}")
+    # Reduce logging verbosity for faster connection
+    logger.debug(f"🔌 SSE connection request for session {session_id}")
+    logger.debug(f"   Token provided: {bool(token)}, Tenant ID: {tenant_id}")
 
     # Get user from token (query param for SSE, or header for regular requests)
+    # Optimize: Do minimal work before starting the stream
     current_user = None
+    user_id_from_token = None
+    
     if token:
-        # Decode token from query parameter
-        logger.info(f"   Attempting to decode token...")
+        # Decode token from query parameter (fast, no DB query)
         payload = decode_token(token)
         if payload:
-            logger.info(f"   Token decoded successfully, payload keys: {list(payload.keys())}")
-            user_id = payload.get("sub")
-            logger.info(f"   User ID from token: {user_id}")
-            if user_id:
-                try:
-                    user_uuid = UUID(str(user_id))
-                    logger.info(f"   Looking up user {user_uuid} in tenant {tenant_id}")
-                    result = await db.execute(
-                        sql_select(User).where(
-                            User.id == user_uuid,
-                            User.tenant_id == tenant_id,
-                            User.active == True
-                        )
-                    )
-                    current_user = result.scalar_one_or_none()
-                    if current_user:
-                        logger.info(f"   ✅ User found: {current_user.email}")
-                    else:
-                        logger.warning(f"   ❌ User not found or inactive")
-                except ValueError as e:
-                    logger.warning(f"   ❌ Invalid UUID format: {e}")
-        else:
-            logger.warning(f"   ❌ Token decode failed")
+            user_id_from_token = payload.get("sub")
+            logger.debug(f"   Token decoded, user_id: {user_id_from_token}")
     
     # Fallback to header if query param not provided
-    if not current_user:
-        logger.info(f"   Trying Authorization header fallback...")
-        try:
-            authorization = request.headers.get("Authorization")
-            logger.info(f"   Authorization header present: {bool(authorization)}")
-            if authorization:
-                current_user = await get_current_user(authorization=authorization, db=db, tenant_id=tenant_id)
-                if current_user:
-                    logger.info(f"   ✅ User found via header: {current_user.email}")
-        except HTTPException as e:
-            logger.warning(f"   ❌ Header auth failed: {e.detail}")
-        except Exception as e:
-            logger.warning(f"   ❌ Header auth error: {e}")
+    authorization = None
+    if not user_id_from_token:
+        authorization = request.headers.get("Authorization")
+        logger.debug(f"   Authorization header present: {bool(authorization)}")
+    
+    # Optimize: Run user lookup and session verification in parallel
+    async def get_user():
+        if user_id_from_token:
+            try:
+                user_uuid = UUID(str(user_id_from_token))
+                # Only select id and email for faster query
+                result = await db.execute(
+                    sql_select(User.id, User.email, User.active).where(
+                        User.id == user_uuid,
+                        User.tenant_id == tenant_id,
+                        User.active == True
+                    )
+                )
+                user_row = result.first()
+                if user_row:
+                    # Create a minimal user object
+                    from types import SimpleNamespace
+                    user = SimpleNamespace()
+                    user.id = user_row[0]
+                    user.email = user_row[1]
+                    user.active = user_row[2]
+                    logger.debug(f"   ✅ User found: {user.email}")
+                    return user
+                else:
+                    logger.debug(f"   ❌ User not found or inactive")
+            except ValueError as e:
+                logger.warning(f"   ❌ Invalid UUID format: {e}")
+        elif authorization:
+            try:
+                user = await get_current_user(authorization=authorization, db=db, tenant_id=tenant_id)
+                if user:
+                    logger.debug(f"   ✅ User found via header: {user.email}")
+                    return user
+            except HTTPException as e:
+                logger.debug(f"   ❌ Header auth failed: {e.detail}")
+            except Exception as e:
+                logger.debug(f"   ❌ Header auth error: {e}")
+        return None
+    
+    async def verify_session(user_id: Optional[UUID]):
+        if not user_id:
+            return False
+        # Only select id for faster query
+        result = await db.execute(
+            select(SessionModel.id).where(
+                SessionModel.id == session_id,
+                SessionModel.tenant_id == tenant_id,
+                SessionModel.user_id == user_id
+            )
+        )
+        return result.scalar_one_or_none() is not None
+    
+    # Get user first (needed for session verification)
+    current_user = await get_user()
     
     if not current_user:
         logger.warning(f"❌ Unauthorized SSE connection attempt for session {session_id}")
         logger.warning(f"   Token was provided: {bool(token)}")
-        logger.warning(f"   Authorization header present: {bool(request.headers.get('Authorization'))}")
+        logger.warning(f"   Authorization header present: {bool(authorization)}")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Ensure session exists and belongs to user before establishing stream
-    result = await db.execute(
-        select(SessionModel.id).where(
-            SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id,
-            SessionModel.user_id == current_user.id
-        )
-    )
-    if result.scalar_one_or_none() is None:
+    # Verify session exists and belongs to user (optimized query)
+    session_exists = await verify_session(current_user.id)
+    if not session_exists:
         logger.warning(f"❌ Session {session_id} not found for SSE stream")
         raise HTTPException(status_code=404, detail="Session not found")
 
