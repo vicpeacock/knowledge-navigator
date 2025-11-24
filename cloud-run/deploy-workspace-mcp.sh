@@ -33,9 +33,27 @@ function log_debug() {
 # Load environment variables
 if [ -f "$ENV_FILE" ]; then
     log_info "Loading environment variables from .env.cloud-run..."
-    set -a
-    source "$ENV_FILE"
-    set +a
+    # Load .env.cloud-run file, handling values with spaces
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        
+        # Skip lines without =
+        [[ ! "$line" =~ = ]] && continue
+        
+        # Remove leading/trailing whitespace
+        line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        
+        # Extract key and value
+        key=$(echo "$line" | cut -d'=' -f1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        value=$(echo "$line" | cut -d'=' -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        
+        # Remove quotes if present
+        value=$(echo "$value" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+        
+        # Export the variable
+        export "$key=$value" 2>/dev/null || true
+    done < "$ENV_FILE"
 else
     log_error "File .env.cloud-run not found"
     exit 1
@@ -102,20 +120,32 @@ log_info "✅ Image pushed"
 DEPLOYED_URL=""
 REDIRECT_URI_PLACEHOLDER="https://PLACEHOLDER.run.app/oauth2callback"
 
-# Build environment variables
-ENV_VARS="PORT=8000"
+# Build environment variables (PORT is reserved by Cloud Run, don't set it)
+ENV_VARS=""
 
 # Add OAuth credentials if available
 if [ -n "$GOOGLE_OAUTH_CLIENT_ID" ]; then
-    ENV_VARS="${ENV_VARS},GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
+    if [ -z "$ENV_VARS" ]; then
+        ENV_VARS="GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
+    else
+        ENV_VARS="${ENV_VARS},GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
+    fi
 fi
 
 if [ -n "$GOOGLE_OAUTH_CLIENT_SECRET" ]; then
-    ENV_VARS="${ENV_VARS},GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}"
+    if [ -z "$ENV_VARS" ]; then
+        ENV_VARS="GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}"
+    else
+        ENV_VARS="${ENV_VARS},GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}"
+    fi
 fi
 
 # Add OAuth redirect URI (will be updated after deployment)
-ENV_VARS="${ENV_VARS},GOOGLE_OAUTH_REDIRECT_URI=${REDIRECT_URI_PLACEHOLDER}"
+if [ -z "$ENV_VARS" ]; then
+    ENV_VARS="GOOGLE_OAUTH_REDIRECT_URI=${REDIRECT_URI_PLACEHOLDER}"
+else
+    ENV_VARS="${ENV_VARS},GOOGLE_OAUTH_REDIRECT_URI=${REDIRECT_URI_PLACEHOLDER}"
+fi
 
 # Add server configuration
 ENV_VARS="${ENV_VARS},MCP_ENABLE_OAUTH21=true"
