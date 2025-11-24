@@ -427,6 +427,11 @@ async def authorize_mcp_oauth(
         # Use a fixed redirect_uri (not dynamic with integration_id) - integration_id is passed via state
         redirect_uri = f"{settings.base_url}/api/integrations/mcp/oauth/callback"
         
+        # Log the redirect_uri being used for debugging
+        print(f"🔵 OAuth authorize - Using redirect_uri: {redirect_uri}", flush=True)
+        logger.info(f"🔵 OAuth authorize - Using redirect_uri: {redirect_uri}")
+        logger.info(f"   BASE_URL from settings: {settings.base_url}")
+        
         client_config = {
             "web": {
                 "client_id": settings.google_oauth_client_id,
@@ -464,7 +469,10 @@ async def authorize_mcp_oauth(
             state=state_str,
         )
         
+        print(f"✅ OAuth authorization URL generated for integration {integration_id}, user {current_user.id}", flush=True)
+        print(f"   Authorization URL: {authorization_url[:200]}...", flush=True)
         logger.info(f"OAuth authorization URL generated for integration {integration_id}, user {current_user.id}")
+        logger.info(f"   Authorization URL: {authorization_url[:200]}...")
         
         return {"authorization_url": authorization_url}
     except Exception as e:
