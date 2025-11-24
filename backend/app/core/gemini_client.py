@@ -157,12 +157,37 @@ class GeminiClient:
                 
                 # Send the last message and get response
                 last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
+                # Configure safety settings for generate() method too
+                generation_config_simple = {}
+                try:
+                    import google.generativeai.types as genai_types
+                    generation_config_simple["safety_settings"] = [
+                        {
+                            "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        },
+                        {
+                            "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        },
+                        {
+                            "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                            "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        },
+                        {
+                            "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        },
+                    ]
+                except Exception:
+                    pass
+                
                 if stream:
                     # Streaming not fully implemented yet - return non-streaming for now
                     logger.warning("Streaming not fully supported for Gemini yet, using non-streaming")
-                    response = await self._generate_async(chat, last_msg)
+                    response = await self._generate_async(chat, last_msg, generation_config=generation_config_simple if generation_config_simple else None)
                 else:
-                    response = await self._generate_async(chat, last_msg)
+                    response = await self._generate_async(chat, last_msg, generation_config=generation_config_simple if generation_config_simple else None)
                 
                 duration = time.time() - start_time
                 observe_histogram("llm_request_duration_seconds", duration, labels={"model": self.model_name, "provider": "gemini", "stream": str(stream)})
@@ -213,13 +238,16 @@ class GeminiClient:
                 logger.error(f"Error calling Gemini API: {e}", exc_info=True)
                 raise
     
-    async def _generate_async(self, chat, message: str):
+    async def _generate_async(self, chat, message: str, generation_config: Optional[Dict[str, Any]] = None):
         """Helper to generate response asynchronously"""
         import asyncio
         loop = asyncio.get_event_loop()
         # Use run_in_executor to avoid blocking
         def _send():
-            return chat.send_message(message)
+            if generation_config:
+                return chat.send_message(message, generation_config=generation_config)
+            else:
+                return chat.send_message(message)
         return await loop.run_in_executor(None, _send)
     
     async def generate_with_context(
@@ -387,6 +415,33 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
         if format == "json":
             generation_config["response_mime_type"] = "application/json"
         
+        # Configure safety settings to be less restrictive
+        # This is especially important when synthesizing tool results (like web search)
+        # Block only the most harmful content (BLOCK_ONLY_HIGH)
+        try:
+            import google.generativeai.types as genai_types
+            generation_config["safety_settings"] = [
+                {
+                    "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                },
+                {
+                    "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                },
+                {
+                    "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                },
+                {
+                    "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                },
+            ]
+            logger.debug("✅ Configured Gemini safety settings to BLOCK_ONLY_HIGH")
+        except Exception as e:
+            logger.warning(f"Could not configure safety settings: {e}, using defaults")
+        
         with trace_span("llm.generate_with_context", {
             "llm.model": self.model_name,
             "llm.provider": "gemini",
@@ -444,15 +499,20 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
                 
                 # Configure generation with format if specified
-                if generation_config:
-                    # Create new model with generation config
-                    if model_config:
-                        model = genai.GenerativeModel(self.model_name, generation_config=generation_config, **{k: v for k, v in model_config.items() if k != "generation_config"})
-                    else:
-                        model = genai.GenerativeModel(self.model_name, generation_config=generation_config)
+                # Note: generation_config (including safety settings) is passed to send_message
+                # If we need to apply it to the model, we do it here
+                if generation_config and not model_config:
+                    # If no model_config, we can apply generation_config to the model
+                    model = genai.GenerativeModel(self.model_name, generation_config=generation_config)
+                    chat = model.start_chat(history=history)
+                elif generation_config and model_config:
+                    # If both exist, merge them
+                    model_config_with_gen = {**model_config, "generation_config": generation_config}
+                    model = genai.GenerativeModel(self.model_name, **model_config_with_gen)
                     chat = model.start_chat(history=history)
                 
-                response = await self._generate_async(chat, last_msg)
+                # Pass generation_config to send_message (safety settings are applied here)
+                response = await self._generate_async(chat, last_msg, generation_config=generation_config if generation_config else None)
                 
                 duration = time.time() - start_time
                 observe_histogram("llm_request_duration_seconds", duration, labels={"model": self.model_name, "provider": "gemini"})
