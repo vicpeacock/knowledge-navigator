@@ -1521,6 +1521,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     
                     # Check if response is empty or is the generic safety block message
                     is_safety_block = response_text and "bloccata dai filtri di sicurezza" in response_text
+                    logger.info(f"🔍 Response check: empty={not response_text or not response_text.strip()}, is_safety_block={is_safety_block}, length={len(response_text) if response_text else 0}")
                     if not response_text or not response_text.strip() or is_safety_block:
                         if is_safety_block:
                             logger.warning("Final response was blocked by safety filters, extracting results from tools")
@@ -1529,6 +1530,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                         
                         # Try to extract useful information from tool results for the fallback
                         logger.info(f"🔍 Extracting results from {len(tool_results)} tool results for fallback")
+                        logger.info(f"   Tool results structure: {[tr.get('tool') for tr in tool_results]}")
                         summary_parts = []
                         for tr in tool_results:
                             tool_name = tr.get('tool', 'unknown')
