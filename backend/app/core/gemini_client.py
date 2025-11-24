@@ -511,8 +511,12 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                         # Add safety_settings to model_config if available
                         if safety_settings:
                             model_config["safety_settings"] = safety_settings
+                            if disable_safety_filters:
+                                logger.info(f"🔓 Safety filters DISABLED (BLOCK_NONE) for this request")
+                            else:
+                                logger.debug(f"✅ Safety filters enabled (BLOCK_ONLY_HIGH) for this request")
                         model = genai.GenerativeModel(self.model_name, **model_config)
-                        logger.info(f"✅ Created Gemini model with {len(gemini_tools) if gemini_tools else 0} tools")
+                        logger.info(f"✅ Created Gemini model with {len(gemini_tools) if gemini_tools else 0} tools, safety_settings={'configured' if safety_settings else 'default'}")
                     else:
                         model = self._get_model()
                         # If no model_config, we'll pass safety_settings to send_message
@@ -541,6 +545,10 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 # Only pass safety_settings if not already in model_config
                 if safety_settings and not (model_config and "safety_settings" in model_config):
                     send_kwargs["safety_settings"] = safety_settings
+                    if disable_safety_filters:
+                        logger.info(f"🔓 Passing safety_settings (BLOCK_NONE) to send_message")
+                    else:
+                        logger.debug(f"✅ Passing safety_settings (BLOCK_ONLY_HIGH) to send_message")
                 
                 response = await self._generate_async(chat, last_msg, **send_kwargs)
                 
