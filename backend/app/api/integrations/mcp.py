@@ -532,11 +532,14 @@ async def mcp_oauth_callback(
     import logging
     logger = logging.getLogger(__name__)
     
+    # Force immediate logging to stdout for Cloud Run
+    print(f"🔵 OAuth callback called! Code length: {len(code)}, State: {state[:50] if state else 'None'}", flush=True)
     logger.info(f"🔵 OAuth callback called!")
     logger.info(f"   Code: {code[:20]}... (length: {len(code)})")
     logger.info(f"   State: {state[:50] if state else 'None'}...")
     logger.info(f"   Tenant ID: {tenant_id}")
     logger.info(f"   Current user from session: {current_user.email if current_user else 'None'} (ID: {current_user.id if current_user else 'None'})")
+    print(f"   Tenant ID: {tenant_id}, User: {current_user.email if current_user else 'None'}", flush=True)
     
     if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
         raise HTTPException(
@@ -852,6 +855,8 @@ async def mcp_oauth_callback(
         import os
         frontend_url = os.getenv("FRONTEND_URL") or settings.frontend_url or "http://localhost:3003"
         redirect_url = f"{frontend_url}/settings/profile?oauth_success=true&integration_id={integration_id}"
+        print(f"✅ OAuth callback completed successfully, redirecting to: {redirect_url}", flush=True)
+        print(f"   Using frontend_url: {frontend_url}", flush=True)
         logger.info(f"✅ OAuth callback completed successfully, redirecting to: {redirect_url}")
         logger.info(f"   Using frontend_url: {frontend_url}")
         return RedirectResponse(url=redirect_url)
