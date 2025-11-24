@@ -217,6 +217,9 @@ function build_env_vars_string() {
     fi
     add_env_var "BASE_URL" "$BASE_URL"
     
+    # HuggingFace (optional, helps avoid rate limits)
+    add_env_var "HUGGINGFACE_TOKEN" "$HUGGINGFACE_TOKEN"
+    
     # Other settings
     add_env_var "USE_LANGGRAPH_PROTOTYPE" "$USE_LANGGRAPH_PROTOTYPE"
     
