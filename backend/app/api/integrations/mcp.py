@@ -561,6 +561,7 @@ async def mcp_oauth_callback(
             integration_id_str: Optional[str] = None
             user_id_str: Optional[str] = None
             decoded: Optional[bytes] = None
+            payload_str: Optional[str] = None
             
             try:
                 logger.info(f"   Attempting base64 decode...")
@@ -574,7 +575,16 @@ async def mcp_oauth_callback(
                 logger.info(f"   Decoded bytes length: {len(decoded)}")
                 logger.info(f"   Decoded bytes preview: {decoded[:100]}")
                 
-                payload_str = decoded.decode("utf-8")
+                # Try to decode as UTF-8, with error handling for invalid bytes
+                try:
+                    payload_str = decoded.decode("utf-8")
+                except UnicodeDecodeError as decode_err:
+                    logger.error(f"❌ UTF-8 decode error: {decode_err}")
+                    logger.error(f"   Decoded bytes (hex): {decoded[:50].hex()}")
+                    # Try with error replacement
+                    payload_str = decoded.decode("utf-8", errors="replace")
+                    logger.warning(f"   Using error replacement, payload_str length: {len(payload_str)}")
+                
                 logger.info(f"   Decoded string: {payload_str}")
                 
                 payload = json.loads(payload_str)
@@ -598,8 +608,10 @@ async def mcp_oauth_callback(
                 raise HTTPException(status_code=400, detail=f"Invalid state parameter: base64 decode failed - {str(e)}")
             except json.JSONDecodeError as e:
                 logger.error(f"❌ JSON decode error: {e}")
-                if decoded:
-                    logger.error(f"   Decoded string: {decoded.decode('utf-8', errors='replace')}")
+                if payload_str:
+                    logger.error(f"   Decoded string (first 200 chars): {payload_str[:200]}")
+                elif decoded:
+                    logger.error(f"   Decoded bytes (hex): {decoded[:100].hex()}")
                 raise HTTPException(status_code=400, detail=f"Invalid state parameter: JSON decode failed - {str(e)}")
             except ValueError as e:
                 logger.error(f"❌ UUID parse error: {e}")
