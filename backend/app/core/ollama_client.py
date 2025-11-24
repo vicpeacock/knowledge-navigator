@@ -110,6 +110,7 @@ class OllamaClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         format: Optional[str] = None,
         return_raw: bool = False,
+        disable_safety_filters: bool = False,  # Ignored for Ollama (no safety filters), kept for compatibility
     ) -> str:
         """
         Generate response with session context and retrieved memory

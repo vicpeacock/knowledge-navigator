@@ -223,6 +223,7 @@ IMPORTANTE: Genera una risposta testuale completa e utile per l'utente basata su
                             retrieved_memory=retrieved_memory if retrieved_memory else None,
                             tools=None,  # No tools - force text response
                             tools_description=None,
+                            disable_safety_filters=True,  # Disable safety filters when synthesizing tool results
                         )
                         if isinstance(final_response, dict):
                             response_text = final_response.get("content", "")
