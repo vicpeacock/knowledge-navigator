@@ -287,8 +287,118 @@ class MemoryManager:
         learned_from_sessions: List[UUID],
         importance_score: float = 0.5,
         tenant_id: Optional[UUID] = None,
+        check_duplicates: bool = True,
+        similarity_threshold: float = 0.85,
     ):
-        """Add content to long-term memory (for specific tenant)"""
+        """
+        Add content to long-term memory (for specific tenant).
+        
+        Args:
+            db: Database session
+            content: Content to store
+            learned_from_sessions: List of session IDs where this was learned
+            importance_score: Importance score (0.0-1.0)
+            tenant_id: Tenant ID (optional)
+            check_duplicates: If True, check for similar memories before adding (default: True)
+            similarity_threshold: Similarity threshold for duplicate detection (default: 0.85)
+        
+        Returns:
+            Tuple[bool, Optional[str]]: (was_added, existing_memory_id_or_none)
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Check for duplicates if enabled
+        if check_duplicates:
+            try:
+                # Retrieve similar memories
+                similar = await self.retrieve_long_term_memory(
+                    query=content,
+                    n_results=3,
+                    min_importance=0.0,  # Check all importance levels
+                    tenant_id=tenant_id,
+                )
+                
+                if similar:
+                    # Calculate similarity using embeddings
+                    content_embedding = self.embedding_service.generate_embedding(content)
+                    
+                    for similar_content in similar:
+                        similar_embedding = self.embedding_service.generate_embedding(similar_content)
+                        
+                        # Calculate cosine similarity
+                        similarity = np.dot(content_embedding, similar_embedding) / (
+                            np.linalg.norm(content_embedding) * np.linalg.norm(similar_embedding)
+                        )
+                        
+                        if similarity >= similarity_threshold:
+                            logger.info(f"⚠️  Duplicate memory detected (similarity: {similarity:.2f}), skipping: {content[:50]}...")
+                            # Find the existing memory ID from database
+                            # Note: similar_content might have formatting (e.g., [PERSONAL_INFO] prefix),
+                            # so we search by content similarity or exact match
+                            from sqlalchemy import select
+                            from app.models.database import MemoryLong
+                            
+                            # Try exact match first
+                            result = await db.execute(
+                                select(MemoryLong).where(
+                                    MemoryLong.content == similar_content,
+                                    MemoryLong.tenant_id == (tenant_id or self.tenant_id)
+                                ).limit(1)
+                            )
+                            existing_memory = result.scalar_one_or_none()
+                            
+                            # If not found, try to find by content without prefix (in case formatting differs)
+                            if not existing_memory:
+                                # Extract content without prefix (e.g., remove [PERSONAL_INFO] prefix)
+                                content_without_prefix = similar_content
+                                for prefix in ["[PERSONAL_INFO]", "[FACT]", "[PREFERENCE]", "[CONTACT]", "[PROJECT]"]:
+                                    if similar_content.startswith(prefix):
+                                        content_without_prefix = similar_content[len(prefix):].strip()
+                                        break
+                                
+                                # Also try without prefix from new content
+                                new_content_without_prefix = content
+                                for prefix in ["[PERSONAL_INFO]", "[FACT]", "[PREFERENCE]", "[CONTACT]", "[PROJECT]"]:
+                                    if content.startswith(prefix):
+                                        new_content_without_prefix = content[len(prefix):].strip()
+                                        break
+                                
+                                # Search for memories that match either stripped version
+                                result = await db.execute(
+                                    select(MemoryLong).where(
+                                        MemoryLong.tenant_id == (tenant_id or self.tenant_id)
+                                    )
+                                )
+                                all_memories = result.scalars().all()
+                                
+                                for mem in all_memories:
+                                    mem_content = mem.content
+                                    # Remove prefix if present
+                                    for prefix in ["[PERSONAL_INFO]", "[FACT]", "[PREFERENCE]", "[CONTACT]", "[PROJECT]"]:
+                                        if mem_content.startswith(prefix):
+                                            mem_content = mem_content[len(prefix):].strip()
+                                            break
+                                    
+                                    # Check if stripped contents match
+                                    if mem_content == content_without_prefix or mem_content == new_content_without_prefix:
+                                        existing_memory = mem
+                                        break
+                            
+                            if existing_memory:
+                                # Update learned_from_sessions to include new sessions
+                                existing_sessions = set(existing_memory.learned_from_sessions or [])
+                                new_sessions = set([str(sid) for sid in learned_from_sessions])
+                                existing_memory.learned_from_sessions = list(existing_sessions | new_sessions)
+                                # Update importance if new one is higher
+                                if importance_score > existing_memory.importance_score:
+                                    existing_memory.importance_score = importance_score
+                                await db.commit()
+                                logger.info(f"✅ Updated existing memory with new session IDs: {existing_memory.id}")
+                            return (False, str(existing_memory.id) if existing_memory else None)
+            except Exception as e:
+                logger.warning(f"Error checking for duplicate memories: {e}, proceeding with add")
+        
         # Generate embedding
         embedding = self.embedding_service.generate_embedding(content)
         
@@ -324,6 +434,8 @@ class MemoryManager:
         )
         db.add(memory_long)
         await db.commit()
+        logger.info(f"✅ Added new long-term memory: {content[:50]}...")
+        return (True, str(memory_long.id))
 
     async def retrieve_long_term_memory(
         self,
