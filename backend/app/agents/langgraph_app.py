@@ -1312,6 +1312,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 message=f"LLM connection failed: {str(llm_error)}",
             )
             # Return a fallback response so the graph can continue
+            from app.core.config import settings
             llm_provider = settings.llm_provider.upper() if hasattr(settings, 'llm_provider') else "LLM"
             state["response"] = f"Mi dispiace, ma al momento non posso rispondere perché il servizio di intelligenza artificiale ({llm_provider}) non è disponibile. Verifica la configurazione."
             state["tools_used"] = []
