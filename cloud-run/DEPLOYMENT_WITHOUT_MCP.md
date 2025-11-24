@@ -136,6 +136,7 @@ Il tuo `.env.cloud-run` dovrebbe avere:
 
 ```bash
 # Database
+# IMPORTANTE: Sostituisci [PASSWORD] con la password reale del database
 DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD_HERE@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
 
 # ChromaDB (da Cloud Run)
