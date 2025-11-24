@@ -55,10 +55,10 @@ WORKDIR /app
 COPY --from=builder /app /app
 
 # Variabili ambiente
+# Cloud Run sets PORT automatically, but we use WORKSPACE_MCP_PORT for the app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    WORKSPACE_MCP_PORT=8000 \
-    PORT=8000
+    WORKSPACE_MCP_PORT=8000
 
 # Esponi porta (default 8000, configurabile via WORKSPACE_MCP_PORT)
 EXPOSE 8000
@@ -69,5 +69,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 # Comando di avvio
 # --transport streamable-http è necessario per HTTP mode e supporto OAuth 2.1 multi-user
-CMD ["uv", "run", "main.py", "--transport", "streamable-http"]
+# Cloud Run sets PORT env var, but the app uses WORKSPACE_MCP_PORT
+# We need to map PORT to WORKSPACE_MCP_PORT if PORT is set
+CMD ["sh", "-c", "if [ -n \"$PORT\" ]; then export WORKSPACE_MCP_PORT=$PORT; fi && uv run main.py --transport streamable-http"]
 
