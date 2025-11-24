@@ -470,9 +470,25 @@ async def authorize_mcp_oauth(
         )
         
         print(f"✅ OAuth authorization URL generated for integration {integration_id}, user {current_user.id}", flush=True)
-        print(f"   Authorization URL: {authorization_url[:200]}...", flush=True)
+        print(f"   Authorization URL (first 500 chars): {authorization_url[:500]}", flush=True)
+        # Parse URL to check redirect_uri
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(authorization_url)
+            params = parse_qs(parsed.query)
+            if 'redirect_uri' in params:
+                print(f"   ✅ redirect_uri found in URL: {params['redirect_uri'][0]}", flush=True)
+                logger.info(f"   ✅ redirect_uri in authorization URL: {params['redirect_uri'][0]}")
+            else:
+                print(f"   ⚠️  redirect_uri NOT found in URL parameters", flush=True)
+                logger.warning(f"   ⚠️  redirect_uri NOT found in URL parameters")
+                logger.info(f"   URL parameters: {list(params.keys())}")
+        except Exception as e:
+            print(f"   ⚠️  Could not parse authorization URL: {e}", flush=True)
+            logger.warning(f"   ⚠️  Could not parse authorization URL: {e}")
+        
         logger.info(f"OAuth authorization URL generated for integration {integration_id}, user {current_user.id}")
-        logger.info(f"   Authorization URL: {authorization_url[:200]}...")
+        logger.info(f"   Authorization URL (first 500 chars): {authorization_url[:500]}...")
         
         return {"authorization_url": authorization_url}
     except Exception as e:
