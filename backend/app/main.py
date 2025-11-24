@@ -389,6 +389,8 @@ app.add_middleware(
         "http://localhost:3002",  # MCP Gateway
         "http://localhost:3000",  # Frontend locale (alternativo)
         "http://localhost:3004",  # Frontend Docker (test cloud)
+        "https://knowledge-navigator-frontend-526374196058.us-central1.run.app",  # Frontend Cloud Run
+        "https://knowledge-navigator-frontend-osbdwu5a7q-uc.a.run.app",  # Frontend Cloud Run (alternativo)
     ],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
