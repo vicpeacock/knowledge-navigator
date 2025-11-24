@@ -45,12 +45,6 @@ cloud-run/DEPLOYMENT_SUMMARY.md
 cloud-run/SERVICES_EXPLANATION.md
 docs/HOW_TO_GET_GOOGLE_OAUTH_CREDENTIALS.md
 
-# Documentation files with secrets - Keep locally but don't commit
-SECURITY_NOTICE.md
-cloud-run/DEPLOYMENT_SUMMARY.md
-cloud-run/SERVICES_EXPLANATION.md
-docs/HOW_TO_GET_GOOGLE_OAUTH_CREDENTIALS.md
-
 # IDE
 .vscode/
 .idea/

@@ -167,8 +167,26 @@ class GeminiClient:
                 duration = time.time() - start_time
                 observe_histogram("llm_request_duration_seconds", duration, labels={"model": self.model_name, "provider": "gemini", "stream": str(stream)})
                 
+                # Check for safety blocks (finish_reason = 1 = SAFETY)
+                finish_reason = None
+                if hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'finish_reason'):
+                        finish_reason = candidate.finish_reason
+                
                 # Convert Gemini response to Ollama format
-                response_text = response.text if hasattr(response, 'text') else str(response)
+                # Handle safety blocks (finish_reason = 1)
+                if finish_reason == 1:  # SAFETY
+                    logger.warning(f"Gemini response blocked by safety filters (finish_reason=1)")
+                    response_text = "Mi dispiace, la mia risposta è stata bloccata dai filtri di sicurezza. Potresti riformulare la tua richiesta in modo diverso?"
+                else:
+                    try:
+                        response_text = response.text if hasattr(response, 'text') else str(response)
+                    except Exception as e:
+                        # If response.text fails (e.g., finish_reason=1), provide fallback
+                        logger.warning(f"Could not access response.text: {e}, finish_reason={finish_reason}")
+                        response_text = "Mi dispiace, ho riscontrato un problema nella generazione della risposta. Potresti riprovare?"
+                
                 if response_text:
                     set_trace_attribute("llm.response_length", len(response_text))
                     add_trace_event("llm.response.completed", {
@@ -442,6 +460,27 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 # Parse response
                 content = ""
                 tool_calls = []
+                
+                # First, check for safety blocks (finish_reason = 1 = SAFETY)
+                finish_reason = None
+                if hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'finish_reason'):
+                        finish_reason = candidate.finish_reason
+                
+                # Handle safety blocks
+                if finish_reason == 1:  # SAFETY
+                    logger.warning(f"Gemini response blocked by safety filters (finish_reason=1) in generate_with_tools")
+                    return {
+                        "model": self.model_name,
+                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                        "message": {
+                            "role": "assistant",
+                            "content": "Mi dispiace, la mia risposta è stata bloccata dai filtri di sicurezza. Potresti riformulare la tua richiesta in modo diverso?"
+                        },
+                        "tool_calls": [],
+                        "done": True
+                    }
                 
                 # First, check for function calls in Gemini response
                 # If there are function calls, response.text will fail, so we need to check parts first

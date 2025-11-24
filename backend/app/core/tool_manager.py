@@ -831,9 +831,11 @@ class ToolManager:
                 return {"error": "Nessuna integrazione Google Calendar configurata"}
             
             # Decrypt credentials
+            # Import settings locally to avoid potential import issues
+            from app.core.config import settings as config_settings
             credentials = _decrypt_credentials(
                 integration.credentials_encrypted,
-                settings.credentials_encryption_key
+                config_settings.credentials_encryption_key
             )
             
             # Setup service
@@ -925,9 +927,11 @@ class ToolManager:
                 return {"error": "Nessuna integrazione Gmail configurata"}
             
             # Decrypt credentials
+            # Import settings locally to avoid potential import issues
+            from app.core.config import settings as config_settings
             credentials = _decrypt_credentials(
                 integration.credentials_encrypted,
-                settings.credentials_encryption_key
+                config_settings.credentials_encryption_key
             )
             
             # Setup service
@@ -1389,9 +1393,11 @@ class ToolManager:
                 return {"error": "Nessuna integrazione Gmail configurata"}
             
             # Decrypt credentials
+            # Import settings locally to avoid potential import issues
+            from app.core.config import settings as config_settings
             credentials = _decrypt_credentials(
                 integration.credentials_encrypted,
-                settings.credentials_encryption_key
+                config_settings.credentials_encryption_key
             )
             
             # Setup service
@@ -1495,9 +1501,11 @@ Riassunto:"""
                 return {"error": "Nessuna integrazione Gmail configurata"}
             
             # Decrypt credentials
+            # Import settings locally to avoid potential import issues
+            from app.core.config import settings as config_settings
             credentials = _decrypt_credentials(
                 integration.credentials_encrypted,
-                settings.credentials_encryption_key
+                config_settings.credentials_encryption_key
             )
             
             # Setup service
@@ -1589,9 +1597,11 @@ Riassunto:"""
                 return {"error": "Nessuna integrazione Gmail configurata"}
             
             # Decrypt credentials
+            # Import settings locally to avoid potential import issues
+            from app.core.config import settings as config_settings
             credentials = _decrypt_credentials(
                 integration.credentials_encrypted,
-                settings.credentials_encryption_key
+                config_settings.credentials_encryption_key
             )
             
             # Setup service
@@ -1714,9 +1724,11 @@ Riassunto:"""
                 return {"error": "Nessuna integrazione Gmail configurata"}
             
             # Decrypt credentials
+            # Import settings locally to avoid potential import issues
+            from app.core.config import settings as config_settings
             credentials = _decrypt_credentials(
                 integration.credentials_encrypted,
-                settings.credentials_encryption_key
+                config_settings.credentials_encryption_key
             )
             
             # Setup service
@@ -1876,7 +1888,8 @@ Riassunto:"""
             return {"error": "Query parameter is required for web_search"}
         
         # Check if API key is configured
-        if not settings.ollama_api_key:
+        from app.core.config import settings as config_settings
+        if not config_settings.ollama_api_key:
             logger.error("OLLAMA_API_KEY not configured. Web search requires an API key from https://ollama.com")
             return {
                 "error": "OLLAMA_API_KEY not configured. Please set it in your .env file or environment variables. Get an API key from https://ollama.com"
@@ -1889,7 +1902,8 @@ Riassunto:"""
             # IMPORTANT: Set API key BEFORE importing ollama functions
             # The library reads OLLAMA_API_KEY from environment at import time
             original_key = os.environ.get("OLLAMA_API_KEY")
-            os.environ["OLLAMA_API_KEY"] = settings.ollama_api_key
+            from app.core.config import settings as config_settings
+            os.environ["OLLAMA_API_KEY"] = config_settings.ollama_api_key
             
             try:
                 # Verify API key is set
@@ -2035,19 +2049,20 @@ Riassunto:"""
             return {"error": "Query parameter is required for customsearch_search"}
         
         # Check if API key and CX are configured
-        logger.info(f"   Checking API key: {'✅ SET' if settings.google_pse_api_key else '❌ NOT SET'}")
-        logger.info(f"   Checking CX: {'✅ SET' if settings.google_pse_cx else '❌ NOT SET'}")
+        from app.core.config import settings as config_settings
+        logger.info(f"   Checking API key: {'✅ SET' if config_settings.google_pse_api_key else '❌ NOT SET'}")
+        logger.info(f"   Checking CX: {'✅ SET' if config_settings.google_pse_cx else '❌ NOT SET'}")
         
-        if not settings.google_pse_api_key:
+        if not config_settings.google_pse_api_key:
             logger.error("❌ GOOGLE_PSE_API_KEY or GOOGLE_CSE_API_KEY not configured. Google Custom Search requires an API key.")
-            logger.error(f"   Current value: {settings.google_pse_api_key}")
+            logger.error(f"   Current value: {config_settings.google_pse_api_key}")
             return {
                 "error": "GOOGLE_PSE_API_KEY (or GOOGLE_CSE_API_KEY) not configured. Please set it in your .env file or environment variables. Get an API key from https://developers.google.com/custom-search/v1/overview"
             }
         
-        if not settings.google_pse_cx:
+        if not config_settings.google_pse_cx:
             logger.error("❌ GOOGLE_PSE_CX or GOOGLE_CSE_CX not configured. Google Custom Search requires a Custom Search Engine ID.")
-            logger.error(f"   Current value: {settings.google_pse_cx}")
+            logger.error(f"   Current value: {config_settings.google_pse_cx}")
             return {
                 "error": "GOOGLE_PSE_CX (or GOOGLE_CSE_CX) not configured. Please set it in your .env file or environment variables. Create a Custom Search Engine at https://programmablesearchengine.google.com/"
             }
@@ -2059,9 +2074,10 @@ Riassunto:"""
             
             # Call Google Custom Search API
             url = "https://www.googleapis.com/customsearch/v1"
+            from app.core.config import settings as config_settings
             params = {
-                "key": settings.google_pse_api_key,
-                "cx": settings.google_pse_cx,
+                "key": config_settings.google_pse_api_key,
+                "cx": config_settings.google_pse_cx,
                 "q": query,
                 "num": min(num_results, 10)  # Google API limits to 10 results per request
             }
@@ -2069,8 +2085,9 @@ Riassunto:"""
             async with httpx.AsyncClient(timeout=30.0) as client:
                 logger.info(f"   Calling Google Custom Search API: {url}")
                 logger.info(f"   Query: '{query}', num: {min(num_results, 10)}")
-                logger.info(f"   API Key present: {bool(settings.google_pse_api_key)}")
-                logger.info(f"   CX present: {bool(settings.google_pse_cx)}")
+                from app.core.config import settings as config_settings
+                logger.info(f"   API Key present: {bool(config_settings.google_pse_api_key)}")
+                logger.info(f"   CX present: {bool(config_settings.google_pse_cx)}")
                 response = await client.get(url, params=params)
                 
                 # Log response status
@@ -2210,7 +2227,8 @@ Riassunto:"""
             url = f"https://{url}"
         
         # Check if API key is configured
-        if not settings.ollama_api_key:
+        from app.core.config import settings as config_settings
+        if not config_settings.ollama_api_key:
             logger.error("OLLAMA_API_KEY not configured. Web fetch requires an API key from https://ollama.com")
             return {
                 "error": "OLLAMA_API_KEY not configured. Please set it in your .env file or environment variables. Get an API key from https://ollama.com"
@@ -2223,7 +2241,8 @@ Riassunto:"""
             # IMPORTANT: Set API key BEFORE importing ollama functions
             # The library reads OLLAMA_API_KEY from environment at import time
             original_key = os.environ.get("OLLAMA_API_KEY")
-            os.environ["OLLAMA_API_KEY"] = settings.ollama_api_key
+            from app.core.config import settings as config_settings
+            os.environ["OLLAMA_API_KEY"] = config_settings.ollama_api_key
             
             try:
                 # Verify API key is set
