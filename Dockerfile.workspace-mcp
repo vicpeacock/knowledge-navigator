@@ -57,7 +57,8 @@ COPY --from=builder /app /app
 # Variabili ambiente
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    WORKSPACE_MCP_PORT=8000
+    WORKSPACE_MCP_PORT=8000 \
+    PORT=8000
 
 # Esponi porta (default 8000, configurabile via WORKSPACE_MCP_PORT)
 EXPOSE 8000
