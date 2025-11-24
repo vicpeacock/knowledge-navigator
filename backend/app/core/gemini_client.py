@@ -264,6 +264,7 @@ class GeminiClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         format: Optional[str] = None,
         return_raw: bool = False,
+        disable_safety_filters: bool = False,  # New parameter: disable safety filters for tool result synthesis
     ) -> str:
         """
         Generate response with session context and retrieved memory (compatible with OllamaClient.generate_with_context)
@@ -419,32 +420,56 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
         if format == "json":
             generation_config["response_mime_type"] = "application/json"
         
-        # Configure safety settings to be less restrictive
-        # This is especially important when synthesizing tool results (like web search)
-        # Block only the most harmful content (BLOCK_ONLY_HIGH)
+        # Configure safety settings
+        # When synthesizing tool results, we can disable safety filters to avoid blocking legitimate content
+        # For normal interactions, we use BLOCK_ONLY_HIGH to block only the most harmful content
         # NOTE: safety_settings must be passed to the model, NOT to GenerationConfig
         safety_settings = None
         try:
             import google.generativeai.types as genai_types
-            safety_settings = [
-                {
-                    "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                    "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                },
-                {
-                    "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                    "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                },
-                {
-                    "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                    "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                },
-                {
-                    "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                    "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                },
-            ]
-            logger.debug("✅ Configured Gemini safety settings to BLOCK_ONLY_HIGH")
+            if disable_safety_filters:
+                # Disable all safety filters for tool result synthesis
+                # This is safe because tool results come from trusted sources (our own tools)
+                safety_settings = [
+                    {
+                        "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                    },
+                    {
+                        "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                    },
+                    {
+                        "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                    },
+                    {
+                        "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                    },
+                ]
+                logger.info("🔓 Disabled safety filters for tool result synthesis (BLOCK_NONE)")
+            else:
+                # Block only the most harmful content (BLOCK_ONLY_HIGH) for normal interactions
+                safety_settings = [
+                    {
+                        "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    },
+                    {
+                        "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    },
+                    {
+                        "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    },
+                    {
+                        "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    },
+                ]
+                logger.debug("✅ Configured Gemini safety settings to BLOCK_ONLY_HIGH")
         except Exception as e:
             logger.warning(f"Could not configure safety settings: {e}, using defaults")
         
