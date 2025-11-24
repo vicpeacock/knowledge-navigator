@@ -41,6 +41,11 @@ class EmailService:
         if not settings.google_client_id or not settings.google_client_secret:
             raise ValueError("Google OAuth credentials not configured")
         
+        # Use BASE_URL from environment if available, otherwise use settings
+        import os
+        base_url = os.getenv("BASE_URL") or settings.base_url or "http://localhost:8000"
+        redirect_uri = f"{base_url}/api/integrations/emails/oauth/callback"
+        
         flow = Flow.from_client_config(
             {
                 "web": {
@@ -48,7 +53,7 @@ class EmailService:
                     "client_secret": settings.google_client_secret,
                     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                     "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [settings.google_redirect_uri_email],
+                    "redirect_uris": [redirect_uri],
                 }
             },
                 scopes=[
@@ -58,7 +63,7 @@ class EmailService:
                     "https://www.googleapis.com/auth/gmail.modify",  # Per archiviare/modificare email
                     "https://www.googleapis.com/auth/gmail.send",  # Per inviare email
                 ],
-            redirect_uri=settings.google_redirect_uri_email,
+            redirect_uri=redirect_uri,
         )
         
         return flow
