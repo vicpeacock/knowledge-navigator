@@ -1664,17 +1664,51 @@ Rispondi all'utente basandoti sui risultati dei tool sopra. IMPORTANTE: I conten
                     logger.debug(f"🔍 Converted to string, length: {len(response_text)}")
                 
                 if not response_text:
-                    logger.error("⚠️⚠️⚠️  Final response is EMPTY, using fallback")
-                    # Create a more detailed fallback
+                    logger.error("⚠️⚠️⚠️  Final response is EMPTY, using fallback with tool results extraction")
+                    # Extract results from tools, especially for customsearch_search
                     fallback_parts = []
                     for tr in tool_results:
                         tool_name = tr.get('tool', 'unknown')
                         tool_result = tr.get('result', {})
-                        if isinstance(tool_result, dict) and "error" in tool_result:
-                            fallback_parts.append(f"Tool {tool_name}: ERRORE - {tool_result['error']}")
+                        logger.info(f"   🔍 Fallback: Processing tool {tool_name}, result type: {type(tool_result)}")
+                        
+                        if isinstance(tool_result, dict):
+                            if "error" in tool_result:
+                                fallback_parts.append(f"Tool {tool_name}: ERRORE - {tool_result['error']}")
+                            elif tool_name == 'customsearch_search':
+                                # Extract search results
+                                results = tool_result.get('results', [])
+                                logger.info(f"   🔍 Found {len(results)} results in customsearch_search")
+                                if results:
+                                    # Format results directly
+                                    result_lines = []
+                                    for i, r in enumerate(results[:3], 1):
+                                        title = r.get('title', 'N/A')
+                                        snippet = r.get('content', 'N/A')
+                                        url = r.get('url', 'N/A')
+                                        result_lines.append(f"{i}. **{title}**\n   {snippet[:200]}...\n   {url}")
+                                    response_text = f"Ho trovato {len(results)} risultati per la tua ricerca:\n\n" + "\n\n".join(result_lines)
+                                    logger.info(f"   ✅ Created direct response from search results, length: {len(response_text)}")
+                                    break  # Use this response, don't continue with other tools
+                                elif 'summary' in tool_result:
+                                    response_text = tool_result['summary']
+                                    logger.info(f"   ✅ Using summary from customsearch_search")
+                                    break
+                            else:
+                                # For other tools, try to extract useful info
+                                if 'summary' in tool_result:
+                                    fallback_parts.append(tool_result['summary'])
+                                elif 'content' in tool_result:
+                                    content = str(tool_result['content'])[:200]
+                                    fallback_parts.append(content)
+                                else:
+                                    fallback_parts.append(f"Tool {tool_name}: Eseguito con successo")
                         else:
                             fallback_parts.append(f"Tool {tool_name}: Eseguito con successo")
-                    response_text = f"Ho eseguito {len(tool_results)} tool(s). " + "; ".join(fallback_parts)
+                    
+                    # If we didn't create a direct response from customsearch_search, use generic fallback
+                    if not response_text:
+                        response_text = f"Ho eseguito {len(tool_results)} tool(s). " + "; ".join(fallback_parts)
                 else:
                     logger.info(f"✅ Generated final response: {len(response_text)} characters. Preview: {response_text[:200]}")
             except Exception as final_error:
