@@ -201,6 +201,9 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3003"
     base_url: str = "http://localhost:8000"  # Backend base URL for OAuth redirects
     
+    # HuggingFace (for embedding models)
+    huggingface_token: Optional[str] = None  # Optional token to avoid rate limits
+    
     # Encryption for credentials
     credentials_encryption_key: str = "your-32-byte-encryption-key-change-me"
 
