@@ -184,15 +184,10 @@ export default function IntegrationsPage() {
     }
 
     try {
-      // For admin: use service integrations endpoints (for system communications)
-      // For regular users: use regular endpoints (their personal integrations)
+      // Always load user integrations (personal accounts) - service integrations are separate
       const [calendarResponse, emailResponse, mcpResponse] = await Promise.all([
-        isAdmin 
-          ? integrationsApi.calendar.listServiceIntegrations().catch(() => ({ data: { integrations: [] } }))
-          : integrationsApi.calendar.listIntegrations(),
-        isAdmin 
-          ? integrationsApi.email.listServiceIntegrations().catch(() => ({ data: { integrations: [] } }))
-          : integrationsApi.email.listIntegrations(),
+        integrationsApi.calendar.listIntegrations(),
+        integrationsApi.email.listIntegrations(),
         integrationsApi.mcp.listIntegrations().catch(() => ({ data: { integrations: [] } })),
       ])
       let calendarList: Integration[] = calendarResponse.data.integrations || []
@@ -231,8 +226,8 @@ export default function IntegrationsPage() {
   const connectGoogleCalendar = async (integrationId?: string) => {
     setConnectingCalendar(true)
     try {
-      // For admin in Integrations page: create service integration
-      const serviceIntegration = isAdmin
+      // Always create user integration (personal account) - service integrations should be created via admin API
+      const serviceIntegration = false
       const response = await integrationsApi.calendar.authorize(integrationId, serviceIntegration)
       if (response.data?.authorization_url) {
         window.location.href = response.data.authorization_url
@@ -251,8 +246,8 @@ export default function IntegrationsPage() {
   const connectGmail = async (integrationId?: string) => {
     setConnectingEmail(true)
     try {
-      // For admin in Integrations page: create service integration
-      const serviceIntegration = isAdmin
+      // Always create user integration (personal account) - service integrations should be created via admin API
+      const serviceIntegration = false
       const response = await integrationsApi.email.authorize(integrationId, serviceIntegration)
       if (response.data?.authorization_url) {
         window.location.href = response.data.authorization_url
