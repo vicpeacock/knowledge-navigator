@@ -547,12 +547,14 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                 # If there are function calls, process them normally (safety block might be only on text response)
                 if finish_reason == 1 and not has_function_calls:  # SAFETY and no function calls
                     logger.warning(f"Gemini response blocked by safety filters (finish_reason=1) in generate_with_tools, no function calls available")
+                    # Return empty string instead of generic error message
+                    # This allows the caller to extract results from tool execution
                     return {
                         "model": self.model_name,
                         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
                         "message": {
                             "role": "assistant",
-                            "content": "Mi dispiace, la mia risposta è stata bloccata dai filtri di sicurezza. Potresti riformulare la tua richiesta in modo diverso?"
+                            "content": ""  # Empty content to trigger fallback in caller
                         },
                         "tool_calls": [],
                         "done": True
@@ -601,6 +603,24 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
                                     elif hasattr(part, 'text'):
                                         # Extract text from parts if available
                                         content = part.text
+                
+                # Handle safety blocks when tools=None (no function calls expected)
+                if finish_reason == 1 and not has_function_calls:
+                    logger.warning(f"Gemini response blocked by safety filters (finish_reason=1) in generate_with_context")
+                    # Return empty string to allow caller to extract results from tools if available
+                    if return_raw:
+                        return {
+                            "model": self.model_name,
+                            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                            "message": {
+                                "role": "assistant",
+                                "content": ""  # Empty content to trigger fallback in caller
+                            },
+                            "tool_calls": [],
+                            "done": True
+                        }
+                    else:
+                        return ""  # Return empty string to trigger fallback
                 
                 # Only try to access response.text if there are no function calls
                 # (function calls cause response.text to fail)
