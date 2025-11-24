@@ -245,6 +245,8 @@ class GeminiClient:
     async def _generate_async(self, chat, message: str, generation_config: Optional[Dict[str, Any]] = None, safety_settings: Optional[List[Dict[str, Any]]] = None):
         """Helper to generate response asynchronously"""
         import asyncio
+        import logging
+        logger = logging.getLogger(__name__)
         loop = asyncio.get_event_loop()
         # Use run_in_executor to avoid blocking
         def _send():
@@ -253,9 +255,24 @@ class GeminiClient:
                 kwargs["generation_config"] = generation_config
             if safety_settings:
                 kwargs["safety_settings"] = safety_settings
+                # Log what we're passing to verify format
+                logger.info(f"🔍 _generate_async: Passing safety_settings to send_message")
+                logger.info(f"   Safety settings type: {type(safety_settings)}")
+                logger.info(f"   Safety settings length: {len(safety_settings) if safety_settings else 0}")
+                if safety_settings and len(safety_settings) > 0:
+                    first_setting = safety_settings[0]
+                    logger.info(f"   First setting type: {type(first_setting)}")
+                    logger.info(f"   First setting keys: {list(first_setting.keys()) if isinstance(first_setting, dict) else 'N/A'}")
+                    if isinstance(first_setting, dict):
+                        category = first_setting.get("category")
+                        threshold = first_setting.get("threshold")
+                        logger.info(f"   Category type: {type(category)}, value: {category}")
+                        logger.info(f"   Threshold type: {type(threshold)}, value: {threshold}")
             if kwargs:
+                logger.info(f"🔍 _generate_async: Calling send_message with {len(kwargs)} kwargs: {list(kwargs.keys())}")
                 return chat.send_message(message, **kwargs)
             else:
+                logger.info(f"🔍 _generate_async: Calling send_message without kwargs")
                 return chat.send_message(message)
         return await loop.run_in_executor(None, _send)
     
