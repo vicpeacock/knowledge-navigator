@@ -1517,8 +1517,31 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                         response_text = str(final_response) if final_response else ""
                     
                     if not response_text or not response_text.strip():
-                        logger.warning("Final response after tool execution is empty, using fallback")
-                        response_text = f"Ho completato le azioni richieste. Ho eseguito {len(tool_results)} tool(s)."
+                        logger.warning("Final response after tool execution is empty, using fallback with tool results summary")
+                        # Try to extract useful information from tool results for the fallback
+                        summary_parts = []
+                        for tr in tool_results:
+                            tool_name = tr.get('tool', 'unknown')
+                            tool_result = tr.get('result', {})
+                            if isinstance(tool_result, dict):
+                                # For customsearch_search, extract search results
+                                if tool_name == 'customsearch_search' and 'results' in tool_result:
+                                    results = tool_result.get('results', [])
+                                    if results:
+                                        summary_parts.append(f"Ho trovato {len(results)} risultati nella ricerca. Primo risultato: {results[0].get('title', 'N/A')}")
+                                # For other tools, try to extract useful info
+                                elif 'error' not in tool_result:
+                                    # Try to extract a summary from the result
+                                    if 'summary' in tool_result:
+                                        summary_parts.append(tool_result['summary'])
+                                    elif 'content' in tool_result:
+                                        content = str(tool_result['content'])[:200]
+                                        summary_parts.append(content)
+                        
+                        if summary_parts:
+                            response_text = "Ho completato la ricerca. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
+                        else:
+                            response_text = f"Ho completato le azioni richieste. Ho eseguito {len(tool_results)} tool(s)."
                 except Exception as final_error:
                     logger.error(f"Error generating final response after tools: {final_error}", exc_info=True)
                     response_text = f"Ho eseguito {len(tool_results)} tool(s). Risultati: {json.dumps(tool_results, indent=2, ensure_ascii=False, default=str)[:500]}"
@@ -1856,8 +1879,29 @@ Rispondi all'utente basandoti sui risultati dei tool sopra. Se ci sono errori, s
                         response_text = f"Ho eseguito {len(tool_results)} tool(s). " + "; ".join(error_summary)
                 except Exception as e:
                     logger.error(f"Error generating response from tool results: {e}", exc_info=True)
-                    # Final fallback
-                    response_text = f"Ho eseguito {len(tool_results)} tool(s). Alcuni tool hanno restituito errori."
+                    # Final fallback - try to extract useful info from tool results
+                    summary_parts = []
+                    for tr in tool_results:
+                        tool_name = tr.get('tool', 'unknown')
+                        tool_result = tr.get('result', {})
+                        if isinstance(tool_result, dict):
+                            # For customsearch_search, extract search results
+                            if tool_name == 'customsearch_search' and 'results' in tool_result:
+                                results = tool_result.get('results', [])
+                                if results:
+                                    summary_parts.append(f"Ho trovato {len(results)} risultati nella ricerca. Primo risultato: {results[0].get('title', 'N/A')}")
+                            # For other tools, try to extract useful info
+                            elif 'error' not in tool_result:
+                                if 'summary' in tool_result:
+                                    summary_parts.append(tool_result['summary'])
+                                elif 'content' in tool_result:
+                                    content = str(tool_result['content'])[:200]
+                                    summary_parts.append(content)
+                    
+                    if summary_parts:
+                        response_text = "Ho completato la ricerca. " + " ".join(summary_parts[:3])
+                    else:
+                        response_text = f"Ho eseguito {len(tool_results)} tool(s). Alcuni tool hanno restituito errori."
             logger.debug(f"🔍 Response Formatter: response text length: {len(response_text) if response_text else 0}")
             logger.debug(f"🔍 Response Formatter: response preview: {response_text[:100] if response_text else 'EMPTY'}")
             logger.debug(f"🔍 Response Formatter: tools_used: {len(tools_used)}, tool_results: {len(tool_results)}")
