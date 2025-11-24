@@ -107,8 +107,14 @@ function ProfileContent() {
       // Clean up sessionStorage
       sessionStorage.removeItem('oauth_redirect_back')
       sessionStorage.removeItem('oauth_integration_id')
+      // Reset loading states before loading data to prevent infinite loading
+      console.log('🔵 OAuth success detected, resetting loading states and loading all profile data...')
+      setOAuthIntegrationsLoading(false) // Reset to false first
+      setProfileLoading(false)
+      setBackgroundServicesLoading(false)
+      setEmailIntegrationsLoading(false)
+      setCalendarIntegrationsLoading(false)
       // Then reload all data (not just OAuth integrations)
-      console.log('OAuth success detected, loading all profile data...')
       loadProfile()
       loadBackgroundServicesPreferences()
       loadOAuthIntegrations()
