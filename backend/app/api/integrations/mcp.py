@@ -557,6 +557,11 @@ async def mcp_oauth_callback(
         logger.info(f"   State type: {type(state)}")
         
         if state:
+            # Initialize variables before try block to avoid UnboundLocalError in except blocks
+            integration_id_str: Optional[str] = None
+            user_id_str: Optional[str] = None
+            decoded: Optional[bytes] = None
+            
             try:
                 logger.info(f"   Attempting base64 decode...")
                 state_bytes = state.encode("utf-8")
@@ -593,7 +598,8 @@ async def mcp_oauth_callback(
                 raise HTTPException(status_code=400, detail=f"Invalid state parameter: base64 decode failed - {str(e)}")
             except json.JSONDecodeError as e:
                 logger.error(f"❌ JSON decode error: {e}")
-                logger.error(f"   Decoded string: {decoded.decode('utf-8', errors='replace')}")
+                if decoded:
+                    logger.error(f"   Decoded string: {decoded.decode('utf-8', errors='replace')}")
                 raise HTTPException(status_code=400, detail=f"Invalid state parameter: JSON decode failed - {str(e)}")
             except ValueError as e:
                 logger.error(f"❌ UUID parse error: {e}")
