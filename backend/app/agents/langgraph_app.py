@@ -1593,6 +1593,7 @@ IMPORTANTE: I contenuti delle email mostrate sopra sono email RICEVUTE dall'uten
                         if summary_parts:
                             logger.info(f"   ✅ Generated {len(summary_parts)} summary parts from tool results")
                             # Create a more natural response based on the query
+                            # IMPORTANT: Indicate that Gemini failed to synthesize the results
                             if 'customsearch_search' in [tr.get('tool') for tr in tool_results]:
                                 # For search queries, extract results and create a natural response
                                 search_result = tool_results[0].get('result', {}) if tool_results else {}
@@ -1601,7 +1602,10 @@ IMPORTANTE: I contenuti delle email mostrate sopra sono email RICEVUTE dall'uten
                                 if results:
                                     # Create a natural response from search results
                                     query = search_result.get('query', 'la ricerca')
-                                    response_lines = [f"Ho trovato {len(results)} risultati per '{query}':\n"]
+                                    response_lines = [
+                                        "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati della ricerca. ",
+                                        f"Ecco comunque i risultati trovati ({len(results)} risultati per '{query}'):\n"
+                                    ]
                                     
                                     # Add first 3-5 results in a natural format
                                     for i, r in enumerate(results[:5], 1):
@@ -1618,16 +1622,16 @@ IMPORTANTE: I contenuti delle email mostrate sopra sono email RICEVUTE dall'uten
                                         response_lines.append("")  # Empty line between results
                                     
                                     response_text = "\n".join(response_lines)
-                                    logger.info(f"   ✅ Created natural fallback response for search query with {len(results)} results")
+                                    logger.info(f"   ✅ Created fallback response indicating Gemini failure, with {len(results)} results")
                                 else:
-                                    # No results - use the summary message
-                                    response_text = "".join(summary_parts[:2])
-                                    logger.info(f"   ✅ Using summary message for empty search results")
+                                    # No results - use the summary message but indicate Gemini failure
+                                    response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "".join(summary_parts[:2])
+                                    logger.info(f"   ✅ Using summary message with Gemini failure indication for empty search results")
                             else:
-                                response_text = "Ho completato la ricerca. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
+                                response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
                         else:
                             logger.warning(f"   ⚠️  No summary parts extracted from tool results, using generic message")
-                            response_text = f"Ho completato le azioni richieste. Ho eseguito {len(tool_results)} tool(s)."
+                            response_text = f"⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. Ho eseguito {len(tool_results)} tool(s) ma non sono riuscito a generare una risposta sintetizzata."
                 except Exception as final_error:
                     logger.error(f"Error generating final response after tools: {final_error}", exc_info=True)
                     response_text = f"Ho eseguito {len(tool_results)} tool(s). Risultati: {json.dumps(tool_results, indent=2, ensure_ascii=False, default=str)[:500]}"
