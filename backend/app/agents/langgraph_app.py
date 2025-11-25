@@ -144,11 +144,67 @@ def build_tool_catalog(tools: List[Dict[str, Any]]) -> str:
     return "\n".join(catalog_lines)
 
 
-def _format_tool_results_for_llm(tool_results: List[Dict[str, Any]]) -> str:
-    """Format tool results for LLM with clear context, especially for emails"""
+def _format_tool_results_for_llm(tool_results: List[Dict[str, Any]], simple_format: bool = False) -> str:
+    """Format tool results for LLM with clear context, especially for emails
+    
+    Args:
+        tool_results: List of tool execution results
+        simple_format: If True, use a simpler, cleaner format that's less likely to trigger safety filters
+    """
     import logging
     logger = logging.getLogger(__name__)
     
+    if simple_format:
+        # Simple, clean format - extract only essential information
+        formatted_lines = []
+        
+        for tr in tool_results:
+            tool_name = tr.get('tool', 'unknown')
+            tool_result = tr.get('result', {})
+            
+            if isinstance(tool_result, dict):
+                # Check for errors
+                if "error" in tool_result:
+                    formatted_lines.append(f"Errore in {tool_name}: {tool_result['error']}")
+                    continue
+                
+                # For search results, extract cleanly
+                if tool_name == 'customsearch_search' and "results" in tool_result:
+                    results = tool_result.get("results", [])
+                    if results:
+                        formatted_lines.append(f"Risultati ricerca ({len(results)} trovati):")
+                        for i, r in enumerate(results[:5], 1):  # Limit to 5 results
+                            title = r.get("title", "")
+                            snippet = r.get("content", "")[:150]  # Limit snippet length
+                            formatted_lines.append(f"{i}. {title}")
+                            if snippet:
+                                formatted_lines.append(f"   {snippet}")
+                        formatted_lines.append("")  # Empty line
+                    elif "summary" in tool_result:
+                        # Use summary if available
+                        summary = tool_result["summary"]
+                        # Remove markdown headers and formatting that might trigger filters
+                        clean_summary = summary.replace("===", "").replace("Risultati Ricerca Web", "Risultati ricerca")
+                        formatted_lines.append(clean_summary)
+                elif "summary" in tool_result:
+                    # Use summary field if available
+                    formatted_lines.append(tool_result["summary"])
+                elif "content" in tool_result:
+                    # Use content field
+                    content = str(tool_result["content"])[:300]  # Limit length
+                    formatted_lines.append(content)
+                else:
+                    # Minimal JSON for other results
+                    result_str = json.dumps(tool_result, ensure_ascii=False, default=str)[:300]
+                    formatted_lines.append(f"Risultato: {result_str}")
+            else:
+                # Non-dict result
+                result_str = str(tool_result)[:300]
+                formatted_lines.append(f"Risultato: {result_str}")
+        
+        return "\n".join(formatted_lines)
+    
+    # Original detailed format (kept for backward compatibility)
     formatted_lines = ["=== Risultati Tool Eseguiti ===\n"]
     
     for tr in tool_results:
