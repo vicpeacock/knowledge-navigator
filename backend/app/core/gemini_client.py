@@ -362,16 +362,23 @@ Respond naturally and directly based on the data obtained from tools. Use clear,
             enhanced_system += tools_description
         
         # Prepare messages for Gemini
-        # Gemini supports system instructions via generation_config
-        # We'll include system in the first user message
+        # Gemini supports system instructions via system_instruction parameter in GenerativeModel
+        # We'll pass system_content as system_instruction, NOT in the message
         messages = []
         system_content = enhanced_system if enhanced_system else ""
         
-        # Add session context
+        # Log system instruction for debugging
+        if system_content:
+            logger.info(f"🔍 System instruction configured (length: {len(system_content)} chars)")
+            logger.debug(f"   System instruction preview: {system_content[:200]}...")
+        
+        # Add session context (without system prompt - it will be passed as system_instruction)
         for msg in session_context:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            messages.append({"role": role, "parts": [content]})
+            # Skip system messages from context - they're handled by system_instruction
+            if role != "system":
+                messages.append({"role": role, "parts": [content]})
         
         # Add current prompt
         messages.append({"role": "user", "parts": [prompt]})
@@ -571,6 +578,7 @@ Respond naturally and directly based on the data obtained from tools. Use clear,
                 model_config = {}
                 if system_content:
                     model_config["system_instruction"] = system_content
+                    logger.info(f"✅ Passing system_instruction to GenerativeModel (length: {len(system_content)} chars)")
                 
                 if gemini_tools:
                     model_config["tools"] = gemini_tools
