@@ -1579,9 +1579,35 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                             logger.info(f"   ✅ Generated {len(summary_parts)} summary parts from tool results")
                             # Create a more natural response based on the query
                             if 'customsearch_search' in [tr.get('tool') for tr in tool_results]:
-                                # For search queries, provide a direct answer
-                                response_text = "".join(summary_parts[:2])  # Use first 2 summaries (usually just one for search)
-                                logger.info(f"   ✅ Created fallback response for search query, length: {len(response_text)}")
+                                # For search queries, extract results and create a natural response
+                                search_result = tool_results[0].get('result', {}) if tool_results else {}
+                                results = search_result.get('results', [])
+                                
+                                if results:
+                                    # Create a natural response from search results
+                                    query = search_result.get('query', 'la ricerca')
+                                    response_lines = [f"Ho trovato {len(results)} risultati per '{query}':\n"]
+                                    
+                                    # Add first 3-5 results in a natural format
+                                    for i, r in enumerate(results[:5], 1):
+                                        title = r.get('title', 'N/A')
+                                        snippet = r.get('content', '')[:200]  # Limit snippet length
+                                        url = r.get('url', '')
+                                        
+                                        # Format as a natural list item
+                                        response_lines.append(f"{i}. **{title}**")
+                                        if snippet:
+                                            response_lines.append(f"   {snippet}")
+                                        if url:
+                                            response_lines.append(f"   ({url})")
+                                        response_lines.append("")  # Empty line between results
+                                    
+                                    response_text = "\n".join(response_lines)
+                                    logger.info(f"   ✅ Created natural fallback response for search query with {len(results)} results")
+                                else:
+                                    # No results - use the summary message
+                                    response_text = "".join(summary_parts[:2])
+                                    logger.info(f"   ✅ Using summary message for empty search results")
                             else:
                                 response_text = "Ho completato la ricerca. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
                         else:
