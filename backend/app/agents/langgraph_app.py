@@ -669,58 +669,66 @@ async def analyze_message_for_plan(
     session_context: List[Dict[str, str]],
     ollama_client: Optional[OllamaClient] = None,
 ) -> Dict[str, Any]:
+    from app.core.config import settings
+    
+    # Determine which search tool is available based on LLM provider
+    # Check if customsearch_search is available (Gemini) or web_search (Ollama)
+    has_customsearch = any(t.get("name") == "customsearch_search" for t in available_tools)
+    has_web_search = any(t.get("name") == "web_search" for t in available_tools)
+    search_tool_name = "customsearch_search" if has_customsearch else "web_search"
+    
     tool_catalog = build_tool_catalog(available_tools)
     analysis_prompt = (
-        "Analizza la richiesta dell'utente e valuta se servono tool per rispondere.\n\n"
-        f"Tool disponibili:\n{tool_catalog if tool_catalog else '- Nessun tool disponibile'}\n\n"
-        "IMPORTANTE - Regole per la selezione dei tool:\n"
-        "1. EMAIL: Se l'utente chiede di leggere, vedere, controllare, recuperare email, o domande come 'ci sono email non lette?', 'email nuove', 'leggi le email' → USA SEMPRE get_emails (NON web_search)\n"
-        "   Esempi corretti: 'Ci sono email non lette?' → get_emails con query='is:unread', 'Email di oggi' → get_emails\n"
-        "2. CALENDARIO: Se l'utente chiede eventi, appuntamenti, meeting, impegni → USA get_calendar_events (NON web_search)\n"
-        "   Esempi corretti: 'Cosa ho domani?' → get_calendar_events, 'Eventi questa settimana' → get_calendar_events\n"
-        "3. WEB SEARCH: Usa web_search SOLO per informazioni generali che NON sono email/calendario (es: 'cerca informazioni su X', 'notizie su Y', 'cosa è Z')\n"
-        "   Esempi corretti: 'Cerca informazioni su Python' → web_search, 'Notizie su AI' → web_search\n"
-        "   MAI usare web_search per: 'ci sono email non lette?' (usa get_emails), 'cosa ho domani?' (usa get_calendar_events)\n"
-        "4. AZIONI: Se l'utente chiede di eseguire azioni (inviare email, archiviare email, rispondere) → usa i tool appropriati (send_email, archive_email, reply_to_email)\n\n"
-        "Devi creare un piano (needs_plan=true) quando:\n"
-        "- L'utente chiede informazioni che richiedono dati esterni (email, calendario, web)\n"
-        "- L'utente chiede di eseguire azioni specifiche\n"
-        "- La risposta richiede più di un semplice messaggio di testo\n\n"
-        "Non creare un piano (needs_plan=false) solo per:\n"
-        "- Saluti semplici\n"
-        "- Domande di conversazione generale che non richiedono dati esterni\n"
-        "- Affermazioni dell'utente che non richiedono azioni\n\n"
-        "Rispondi con JSON:\n"
-        "{\n"
+        "Analyze the user's request and evaluate if tools are needed to respond.\n\n"
+        f"Available tools:\n{tool_catalog if tool_catalog else '- No tools available'}\n\n"
+        "CRITICAL - Tool Selection Rules:\n"
+        "1. EMAIL: When the user asks to read, view, check, retrieve emails, or questions like 'are there unread emails?', 'new emails', 'read emails' → ALWAYS use get_emails (NOT {search_tool_name})\n"
+        "   Correct examples: 'Are there unread emails?' → get_emails with query='is:unread', 'Today's emails' → get_emails\n"
+        "2. CALENDAR: When the user asks about events, appointments, meetings, commitments → use get_calendar_events (NOT {search_tool_name})\n"
+        "   Correct examples: 'What do I have tomorrow?' → get_calendar_events, 'Events this week' → get_calendar_events\n"
+        "3. WEB SEARCH: Use {search_tool_name} ONLY for general information that is NOT email/calendar related (e.g., 'search for information about X', 'news about Y', 'what is Z')\n"
+        "   Correct examples: 'Search for information about Python' → {search_tool_name}, 'News about AI' → {search_tool_name}\n"
+        "   NEVER use {search_tool_name} for: 'are there unread emails?' (use get_emails), 'what do I have tomorrow?' (use get_calendar_events)\n"
+        "4. ACTIONS: When the user asks to perform actions (send email, archive email, reply) → use appropriate tools (send_email, archive_email, reply_to_email)\n\n"
+        "You must create a plan (needs_plan=true) when:\n"
+        "- The user asks for information that requires external data (email, calendar, web)\n"
+        "- The user asks to perform specific actions\n"
+        "- The response requires more than a simple text message\n\n"
+        "Do not create a plan (needs_plan=false) for:\n"
+        "- Simple greetings\n"
+        "- General conversation questions that don't require external data\n"
+        "- User statements that don't require actions\n\n"
+        "Respond with JSON:\n"
+        "{{\n"
         "  \"needs_plan\": true|false,\n"
-        "  \"reason\": \"spiega perché serve o non serve un piano\",\n"
+        "  \"reason\": \"explain why a plan is or isn't needed\",\n"
         "  \"steps\": [\n"
-        "     {\n"
-        "        \"description\": \"descrizione dello step\",\n"
+        "     {{\n"
+        "        \"description\": \"step description\",\n"
         "        \"action\": \"tool|respond|wait_user\",\n"
-        "        \"tool\": \"nome_tool_o_null\",\n"
-        "        \"inputs\": { ... }\n"
-        "     }\n"
+        "        \"tool\": \"tool_name_or_null\",\n"
+        "        \"inputs\": {{ ... }}\n"
+        "     }}\n"
         "  ]\n"
-        "}\n"
-    )
+        "}}\n"
+    ).format(search_tool_name=search_tool_name)
 
     system_prompt = (
-        "Sei un pianificatore strategico. Analizza la richiesta dell'utente e determina se serve un piano con tool esterni.\n\n"
-        "REGOLE CRITICHE per la selezione dei tool:\n"
-        "- Se la richiesta riguarda EMAIL (leggere, vedere, controllare, 'ci sono email non lette?') → usa get_emails\n"
-        "- Se la richiesta riguarda CALENDARIO (eventi, appuntamenti, meeting) → usa get_calendar_events\n"
-        "- Se la richiesta riguarda informazioni generali NON email/calendario → usa web_search\n"
-        "- MAI usare web_search per domande su email o calendario dell'utente\n\n"
-        "Crea un piano (needs_plan=true) quando la richiesta richiede:\n"
-        "- Recuperare dati da integrazioni (email, calendario, web)\n"
-        "- Eseguire azioni specifiche (inviare email, archiviare, cercare)\n"
-        "- Informazioni che non sono disponibili nel contesto corrente\n\n"
-        "Non creare un piano (needs_plan=false) per:\n"
-        "- Conversazioni semplici senza bisogno di dati esterni\n"
-        "- Saluti o affermazioni che non richiedono azioni\n\n"
-        "Se crei un piano, includi tutti gli step necessari con i tool appropriati."
-    )
+        "You are a strategic planner. Analyze the user's request and determine if a plan with external tools is needed.\n\n"
+        "CRITICAL rules for tool selection:\n"
+        "- If the request is about EMAIL (read, view, check, 'are there unread emails?') → use get_emails\n"
+        "- If the request is about CALENDAR (events, appointments, meetings) → use get_calendar_events\n"
+        "- If the request is about general information NOT email/calendar → use {search_tool_name}\n"
+        "- NEVER use {search_tool_name} for questions about the user's email or calendar\n\n"
+        "Create a plan (needs_plan=true) when the request requires:\n"
+        "- Retrieving data from integrations (email, calendar, web)\n"
+        "- Performing specific actions (send email, archive, search)\n"
+        "- Information that is not available in the current context\n\n"
+        "Do not create a plan (needs_plan=false) for:\n"
+        "- Simple conversations without need for external data\n"
+        "- Greetings or statements that don't require actions\n\n"
+        "If you create a plan, include all necessary steps with appropriate tools."
+    ).format(search_tool_name=search_tool_name)
 
     logger = logging.getLogger(__name__)
     try:
