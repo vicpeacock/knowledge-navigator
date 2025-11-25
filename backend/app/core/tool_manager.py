@@ -2125,18 +2125,34 @@ Riassunto:"""
                         "content": item.get("snippet", "N/A"),
                     })
             
-            results_text = "\n\n=== Risultati Ricerca Web (Google Custom Search) ===\n"
-            for i, r in enumerate(results_list, 1):
-                results_text += f"\n{i}. {r['title']}\n"
-                results_text += f"   URL: {r['url']}\n"
-                results_text += f"   {r['content']}\n"
+            # Check if we have results
+            total_results = data.get("searchInformation", {}).get("totalResults", "0")
+            logger.info(f"   Total results from API: {total_results}")
             
-            result_dict = {
-                "summary": results_text,
-                "results": results_list,
-                "query": query,
-                "total_results": data.get("searchInformation", {}).get("totalResults", "0"),
-            }
+            if not results_list:
+                # No results found - provide helpful message
+                logger.warning(f"   ⚠️  No results found for query: '{query}'")
+                result_dict = {
+                    "summary": f"Non ho trovato risultati per la ricerca '{query}'. Potresti provare con una query diversa o più specifica.",
+                    "results": [],
+                    "query": query,
+                    "total_results": 0,
+                }
+            else:
+                # Format results
+                results_text = f"\n\n=== Risultati Ricerca Web (Google Custom Search) ===\n"
+                results_text += f"Trovati {len(results_list)} risultati per '{query}':\n\n"
+                for i, r in enumerate(results_list, 1):
+                    results_text += f"{i}. {r['title']}\n"
+                    results_text += f"   URL: {r['url']}\n"
+                    results_text += f"   {r['content']}\n\n"
+                
+                result_dict = {
+                    "summary": results_text,
+                    "results": results_list,
+                    "query": query,
+                    "total_results": data.get("searchInformation", {}).get("totalResults", "0"),
+                }
             
             # Auto-index search results if enabled
             if auto_index and session_id and db and results_list:
