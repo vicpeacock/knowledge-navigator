@@ -446,34 +446,61 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
         # When synthesizing tool results, we can disable safety filters to avoid blocking legitimate content
         # For normal interactions, we use BLOCK_ONLY_HIGH to block only the most harmful content
         # NOTE: safety_settings must be passed to the model, NOT to GenerationConfig
+        # IMPORTANT: BLOCK_NONE requires allowlist approval from Google
         logger.info(f"🔍 Safety settings configuration: disable_safety_filters={disable_safety_filters}")
         safety_settings = None
         try:
+            import google.generativeai as genai
             import google.generativeai.types as genai_types
-            logger.info(f"🔍 Successfully imported genai_types")
+            logger.info(f"🔍 Successfully imported genai and genai_types")
             if disable_safety_filters:
                 logger.info(f"🔍 Configuring BLOCK_NONE safety settings...")
                 # Disable all safety filters for tool result synthesis
                 # This is safe because tool results come from trusted sources (our own tools)
-                safety_settings = [
-                    {
-                        "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                    },
-                    {
-                        "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                    },
-                    {
-                        "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                    },
-                    {
-                        "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                        "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                    },
-                ]
-                logger.info(f"🔓 Disabled safety filters for tool result synthesis (BLOCK_NONE). Settings: {safety_settings}")
+                # Try passing enum values directly instead of dictionaries
+                try:
+                    # Method 1: Try using genai.types.SafetySetting objects directly
+                    safety_settings = [
+                        genai_types.SafetySetting(
+                            category=genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
+                        ),
+                        genai_types.SafetySetting(
+                            category=genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
+                        ),
+                        genai_types.SafetySetting(
+                            category=genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                            threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
+                        ),
+                        genai_types.SafetySetting(
+                            category=genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
+                        ),
+                    ]
+                    logger.info(f"🔓 Disabled safety filters using SafetySetting objects (BLOCK_NONE)")
+                except (AttributeError, TypeError) as e:
+                    logger.warning(f"   ⚠️  SafetySetting objects not available, using dict format: {e}")
+                    # Fallback to dictionary format
+                    safety_settings = [
+                        {
+                            "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                        },
+                        {
+                            "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                        },
+                        {
+                            "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                            "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                        },
+                        {
+                            "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                        },
+                    ]
+                    logger.info(f"🔓 Disabled safety filters using dict format (BLOCK_NONE). Settings: {safety_settings}")
             else:
                 logger.info(f"🔍 Configuring BLOCK_ONLY_HIGH safety settings...")
                 # Block only the most harmful content (BLOCK_ONLY_HIGH) for normal interactions
