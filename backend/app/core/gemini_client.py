@@ -455,52 +455,67 @@ Rispondi in modo naturale e diretto basandoti sui dati ottenuti dai tool."""
             logger.info(f"🔍 Successfully imported genai and genai_types")
             if disable_safety_filters:
                 logger.info(f"🔍 Configuring BLOCK_NONE safety settings...")
+                logger.warning(f"   ⚠️  NOTE: BLOCK_NONE requires allowlist approval from Google. If not approved, this may not work.")
                 # Disable all safety filters for tool result synthesis
                 # This is safe because tool results come from trusted sources (our own tools)
-                # Try passing enum values directly instead of dictionaries
+                # Try multiple formats to find what works
+                safety_settings = None
+                
+                # Method 1: Try using genai.types.SafetySetting objects (newer API)
                 try:
-                    # Method 1: Try using genai.types.SafetySetting objects directly
-                    safety_settings = [
-                        genai_types.SafetySetting(
-                            category=genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                            threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
-                        ),
-                        genai_types.SafetySetting(
-                            category=genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                            threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
-                        ),
-                        genai_types.SafetySetting(
-                            category=genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                            threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
-                        ),
-                        genai_types.SafetySetting(
-                            category=genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                            threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
-                        ),
-                    ]
-                    logger.info(f"🔓 Disabled safety filters using SafetySetting objects (BLOCK_NONE)")
+                    if hasattr(genai_types, 'SafetySetting'):
+                        safety_settings = [
+                            genai_types.SafetySetting(
+                                category=genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
+                            ),
+                            genai_types.SafetySetting(
+                                category=genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
+                            ),
+                            genai_types.SafetySetting(
+                                category=genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                                threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
+                            ),
+                            genai_types.SafetySetting(
+                                category=genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                                threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
+                            ),
+                        ]
+                        logger.info(f"🔓 Using SafetySetting objects (BLOCK_NONE)")
+                    else:
+                        raise AttributeError("SafetySetting not available")
                 except (AttributeError, TypeError) as e:
-                    logger.warning(f"   ⚠️  SafetySetting objects not available, using dict format: {e}")
-                    # Fallback to dictionary format
-                    safety_settings = [
-                        {
-                            "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                            "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                        },
-                        {
-                            "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                            "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                        },
-                        {
-                            "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                            "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                        },
-                        {
-                            "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                            "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                        },
-                    ]
-                    logger.info(f"🔓 Disabled safety filters using dict format (BLOCK_NONE). Settings: {safety_settings}")
+                    logger.warning(f"   ⚠️  SafetySetting objects not available: {e}, trying dict format")
+                    # Method 2: Fallback to dictionary format
+                    try:
+                        safety_settings = [
+                            {
+                                "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                            },
+                            {
+                                "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                            },
+                            {
+                                "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                                "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                            },
+                            {
+                                "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                                "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
+                            },
+                        ]
+                        logger.info(f"🔓 Using dict format (BLOCK_NONE)")
+                    except Exception as e2:
+                        logger.error(f"   ❌ Failed to create safety settings: {e2}")
+                        safety_settings = None
+                
+                if safety_settings:
+                    logger.info(f"🔓 Safety settings configured: {len(safety_settings)} categories with BLOCK_NONE")
+                else:
+                    logger.error(f"   ❌ Could not configure BLOCK_NONE safety settings, will use default (may cause blocks)")
             else:
                 logger.info(f"🔍 Configuring BLOCK_ONLY_HIGH safety settings...")
                 # Block only the most harmful content (BLOCK_ONLY_HIGH) for normal interactions
