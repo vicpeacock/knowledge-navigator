@@ -1554,10 +1554,16 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                                         summary_text = f"Ho trovato {len(results)} risultati nella ricerca:\n" + "\n".join(result_texts)
                                         summary_parts.append(summary_text)
                                         logger.info(f"   ✅ Extracted {len(results)} search results for fallback")
-                                    # Also check for summary field
+                                    # Also check for summary field (which now includes helpful message for 0 results)
                                     elif 'summary' in tool_result:
-                                        summary_parts.append(tool_result['summary'])
-                                        logger.info(f"   ✅ Using summary field from customsearch_search")
+                                        summary = tool_result['summary']
+                                        # Check if summary contains the "no results" message
+                                        if "Non ho trovato risultati" in summary or "non ho trovato risultati" in summary:
+                                            summary_parts.append(summary)
+                                            logger.info(f"   ✅ Using 'no results' message from customsearch_search")
+                                        else:
+                                            summary_parts.append(summary)
+                                            logger.info(f"   ✅ Using summary field from customsearch_search")
                                     else:
                                         logger.warning(f"   ⚠️  No 'results' or 'summary' found in customsearch_search result")
                                 # For other tools, try to extract useful info
