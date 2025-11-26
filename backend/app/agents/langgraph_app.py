@@ -678,6 +678,12 @@ async def analyze_message_for_plan(
     search_tool_name = "customsearch_search" if has_customsearch else "web_search"
     
     tool_catalog = build_tool_catalog(available_tools)
+    
+    # Check if user explicitly requests a search
+    search_keywords = ["cerca", "search", "ricerca", "google scholar", "cerca su", "trova", "find", "lookup"]
+    message_lower = request.message.lower()
+    is_explicit_search_request = any(keyword in message_lower for keyword in search_keywords)
+    
     analysis_prompt = (
         "Analyze the user's request and evaluate if tools are needed to respond.\n\n"
         f"Available tools:\n{tool_catalog if tool_catalog else '- No tools available'}\n\n"
@@ -690,10 +696,22 @@ async def analyze_message_for_plan(
         "   Correct examples: 'Search for information about Python' → SEARCH_TOOL, 'News about AI' → SEARCH_TOOL\n"
         "   NEVER use SEARCH_TOOL for: 'are there unread emails?' (use get_emails), 'what do I have tomorrow?' (use get_calendar_events)\n"
         "4. ACTIONS: When the user asks to perform actions (send email, archive email, reply) → use appropriate tools (send_email, archive_email, reply_to_email)\n\n"
+    )
+    
+    if is_explicit_search_request:
+        analysis_prompt += (
+            "⚠️ EXPLICIT SEARCH REQUEST DETECTED ⚠️\n"
+            "The user explicitly asked to search (keywords: 'cerca', 'search', 'ricerca', 'Google Scholar', etc.).\n"
+            "You MUST create a plan (needs_plan=true) and use SEARCH_TOOL, even if similar information might exist in memory.\n"
+            "ALWAYS execute a fresh search when explicitly requested - do not rely on memory for search results.\n\n"
+        )
+    
+    analysis_prompt += (
         "You must create a plan (needs_plan=true) when:\n"
         "- The user asks for information that requires external data (email, calendar, web)\n"
         "- The user asks to perform specific actions\n"
-        "- The response requires more than a simple text message\n\n"
+        "- The response requires more than a simple text message\n"
+        "- The user explicitly requests a search (keywords: 'cerca', 'search', 'ricerca', 'Google Scholar', etc.)\n\n"
         "Do not create a plan (needs_plan=false) for:\n"
         "- Simple greetings\n"
         "- General conversation questions that don't require external data\n"
@@ -711,7 +729,10 @@ async def analyze_message_for_plan(
         "     }}\n"
         "  ]\n"
         "}}\n"
-    ).replace("SEARCH_TOOL", search_tool_name)
+    )
+    
+    # Replace SEARCH_TOOL placeholder with actual tool name
+    analysis_prompt = analysis_prompt.replace("SEARCH_TOOL", search_tool_name)
 
     system_prompt = (
         "You are a strategic planner. Analyze the user's request and determine if a plan with external tools is needed.\n\n"
@@ -728,7 +749,10 @@ async def analyze_message_for_plan(
         "- Simple conversations without need for external data\n"
         "- Greetings or statements that don't require actions\n\n"
         "If you create a plan, include all necessary steps with appropriate tools."
-    ).replace("SEARCH_TOOL", search_tool_name)
+    )
+    
+    # Replace SEARCH_TOOL placeholder with actual tool name
+    system_prompt = system_prompt.replace("SEARCH_TOOL", search_tool_name)
 
     logger = logging.getLogger(__name__)
     try:
@@ -796,6 +820,24 @@ async def summarize_plan_results(
         plan_summary_lines.append(line)
 
     execution_text = "\n".join(execution_summaries)
+    
+    # Check if this was an explicit search request - if so, don't use memory to avoid confusion
+    search_keywords = ["cerca", "search", "ricerca", "google scholar", "cerca su", "trova", "find", "lookup"]
+    message_lower = request.message.lower()
+    is_explicit_search_request = any(keyword in message_lower for keyword in search_keywords)
+    
+    # Filter memory if explicit search request
+    memory_to_use = retrieved_memory
+    if is_explicit_search_request:
+        logger = logging.getLogger(__name__)
+        logger.info("🔍 Explicit search request in summarize_plan_results - filtering memory")
+        filtered_memory = []
+        for mem_item in retrieved_memory:
+            mem_str = str(mem_item).lower()
+            # Skip memory items that look like search results
+            if not any(kw in mem_str for kw in ["risultati ricerca", "search results", "google scholar", "customsearch"]):
+                filtered_memory.append(mem_item)
+        memory_to_use = filtered_memory
 
     prompt = (
         "Hai completato i passaggi pianificati per l'utente."
@@ -812,7 +854,7 @@ async def summarize_plan_results(
     response = await ollama.generate_with_context(
         prompt=prompt,
         session_context=session_context,
-        retrieved_memory=retrieved_memory if retrieved_memory else None,
+        retrieved_memory=memory_to_use if memory_to_use else None,
         tools=None,
         tools_description=None,
         disable_safety_filters=True,  # Disable safety filters when synthesizing plan results
@@ -1361,6 +1403,23 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         ollama = state["ollama"]
         session_context = state["session_context"]
         retrieved_memory = list(state["retrieved_memory"])
+        
+        # Check if user explicitly requests a search - if so, filter memory to avoid using old search results
+        search_keywords = ["cerca", "search", "ricerca", "google scholar", "cerca su", "trova", "find", "lookup"]
+        message_lower = request.message.lower()
+        is_explicit_search_request = any(keyword in message_lower for keyword in search_keywords)
+        
+        if is_explicit_search_request:
+            # Filter out search-related memory when explicit search is requested
+            logger.info("🔍 Explicit search request - filtering memory to avoid using old search results")
+            filtered_memory = []
+            for mem_item in retrieved_memory:
+                mem_str = str(mem_item).lower()
+                # Skip memory items that look like search results
+                if not any(kw in mem_str for kw in ["risultati ricerca", "search results", "google scholar", "customsearch"]):
+                    filtered_memory.append(mem_item)
+            retrieved_memory = filtered_memory
+            logger.info(f"   Filtered memory: {len(retrieved_memory)} items (removed search-related items)")
         
         # Use Ollama's native tool calling
         tools_description = await tool_manager.get_tools_system_prompt()
