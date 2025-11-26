@@ -682,13 +682,13 @@ async def analyze_message_for_plan(
         "Analyze the user's request and evaluate if tools are needed to respond.\n\n"
         f"Available tools:\n{tool_catalog if tool_catalog else '- No tools available'}\n\n"
         "CRITICAL - Tool Selection Rules:\n"
-        "1. EMAIL: When the user asks to read, view, check, retrieve emails, or questions like 'are there unread emails?', 'new emails', 'read emails' → ALWAYS use get_emails (NOT {search_tool_name})\n"
+        "1. EMAIL: When the user asks to read, view, check, retrieve emails, or questions like 'are there unread emails?', 'new emails', 'read emails' → ALWAYS use get_emails (NOT SEARCH_TOOL)\n"
         "   Correct examples: 'Are there unread emails?' → get_emails with query='is:unread', 'Today's emails' → get_emails\n"
-        "2. CALENDAR: When the user asks about events, appointments, meetings, commitments → use get_calendar_events (NOT {search_tool_name})\n"
+        "2. CALENDAR: When the user asks about events, appointments, meetings, commitments → use get_calendar_events (NOT SEARCH_TOOL)\n"
         "   Correct examples: 'What do I have tomorrow?' → get_calendar_events, 'Events this week' → get_calendar_events\n"
-        "3. WEB SEARCH: Use {search_tool_name} ONLY for general information that is NOT email/calendar related (e.g., 'search for information about X', 'news about Y', 'what is Z')\n"
-        "   Correct examples: 'Search for information about Python' → {search_tool_name}, 'News about AI' → {search_tool_name}\n"
-        "   NEVER use {search_tool_name} for: 'are there unread emails?' (use get_emails), 'what do I have tomorrow?' (use get_calendar_events)\n"
+        "3. WEB SEARCH: Use SEARCH_TOOL ONLY for general information that is NOT email/calendar related (e.g., 'search for information about X', 'news about Y', 'what is Z')\n"
+        "   Correct examples: 'Search for information about Python' → SEARCH_TOOL, 'News about AI' → SEARCH_TOOL\n"
+        "   NEVER use SEARCH_TOOL for: 'are there unread emails?' (use get_emails), 'what do I have tomorrow?' (use get_calendar_events)\n"
         "4. ACTIONS: When the user asks to perform actions (send email, archive email, reply) → use appropriate tools (send_email, archive_email, reply_to_email)\n\n"
         "You must create a plan (needs_plan=true) when:\n"
         "- The user asks for information that requires external data (email, calendar, web)\n"
@@ -711,15 +711,15 @@ async def analyze_message_for_plan(
         "     }}\n"
         "  ]\n"
         "}}\n"
-    ).format(search_tool_name=search_tool_name)
+    ).replace("SEARCH_TOOL", search_tool_name)
 
     system_prompt = (
         "You are a strategic planner. Analyze the user's request and determine if a plan with external tools is needed.\n\n"
         "CRITICAL rules for tool selection:\n"
         "- If the request is about EMAIL (read, view, check, 'are there unread emails?') → use get_emails\n"
         "- If the request is about CALENDAR (events, appointments, meetings) → use get_calendar_events\n"
-        "- If the request is about general information NOT email/calendar → use {search_tool_name}\n"
-        "- NEVER use {search_tool_name} for questions about the user's email or calendar\n\n"
+        "- If the request is about general information NOT email/calendar → use SEARCH_TOOL\n"
+        "- NEVER use SEARCH_TOOL for questions about the user's email or calendar\n\n"
         "Create a plan (needs_plan=true) when the request requires:\n"
         "- Retrieving data from integrations (email, calendar, web)\n"
         "- Performing specific actions (send email, archive, search)\n"
@@ -728,7 +728,7 @@ async def analyze_message_for_plan(
         "- Simple conversations without need for external data\n"
         "- Greetings or statements that don't require actions\n\n"
         "If you create a plan, include all necessary steps with appropriate tools."
-    ).format(search_tool_name=search_tool_name)
+    ).replace("SEARCH_TOOL", search_tool_name)
 
     logger = logging.getLogger(__name__)
     try:
@@ -1163,9 +1163,11 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
 
         # Se non abbiamo un piano corrente e il messaggio non è solo conferma, valutiamo la necessità di un piano
         # IMPORTANTE: Non chiamare il planner se il messaggio è vuoto o è un messaggio automatico senza contenuto reale
+        # Protezione contro loop infiniti: se il planner ha già fallito, non riprovare
+        planner_failed = state.get("planner_failed", False)
         message_content = request.message.strip()
         is_auto_task = message_content.startswith("[auto-task]")
-        should_plan = not plan and not acknowledgement and message_content and not is_auto_task
+        should_plan = not plan and not acknowledgement and message_content and not is_auto_task and not planner_failed
         
         if should_plan:
             planner_client = state.get("planner_client") or state["ollama"]
@@ -1192,7 +1194,11 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     status="error",
                     message=str(exc),
                 )
-                raise
+                # Marca il planner come fallito per evitare loop infiniti
+                state["planner_failed"] = True
+                # Invece di fare raise, continua senza piano (genera risposta diretta)
+                logger.warning("⚠️ Planner failed, continuing without plan to avoid infinite loop")
+                analysis = {"needs_plan": False, "reason": f"Planner error: {str(exc)}", "steps": []}
             else:
                 log_agent_activity(state, agent_id="planner", status="completed")
             state["plan_analysis"] = analysis  # utile per debugging/test
@@ -2175,7 +2181,10 @@ def build_langgraph_app() -> StateGraph:
     logger.info("✅ LangGraph application built successfully")
     logger.info("   Graph structure: event_handler -> orchestrator -> tool_loop -> knowledge_agent -> notification_collector -> response_formatter -> END")
     
-    return graph.compile()
+    # Add recursion limit to prevent infinite loops
+    compiled = graph.compile(recursion_limit=50)
+    logger.info("✅ LangGraph compiled with recursion_limit=50")
+    return compiled
 
 
 async def run_langgraph_chat(
@@ -2225,6 +2234,7 @@ async def run_langgraph_chat(
         "plan_dirty": False,
         "plan_completed": not plan_steps,
         "assistant_message_saved": False,
+        "planner_failed": False,  # Track if planner has failed to prevent infinite loops
         "done": False,
         "agent_activity": [],
         "agent_activity_manager": agent_activity_stream,
