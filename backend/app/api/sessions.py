@@ -1155,7 +1155,12 @@ async def chat(
     else:
         logger.warning(f"No file content retrieved for session {session_id}")
     
-    if request.use_memory:
+    # Check if user explicitly requests a search - if so, don't use memory to force fresh search
+    search_keywords = ["cerca", "search", "ricerca", "google scholar", "cerca su", "trova", "find", "lookup"]
+    message_lower = request.message.lower()
+    is_explicit_search_request = any(keyword in message_lower for keyword in search_keywords)
+    
+    if request.use_memory and not is_explicit_search_request:
         # Short-term memory
         short_term = await memory.get_short_term_memory(db, session_id)
         if short_term:
@@ -1174,6 +1179,20 @@ async def chat(
         )
         memory_used["long_term"] = long_mem
         retrieved_memory.extend(long_mem)
+    elif is_explicit_search_request:
+        logger.info("🔍 Explicit search request detected - skipping memory retrieval to force fresh search")
+        # Still get short-term memory for context, but skip medium/long-term that might contain old search results
+        if request.use_memory:
+            short_term = await memory.get_short_term_memory(db, session_id)
+            if short_term:
+                memory_used["short_term"] = True
+                # Only add non-search-related short-term memory
+                if isinstance(short_term, dict):
+                    # Filter out search results from short-term memory
+                    filtered_short_term = {k: v for k, v in short_term.items() 
+                                         if not any(kw in str(v).lower() for kw in ["risultati ricerca", "search results", "google scholar"])}
+                    if filtered_short_term:
+                        retrieved_memory.append(str(filtered_short_term))
     
     # Add file context info to retrieved memory if available
     if file_context_info:
