@@ -429,10 +429,11 @@ app.add_middleware(
         "https://knowledge-navigator-frontend-526374196058.us-central1.run.app",  # Frontend Cloud Run
         "https://knowledge-navigator-frontend-osbdwu5a7q-uc.a.run.app",  # Frontend Cloud Run (alternativo)
     ],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    allow_credentials=True,  # Changed to True to allow credentials (cookies, auth headers)
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Observability middleware (after CORS)

@@ -703,15 +703,21 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
         return
       }
       
-      const errorMessage: Message = {
+      if (error.message === 'Network Error' || !error.response) {
+        errorMessage = 'Errore di rete: impossibile raggiungere il server. Verifica la connessione.'
+      } else if (error.response?.status === 401) {
+        errorMessage = 'Non autorizzato. Il token potrebbe essere scaduto. Controlla i log per il refresh.'
+      }
+      
+      const errorMessageObj: Message = {
         id: '',
         session_id: sessionId,
         role: 'assistant',
-        content: `Errore: ${error.response?.data?.detail || error.message || 'Errore sconosciuto'}`,
+        content: `Errore: ${errorMessage}`,
         timestamp: new Date().toISOString(),
         metadata: {},
       }
-      setMessages((prev) => [...prev, errorMessage])
+      setMessages((prev) => [...prev, errorMessageObj])
     } finally {
       setLoading(false)
     }

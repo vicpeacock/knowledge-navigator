@@ -169,20 +169,33 @@ api.interceptors.response.use(
         const { access_token } = response.data
         console.log('[API] ✅ Access token refreshed successfully')
         
-        // Update token in localStorage
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('access_token', access_token)
-        }
+          // Update token in localStorage FIRST (synchronously)
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('access_token', access_token)
+            console.log('[API] ✅ Token saved to localStorage')
+          }
 
-        // Update authorization header and retry original request
-        originalRequest.headers['Authorization'] = `Bearer ${access_token}`
-        
-        // Clear the _retry flag to allow future retries if needed
-        delete originalRequest._retry
-        
-        console.log('[API] Retrying original request with new token...')
-        // Metadata will be preserved automatically by request interceptor
-        return api(originalRequest)
+          // Update authorization header and retry original request
+          originalRequest.headers['Authorization'] = `Bearer ${access_token}`
+          
+          // Clear the _retry flag to allow future retries if needed
+          delete originalRequest._retry
+          
+          // Also clear any cached config that might have the old token
+          if (originalRequest.headers) {
+            originalRequest.headers['Authorization'] = `Bearer ${access_token}`
+          }
+          
+          console.log('[API] Retrying original request with new token...', {
+            url: originalRequest.url,
+            method: originalRequest.method,
+            hasAuthHeader: !!originalRequest.headers['Authorization'],
+            tokenPreview: access_token.substring(0, 20) + '...',
+          })
+          
+          // Metadata will be preserved automatically by request interceptor
+          // But we need to ensure the request interceptor uses the new token
+          return api(originalRequest)
       } catch (refreshError: any) {
         console.error('[API] ❌ Token refresh failed:', refreshError)
         console.error('[API] Refresh error details:', {
