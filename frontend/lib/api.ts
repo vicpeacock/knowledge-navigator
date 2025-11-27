@@ -123,30 +123,60 @@ api.interceptors.response.use(
           ? localStorage.getItem('refresh_token')
           : null
 
-        if (refreshToken) {
-          const response = await api.post('/api/v1/auth/refresh', {
-            refresh_token: refreshToken
-          })
-
-          const { access_token } = response.data
-          
-          // Update token in localStorage
+        if (!refreshToken) {
+          console.warn('[API] No refresh token available, cannot refresh access token')
+          // Clear tokens and redirect to login
           if (typeof window !== 'undefined') {
-            localStorage.setItem('access_token', access_token)
+            localStorage.removeItem('access_token')
+            localStorage.removeItem('refresh_token')
+            // Redirect to login
+            window.location.href = '/auth/login'
           }
-
-          // Update authorization header and retry original request
-          originalRequest.headers['Authorization'] = `Bearer ${access_token}`
-          
-          // Metadata will be preserved automatically by request interceptor
-          return api(originalRequest)
+          return Promise.reject(error)
         }
-      } catch (refreshError) {
+
+        console.log('[API] Attempting to refresh access token...')
+        const response = await api.post('/api/v1/auth/refresh', {
+          refresh_token: refreshToken
+        })
+
+        if (!response.data || !response.data.access_token) {
+          console.error('[API] Refresh token response missing access_token:', response.data)
+          throw new Error('Invalid refresh token response')
+        }
+
+        const { access_token } = response.data
+        console.log('[API] ✅ Access token refreshed successfully')
+        
+        // Update token in localStorage
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('access_token', access_token)
+        }
+
+        // Update authorization header and retry original request
+        originalRequest.headers['Authorization'] = `Bearer ${access_token}`
+        
+        // Clear the _retry flag to allow future retries if needed
+        delete originalRequest._retry
+        
+        console.log('[API] Retrying original request with new token...')
+        // Metadata will be preserved automatically by request interceptor
+        return api(originalRequest)
+      } catch (refreshError: any) {
+        console.error('[API] ❌ Token refresh failed:', refreshError)
+        console.error('[API] Refresh error details:', {
+          message: refreshError.message,
+          response: refreshError.response?.data,
+          status: refreshError.response?.status,
+        })
+        
         // Refresh failed, clear tokens and redirect to login
         if (typeof window !== 'undefined') {
           localStorage.removeItem('access_token')
           localStorage.removeItem('refresh_token')
-          // Redirect will be handled by middleware or component
+          // Redirect to login
+          console.log('[API] Redirecting to login page...')
+          window.location.href = '/auth/login'
         }
         return Promise.reject(refreshError)
       }
