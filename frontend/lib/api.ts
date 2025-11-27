@@ -12,6 +12,17 @@ const api = axios.create({
   timeout: 300000, // 5 minutes - increased for long-running operations (Gmail API, LangGraph, tool execution)
 })
 
+// Separate axios instance for refresh token requests to avoid infinite loops
+// This instance doesn't have the response interceptor that retries on 401
+const refreshApi = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  withCredentials: false,
+  timeout: 10000, // 10 seconds timeout for refresh
+})
+
 // Request interceptor: Add JWT token, multi-tenant headers, and trace ID
 api.interceptors.request.use((config) => {
   // Preserve existing metadata if present (for retries)
@@ -137,7 +148,7 @@ api.interceptors.response.use(
 
     // If 401 and not already retrying
     // IMPORTANT: Don't retry if the request is already a refresh token request (to avoid infinite loop)
-    const isRefreshRequest = originalRequest.url?.includes('/auth/refresh')
+    const isRefreshRequest = originalRequest.url?.includes('/auth/refresh') || originalRequest._skipRefreshRetry
     
     if (error.response?.status === 401 && !originalRequest._retry && !isRefreshRequest) {
       originalRequest._retry = true
@@ -161,7 +172,9 @@ api.interceptors.response.use(
         }
 
         console.log('[API] Attempting to refresh access token...')
-        const response = await api.post('/api/v1/auth/refresh', {
+        // Use separate axios instance to avoid infinite loop
+        // This instance doesn't have the response interceptor that retries on 401
+        const response = await refreshApi.post('/api/v1/auth/refresh', {
           refresh_token: refreshToken
         })
 
@@ -217,14 +230,17 @@ api.interceptors.response.use(
         
         // Mark that we've already tried to refresh to prevent infinite loop
         originalRequest._retry = true
+        originalRequest._skipRefreshRetry = true
         
-        // Refresh failed, clear tokens and redirect to login
+        // Refresh failed, clear tokens immediately to prevent further retries
         if (typeof window !== 'undefined') {
           localStorage.removeItem('access_token')
           localStorage.removeItem('refresh_token')
-          // Redirect to login
-          console.log('[API] Redirecting to login page...')
-          window.location.href = '/auth/login'
+          console.log('[API] Tokens cleared, redirecting to login page...')
+          // Use setTimeout to avoid blocking the error propagation
+          setTimeout(() => {
+            window.location.href = '/auth/login'
+          }, 100)
         }
         return Promise.reject(refreshError)
       }
