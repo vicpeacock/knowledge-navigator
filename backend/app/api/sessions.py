@@ -1014,14 +1014,16 @@ async def chat(
     """Send a message and get AI response (for current user)"""
     # Log immediately at the start of the function - BEFORE any processing
     import sys
+    import time
+    start_time = time.time()
     try:
-        print(f"[CHAT ENDPOINT] ===== CHAT REQUEST RECEIVED =====", file=sys.stderr)
-        print(f"[CHAT ENDPOINT] session_id={session_id}, message_length={len(request.message) if request else 'None'}, user={current_user.email if current_user else 'None'}", file=sys.stderr)
+        print(f"[CHAT ENDPOINT] ===== CHAT REQUEST RECEIVED =====", file=sys.stderr, flush=True)
+        print(f"[CHAT ENDPOINT] session_id={session_id}, message_length={len(request.message) if request else 'None'}, user={current_user.email if current_user else 'None'}", file=sys.stderr, flush=True)
         logger.info(f"📨📨📨 CHAT REQUEST RECEIVED: session_id={session_id}, message='{request.message[:100] if request and request.message else 'None'}', user={current_user.email if current_user else 'None'}")
-        print(f"[SESSIONS] CHAT REQUEST: session_id={session_id}, message='{request.message[:100]}', user={current_user.email}", file=sys.stderr)
+        print(f"[SESSIONS] CHAT REQUEST: session_id={session_id}, message='{request.message[:100]}', user={current_user.email}", file=sys.stderr, flush=True)
     except Exception as log_error:
         # Even if logging fails, try to continue
-        print(f"[CHAT ENDPOINT] ERROR in initial logging: {log_error}", file=sys.stderr)
+        print(f"[CHAT ENDPOINT] ERROR in initial logging: {log_error}", file=sys.stderr, flush=True)
     
     # Check active SSE connections for this session
     active_sessions = agent_activity_stream.get_active_sessions()
@@ -1292,11 +1294,14 @@ async def chat(
 
         # Commit MUST complete before returning response to ensure message is persisted
         try:
+            print(f"[CHAT ENDPOINT] Committing assistant message to database...", file=sys.stderr, flush=True)
             await db.commit()
             await db.refresh(session)
             logger.info(f"✅ Assistant message saved to database for session {session_id}")
+            print(f"[CHAT ENDPOINT] Assistant message committed successfully", file=sys.stderr, flush=True)
         except Exception as commit_error:
             logger.error(f"❌ Error committing assistant message to database: {commit_error}", exc_info=True)
+            print(f"[CHAT ENDPOINT] ERROR committing: {commit_error}", file=sys.stderr, flush=True)
             await db.rollback()
             # CRITICAL: If commit fails, we still need to ensure the message is saved
             # Try one more time before returning
@@ -1308,6 +1313,10 @@ async def chat(
                 logger.error(f"❌ Retry commit also failed: {retry_error}", exc_info=True)
                 await db.rollback()
                 logger.warning("⚠️  Database commit failed, but returning response anyway")
+        
+        # Log before returning response
+        elapsed = time.time() - start_time
+        print(f"[CHAT ENDPOINT] Preparing response after {elapsed:.2f}s...", file=sys.stderr, flush=True)
 
         # Ensure response is not empty - if it is, provide a fallback message
         if not chat_response.response or not chat_response.response.strip():
@@ -1336,7 +1345,9 @@ async def chat(
         logger.info(f"   Response preview: {final_response.response[:200] if final_response.response else 'EMPTY'}...")
         logger.info(f"   Tools used: {len(final_response.tools_used)}")
         logger.info(f"   Agent activity events: {len(final_response.agent_activity)}")
-        print(f"[SESSIONS] Returning ChatResponse: response_length={len(final_response.response) if final_response.response else 0}", file=sys.stderr)
+        print(f"[SESSIONS] Returning ChatResponse: response_length={len(final_response.response) if final_response.response else 0}", file=sys.stderr, flush=True)
+        elapsed_total = time.time() - start_time
+        print(f"[CHAT ENDPOINT] ===== CHAT REQUEST COMPLETED in {elapsed_total:.2f}s =====", file=sys.stderr, flush=True)
         
         return final_response
     

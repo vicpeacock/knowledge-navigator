@@ -2268,7 +2268,37 @@ async def run_langgraph_chat(
     pending_plan: Optional[Dict[str, Any]] = None,
     current_user: Optional[Any] = None,  # User model for tool filtering
 ) -> LangGraphResult:
-    app = build_langgraph_app()
+    # Build app once and reuse (or build each time if needed)
+    try:
+        app = build_langgraph_app()
+    except TypeError as e:
+        if "recursion_limit" in str(e):
+            logger.error(f"❌ LangGraph version doesn't support recursion_limit: {e}")
+            # Try building without recursion_limit
+            from langgraph.graph import StateGraph, END
+            graph = StateGraph(LangGraphChatState)
+            # Rebuild graph without recursion_limit
+            graph.add_node("event_handler", event_handler_node)
+            graph.add_node("orchestrator", orchestrator_node)
+            graph.add_node("tool_loop", tool_loop_node)
+            graph.add_node("knowledge_agent", knowledge_agent_node)
+            graph.add_node("notification_collector", notification_collector_node)
+            graph.add_node("response_formatter", response_formatter_node)
+            graph.set_entry_point("event_handler")
+            graph.add_edge("event_handler", "orchestrator")
+            graph.add_conditional_edges(
+                "orchestrator",
+                _routing_router,
+                {"tool_loop": "tool_loop"},
+            )
+            graph.add_edge("tool_loop", "knowledge_agent")
+            graph.add_edge("knowledge_agent", "notification_collector")
+            graph.add_edge("notification_collector", "response_formatter")
+            graph.add_edge("response_formatter", END)
+            app = graph.compile()
+            logger.info("✅ LangGraph compiled without recursion_limit")
+        else:
+            raise
     acknowledgement = is_acknowledgement(request.message)
     plan_steps = []
     plan_index = 0
