@@ -1666,288 +1666,42 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             if tool_results:
                 logger.info(f"Generating final response after {len(tool_results)} tool execution(s)")
                 try:
-                    # Try to generate response directly from tool results first
-                    # This avoids calling Gemini which might block due to safety filters
-                    direct_response = None
+                    # Format tool results with clean, factual format
+                    formatted_results = _format_tool_results_for_llm(tool_results, simple_format=True)
                     
-                    if len(tool_results) == 1:
-                        tr = tool_results[0]
-                        tool_name = tr.get('tool', '')
-                        tool_result = tr.get('result', {})
-                        
-                        # For get_calendar_events with no events (not an error), generate direct response
-                        if tool_name == 'get_calendar_events' and isinstance(tool_result, dict):
-                            count = tool_result.get('count', 0)
-                            has_error = 'error' in tool_result
-                            
-                            if not has_error and count == 0:
-                                # No events found - this is a valid result, generate natural response
-                                query = request.message.lower()
-                                if 'sabato' in query or 'saturday' in query:
-                                    direct_response = "Non ci sono eventi programmati per sabato nel tuo calendario."
-                                elif 'domenica' in query or 'sunday' in query:
-                                    direct_response = "Non ci sono eventi programmati per domenica nel tuo calendario."
-                                else:
-                                    direct_response = "Non ci sono eventi nel calendario per il periodo richiesto."
-                                logger.info(f"✅ Generated direct response for empty calendar (no events found)")
-                            elif not has_error and count > 0:
-                                # Events found - format them directly
-                                events = tool_result.get('events', [])
-                                event_lines = [f"Ho trovato {count} evento/i nel calendario:"]
-                                for i, event in enumerate(events[:5], 1):
-                                    summary = event.get('summary', 'Nessun titolo')
-                                    start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date', 'N/A')
-                                    event_lines.append(f"{i}. {summary} - {start}")
-                                direct_response = "\n".join(event_lines)
-                                logger.info(f"✅ Generated direct response for calendar with {count} events")
-                        
-                        # For customsearch_search with no results, use the summary directly
-                        elif tool_name == 'customsearch_search' and isinstance(tool_result, dict):
-                            results = tool_result.get('results', [])
-                            summary = tool_result.get('summary', '')
-                            # If no results and we have a clear summary, use it directly
-                            if not results and summary:
-                                direct_response = summary
-                                logger.info(f"✅ Using direct response from {tool_name} (no results, clear summary available)")
-                            elif results:
-                                # Format search results directly
-                                query = tool_result.get('query', 'la ricerca')
-                                result_lines = [f"Ho trovato {len(results)} risultato/i per '{query}':"]
-                                for i, r in enumerate(results[:5], 1):
-                                    title = r.get('title', 'N/A')
-                                    snippet = r.get('content', '')[:150]
-                                    url = r.get('url', '')
-                                    result_lines.append(f"{i}. {title}")
-                                    if snippet:
-                                        result_lines.append(f"   {snippet}...")
-                                    if url:
-                                        result_lines.append(f"   {url}")
-                                    result_lines.append("")
-                                direct_response = "\n".join(result_lines)
-                                logger.info(f"✅ Generated direct response for search with {len(results)} results")
-                    
-                    if direct_response:
-                        response_text = direct_response
-                        logger.info(f"✅ Using direct response from tool results (bypassed Gemini synthesis)")
-                    else:
-                        # Format tool results with simple, clean format to avoid safety filter triggers
-                        formatted_results = _format_tool_results_for_llm(tool_results, simple_format=True)
-                        
-                        # Create a simple, direct prompt for synthesizing results
-                        # Avoid complex instructions that might trigger safety filters
-                        # Use a more neutral, factual tone to avoid safety filter triggers
-                        synthesis_prompt = f"""L'utente ha chiesto: {request.message}
+                    # Create a neutral, factual prompt for synthesizing results
+                    # Use simple, direct language to avoid safety filter triggers
+                    synthesis_prompt = f"""User question: {request.message}
 
-Informazioni disponibili:
+Tool results:
 {formatted_results}
 
-Fornisci una risposta chiara e utile basata sulle informazioni sopra. Se non ci sono informazioni rilevanti, indica che non sono state trovate informazioni sufficienti."""
-                        
-                        # CRITICAL: Disable safety filters for tool result synthesis
-                        # Tool results come from trusted sources (our own tools), so it's safe to disable filters
-                        # This prevents Gemini from blocking legitimate responses about calendar events, emails, search results, etc.
-                        final_response = await ollama.generate_with_context(
-                            prompt=synthesis_prompt,
-                            session_context=session_context,
-                            retrieved_memory=retrieved_memory if retrieved_memory else None,
-                            tools=None,  # No tools needed for final response
-                            tools_description=None,
-                            disable_safety_filters=True,  # Disable safety filters - tool results are from trusted sources
-                        )
-                        
-                        # Extract response text
-                        if isinstance(final_response, dict):
-                            response_text = final_response.get("content", "")
-                        else:
-                            response_text = str(final_response) if final_response else ""
+Provide a clear, factual response based on the information above. Use neutral, professional language."""
                     
-                    # Check if response is empty or is the generic safety block message
-                    is_safety_block = response_text and "bloccata dai filtri di sicurezza" in response_text
-                    logger.info(f"🔍 Response check: empty={not response_text or not response_text.strip()}, is_safety_block={is_safety_block}, length={len(response_text) if response_text else 0}")
-                    if not response_text or not response_text.strip() or is_safety_block:
-                        if is_safety_block:
-                            logger.warning("Final response was blocked by safety filters, extracting results from tools")
-                        else:
-                            logger.warning("Final response after tool execution is empty, using fallback with tool results summary")
-                        
-                        # Try to extract useful information from tool results for the fallback
-                        logger.info(f"🔍 Extracting results from {len(tool_results)} tool results for fallback")
-                        logger.info(f"   Tool results structure: {[tr.get('tool') for tr in tool_results]}")
-                        summary_parts = []
-                        for tr in tool_results:
-                            tool_name = tr.get('tool', 'unknown')
-                            tool_result = tr.get('result', {})
-                            logger.info(f"   Tool: {tool_name}, result type: {type(tool_result)}")
-                            if isinstance(tool_result, dict):
-                                logger.info(f"   Result keys: {list(tool_result.keys())}")
-                                # Log full result structure for debugging
-                                if tool_name == 'get_calendar_events':
-                                    logger.info(f"   🔍 Full calendar result: {json.dumps(tool_result, default=str, ensure_ascii=False)[:500]}")
-                                    logger.info(f"   🔍 Has 'error' key: {'error' in tool_result}")
-                                    logger.info(f"   🔍 Has 'success' key: {'success' in tool_result}")
-                                    logger.info(f"   🔍 Has 'count' key: {'count' in tool_result}")
-                                    if 'error' in tool_result:
-                                        logger.info(f"   🔍 Error value: {tool_result.get('error', 'N/A')[:200]}")
-                                    if 'count' in tool_result:
-                                        logger.info(f"   🔍 Count value: {tool_result.get('count', 'N/A')}")
-                                # For customsearch_search, extract search results
-                                if tool_name == 'customsearch_search':
-                                    # Check for results in the result dict
-                                    results = tool_result.get('results', [])
-                                    logger.info(f"   Found {len(results)} results in customsearch_search")
-                                    if results:
-                                        # Extract first few results with details
-                                        result_texts = []
-                                        for i, r in enumerate(results[:3], 1):
-                                            title = r.get('title', 'N/A')
-                                            snippet = r.get('content', 'N/A')
-                                            url = r.get('url', 'N/A')
-                                            result_texts.append(f"{i}. {title}: {snippet[:150]}...")
-                                        summary_text = f"Ho trovato {len(results)} risultati nella ricerca:\n" + "\n".join(result_texts)
-                                        summary_parts.append(summary_text)
-                                        logger.info(f"   ✅ Extracted {len(results)} search results for fallback")
-                                    # Also check for summary field (which now includes helpful message for 0 results)
-                                    elif 'summary' in tool_result:
-                                        summary = tool_result['summary']
-                                        # Check if summary contains the "no results" message
-                                        if "Non ho trovato risultati" in summary or "non ho trovato risultati" in summary:
-                                            summary_parts.append(summary)
-                                            logger.info(f"   ✅ Using 'no results' message from customsearch_search")
-                                        else:
-                                            summary_parts.append(summary)
-                                            logger.info(f"   ✅ Using summary field from customsearch_search")
-                                    else:
-                                        logger.warning(f"   ⚠️  No 'results' or 'summary' found in customsearch_search result")
-                                # For get_calendar_events, extract events
-                                elif tool_name == 'get_calendar_events':
-                                    events = tool_result.get('events', [])
-                                    count = tool_result.get('count', 0)
-                                    logger.info(f"   Found {count} events in get_calendar_events")
-                                    if events:
-                                        # Format first few events
-                                        event_texts = []
-                                        for i, event in enumerate(events[:5], 1):
-                                            summary = event.get('summary', 'Nessun titolo')
-                                            start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date', 'N/A')
-                                            event_texts.append(f"{i}. {summary} - {start}")
-                                        summary_text = f"Ho trovato {count} evento/i nel calendario:\n" + "\n".join(event_texts)
-                                        summary_parts.append(summary_text)
-                                        logger.info(f"   ✅ Extracted {count} calendar events for fallback")
-                                    elif count == 0:
-                                        summary_parts.append("Non ci sono eventi nel calendario per il periodo richiesto.")
-                                        logger.info(f"   ✅ No events found - using empty calendar message")
-                                # For get_emails, extract emails
-                                elif tool_name == 'get_emails':
-                                    emails = tool_result.get('emails', [])
-                                    count = tool_result.get('count', 0)
-                                    logger.info(f"   Found {count} emails in get_emails")
-                                    if emails:
-                                        # Format first few emails
-                                        email_texts = []
-                                        for i, email in enumerate(emails[:5], 1):
-                                            subject = email.get('subject', 'Nessun oggetto')
-                                            sender = email.get('from', 'N/A')
-                                            date = email.get('date', 'N/A')
-                                            email_texts.append(f"{i}. Da: {sender} - Oggetto: {subject} ({date})")
-                                        summary_text = f"Ho trovato {count} email:\n" + "\n".join(email_texts)
-                                        summary_parts.append(summary_text)
-                                        logger.info(f"   ✅ Extracted {count} emails for fallback")
-                                    elif count == 0:
-                                        summary_parts.append("Non ci sono email nella casella di posta per i criteri richiesti.")
-                                        logger.info(f"   ✅ No emails found - using empty email message")
-                                # For other tools, try to extract useful info
-                                elif 'error' not in tool_result:
-                                    # Try to extract a summary from the result
-                                    if 'summary' in tool_result:
-                                        summary_parts.append(tool_result['summary'])
-                                    elif 'content' in tool_result:
-                                        content = str(tool_result['content'])[:200]
-                                        summary_parts.append(content)
-                        
-                        if summary_parts:
-                            logger.info(f"   ✅ Generated {len(summary_parts)} summary parts from tool results")
-                            # Create a more natural response based on the query
-                            # IMPORTANT: Indicate that Gemini failed to synthesize the results
-                            if 'customsearch_search' in [tr.get('tool') for tr in tool_results]:
-                                # For search queries, extract results and create a natural response
-                                search_result = tool_results[0].get('result', {}) if tool_results else {}
-                                results = search_result.get('results', [])
-                                
-                                if results:
-                                    # Create a natural response from search results
-                                    query = search_result.get('query', 'la ricerca')
-                                    response_lines = [
-                                        "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati della ricerca. ",
-                                        f"Ecco comunque i risultati trovati ({len(results)} risultati per '{query}'):\n"
-                                    ]
-                                    
-                                    # Add first 3-5 results in a natural format
-                                    for i, r in enumerate(results[:5], 1):
-                                        title = r.get('title', 'N/A')
-                                        snippet = r.get('content', '')[:200]  # Limit snippet length
-                                        url = r.get('url', '')
-                                        
-                                        # Format as a natural list item
-                                        response_lines.append(f"{i}. **{title}**")
-                                        if snippet:
-                                            response_lines.append(f"   {snippet}")
-                                        if url:
-                                            response_lines.append(f"   ({url})")
-                                        response_lines.append("")  # Empty line between results
-                                    
-                                    response_text = "\n".join(response_lines)
-                                    logger.info(f"   ✅ Created fallback response indicating Gemini failure, with {len(results)} results")
-                                else:
-                                    # No results - use the summary message but indicate Gemini failure
-                                    response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "".join(summary_parts[:2])
-                                    logger.info(f"   ✅ Using summary message with Gemini failure indication for empty search results")
-                            elif 'get_calendar_events' in [tr.get('tool') for tr in tool_results]:
-                                # For calendar queries, check if it's a "no events" case (which is a valid result, not an error)
-                                calendar_result = tool_results[0].get('result', {}) if tool_results else {}
-                                count = calendar_result.get('count', 0)
-                                has_error = 'error' in calendar_result
-                                
-                                if not has_error and count == 0:
-                                    # No events found - this is a valid result, not an error
-                                    # Use a natural response without the error prefix
-                                    response_text = "\n\n".join(summary_parts)
-                                    logger.info(f"   ✅ Created natural response for empty calendar (no error prefix)")
-                                else:
-                                    # There was an error or Gemini failed to synthesize - use error prefix
-                                    response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "\n\n".join(summary_parts)
-                                    logger.info(f"   ✅ Created fallback response for calendar events with error prefix")
-                            elif 'get_emails' in [tr.get('tool') for tr in tool_results]:
-                                # For email queries, check if it's a "no emails" case (which is a valid result, not an error)
-                                email_result = tool_results[0].get('result', {}) if tool_results else {}
-                                count = email_result.get('count', 0)
-                                has_error = 'error' in email_result
-                                
-                                if not has_error and count == 0:
-                                    # No emails found - this is a valid result, not an error
-                                    # Use a natural response without the error prefix
-                                    response_text = "\n\n".join(summary_parts)
-                                    logger.info(f"   ✅ Created natural response for empty emails (no error prefix)")
-                                else:
-                                    # There was an error or Gemini failed to synthesize - use error prefix
-                                    response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "\n\n".join(summary_parts)
-                                    logger.info(f"   ✅ Created fallback response for emails with error prefix")
-                            else:
-                                response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
-                        else:
-                            logger.warning(f"   ⚠️  No summary parts extracted from tool results, trying to extract from formatted results")
-                            # Last resort: try to use the formatted_results we already created
-                            if formatted_results and formatted_results.strip():
-                                # Use the formatted results directly as response
-                                response_text = f"⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. Ecco comunque i risultati trovati:\n\n{formatted_results}"
-                                logger.info(f"   ✅ Using formatted_results as fallback response")
-                            else:
-                                # Final fallback: show tool names and basic info
-                                tool_names = [tr.get('tool', 'unknown') for tr in tool_results]
-                                response_text = f"⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. Ho eseguito {len(tool_results)} tool(s) ({', '.join(tool_names)}) ma non sono riuscito a generare una risposta sintetizzata."
-                                logger.warning(f"   ⚠️  Using final fallback with tool names only")
+                    # Use Gemini to synthesize the response
+                    # Tool results come from trusted sources, so we can disable safety filters
+                    final_response = await ollama.generate_with_context(
+                        prompt=synthesis_prompt,
+                        session_context=session_context,
+                        retrieved_memory=retrieved_memory if retrieved_memory else None,
+                        tools=None,  # No tools needed for final response
+                        tools_description=None,
+                        disable_safety_filters=True,  # Disable safety filters - tool results are from trusted sources
+                    )
+                    
+                    # Extract response text
+                    if isinstance(final_response, dict):
+                        response_text = final_response.get("content", "")
+                    else:
+                        response_text = str(final_response) if final_response else ""
+                    
+                    if not response_text or not response_text.strip():
+                        raise ValueError("Gemini returned empty response")
+                    
+                    logger.info(f"✅ Successfully generated response from Gemini: {len(response_text)} characters")
                 except Exception as final_error:
-                    logger.error(f"Error generating final response after tools: {final_error}", exc_info=True)
-                    response_text = f"Ho eseguito {len(tool_results)} tool(s). Risultati: {json.dumps(tool_results, indent=2, ensure_ascii=False, default=str)[:500]}"
+                    logger.error(f"❌ Error generating final response after tools: {final_error}", exc_info=True)
+                    raise  # Re-raise to let the error propagate instead of using fallback
         else:
             # No tool calls - use the response_text we extracted (or fallback if empty)
             logger.info(f"No tool calls, using direct response. Length: {len(response_text) if response_text else 0}")
