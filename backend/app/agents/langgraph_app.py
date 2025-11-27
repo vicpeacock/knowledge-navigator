@@ -1666,29 +1666,69 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             if tool_results:
                 logger.info(f"Generating final response after {len(tool_results)} tool execution(s)")
                 try:
-                    # Check if we can use tool results directly without synthesis
-                    # Some tools (like customsearch_search with no results) already provide clear messages
-                    can_use_direct = False
+                    # Try to generate response directly from tool results first
+                    # This avoids calling Gemini which might block due to safety filters
                     direct_response = None
                     
-                    # Check if all tools returned clear summary messages that don't need synthesis
                     if len(tool_results) == 1:
                         tr = tool_results[0]
                         tool_name = tr.get('tool', '')
                         tool_result = tr.get('result', {})
                         
+                        # For get_calendar_events with no events (not an error), generate direct response
+                        if tool_name == 'get_calendar_events' and isinstance(tool_result, dict):
+                            count = tool_result.get('count', 0)
+                            has_error = 'error' in tool_result
+                            
+                            if not has_error and count == 0:
+                                # No events found - this is a valid result, generate natural response
+                                query = request.message.lower()
+                                if 'sabato' in query or 'saturday' in query:
+                                    direct_response = "Non ci sono eventi programmati per sabato nel tuo calendario."
+                                elif 'domenica' in query or 'sunday' in query:
+                                    direct_response = "Non ci sono eventi programmati per domenica nel tuo calendario."
+                                else:
+                                    direct_response = "Non ci sono eventi nel calendario per il periodo richiesto."
+                                logger.info(f"✅ Generated direct response for empty calendar (no events found)")
+                            elif not has_error and count > 0:
+                                # Events found - format them directly
+                                events = tool_result.get('events', [])
+                                event_lines = [f"Ho trovato {count} evento/i nel calendario:"]
+                                for i, event in enumerate(events[:5], 1):
+                                    summary = event.get('summary', 'Nessun titolo')
+                                    start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date', 'N/A')
+                                    event_lines.append(f"{i}. {summary} - {start}")
+                                direct_response = "\n".join(event_lines)
+                                logger.info(f"✅ Generated direct response for calendar with {count} events")
+                        
                         # For customsearch_search with no results, use the summary directly
-                        if tool_name == 'customsearch_search' and isinstance(tool_result, dict):
+                        elif tool_name == 'customsearch_search' and isinstance(tool_result, dict):
                             results = tool_result.get('results', [])
                             summary = tool_result.get('summary', '')
                             # If no results and we have a clear summary, use it directly
-                            if not results and summary and "Non ho trovato risultati" in summary:
-                                can_use_direct = True
+                            if not results and summary:
                                 direct_response = summary
                                 logger.info(f"✅ Using direct response from {tool_name} (no results, clear summary available)")
+                            elif results:
+                                # Format search results directly
+                                query = tool_result.get('query', 'la ricerca')
+                                result_lines = [f"Ho trovato {len(results)} risultato/i per '{query}':"]
+                                for i, r in enumerate(results[:5], 1):
+                                    title = r.get('title', 'N/A')
+                                    snippet = r.get('content', '')[:150]
+                                    url = r.get('url', '')
+                                    result_lines.append(f"{i}. {title}")
+                                    if snippet:
+                                        result_lines.append(f"   {snippet}...")
+                                    if url:
+                                        result_lines.append(f"   {url}")
+                                    result_lines.append("")
+                                direct_response = "\n".join(result_lines)
+                                logger.info(f"✅ Generated direct response for search with {len(results)} results")
                     
-                    if can_use_direct and direct_response:
+                    if direct_response:
                         response_text = direct_response
+                        logger.info(f"✅ Using direct response from tool results (bypassed Gemini synthesis)")
                     else:
                         # Format tool results with simple, clean format to avoid safety filter triggers
                         formatted_results = _format_tool_results_for_llm(tool_results, simple_format=True)
