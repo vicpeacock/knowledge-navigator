@@ -474,52 +474,52 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                 logger.info(f"✅ Using SafetySetting objects (if available)")
             
             if disable_safety_filters:
-                logger.info(f"🔍 Configuring BLOCK_ONLY_HIGH safety settings for tool result synthesis...")
-                logger.info(f"   Using BLOCK_ONLY_HIGH (most permissive without allowlist)")
-                # Use BLOCK_ONLY_HIGH for tool result synthesis (most permissive without allowlist)
-                # BLOCK_ONLY_HIGH blocks only HIGH probability harmful content
+                logger.info(f"🔍 Configuring BLOCK_NONE safety settings for tool result synthesis...")
+                logger.warning(f"   ⚠️  NOTE: BLOCK_NONE requires allowlist approval from Google. If not approved, this may not work.")
+                # Use BLOCK_NONE for tool result synthesis (disable all safety filters)
+                # This is safe because tool results come from trusted sources (our own tools)
                 try:
                     if use_objects:
                         safety_settings = [
                             SafetySetting(
                                 category=HarmCategory.HARM_CATEGORY_HARASSMENT,
-                                threshold=HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                threshold=HarmBlockThreshold.BLOCK_NONE,
                             ),
                             SafetySetting(
                                 category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                                threshold=HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                threshold=HarmBlockThreshold.BLOCK_NONE,
                             ),
                             SafetySetting(
                                 category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                                threshold=HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                threshold=HarmBlockThreshold.BLOCK_NONE,
                             ),
                             SafetySetting(
                                 category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                                threshold=HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                threshold=HarmBlockThreshold.BLOCK_NONE,
                             ),
                         ]
-                        logger.info(f"🔓 Safety settings configured: {len(safety_settings)} categories with BLOCK_ONLY_HIGH (using SafetySetting objects)")
+                        logger.info(f"🔓 Safety settings configured: {len(safety_settings)} categories with BLOCK_NONE (using SafetySetting objects)")
                     else:
                         # Fallback to dict format if SafetySetting not available
                         safety_settings = [
                             {
                                 "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
-                                "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                "threshold": HarmBlockThreshold.BLOCK_NONE,
                             },
                             {
                                 "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                                "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                "threshold": HarmBlockThreshold.BLOCK_NONE,
                             },
                             {
                                 "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                                "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                "threshold": HarmBlockThreshold.BLOCK_NONE,
                             },
                             {
                                 "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                                "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                "threshold": HarmBlockThreshold.BLOCK_NONE,
                             },
                         ]
-                        logger.warning(f"⚠️  Using dict format (SafetySetting objects not available)")
+                        logger.info(f"🔓 Using dict format (BLOCK_NONE)")
                 except Exception as e:
                     logger.error(f"   ❌ Failed to create safety settings: {e}", exc_info=True)
                     safety_settings = None
