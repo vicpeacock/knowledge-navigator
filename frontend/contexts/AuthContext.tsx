@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(false)
         return
       } catch (apiError: any) {
-        // Token invalid or expired - try to refresh
+        // Token invalid or expired
         console.error('[AuthContext] Auth check failed:', apiError)
         console.error('[AuthContext] Error details:', {
           message: apiError.message,
@@ -81,38 +81,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           code: apiError.code,
         })
         
-        // Try to refresh token if we have a refresh token
-        const storedRefreshToken = localStorage.getItem('refresh_token')
-        if (storedRefreshToken && apiError.response?.status === 401) {
-          try {
-            console.log('[AuthContext] Attempting token refresh...')
-            // Call refresh API directly to avoid circular dependency
-            const refreshResponse = await authApi.refresh({ refresh_token: storedRefreshToken })
-            const { access_token } = refreshResponse.data
-            
-            localStorage.setItem('access_token', access_token)
-            setToken(access_token)
-            
-            // Retry checkAuth after refresh
-            console.log('[AuthContext] Retrying auth check after refresh...')
-            const retryResponse = await authApi.me()
-            console.log('[AuthContext] Auth check successful after refresh:', retryResponse.data)
-            setUser(retryResponse.data)
-            setIsLoading(false)
-            return
-          } catch (refreshError: any) {
-            console.error('[AuthContext] Token refresh failed:', refreshError)
-            console.error('[AuthContext] Refresh error details:', {
-              message: refreshError.message,
-              response: refreshError.response?.data,
-              status: refreshError.response?.status,
-            })
-            // Fall through to clear tokens
-          }
+        // If 401, token is expired - clear tokens and let user login again
+        // Don't try to refresh here to avoid infinite loops
+        if (apiError.response?.status === 401) {
+          console.log('[AuthContext] Token expired (401), clearing tokens')
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+          setUser(null)
+          setToken(null)
+          setIsLoading(false)
+          return
         }
         
-        // Clear tokens - don't redirect here, let ProtectedRoute handle it
-        console.log('[AuthContext] Clearing tokens and setting isLoading to false')
+        // For other errors, clear tokens anyway
+        console.log('[AuthContext] Clearing tokens due to error')
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
         setUser(null)
