@@ -22,6 +22,17 @@ api.interceptors.request.use((config) => {
     const token = localStorage.getItem('access_token')
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`
+      // Log for chat requests to debug auth issues
+      if (config.url?.includes('/chat')) {
+        console.log('[API] Request interceptor - Chat request:', {
+          url: config.url,
+          hasToken: !!token,
+          tokenLength: token.length,
+          tokenPreview: token.substring(0, 20) + '...',
+        })
+      }
+    } else if (config.url?.includes('/chat')) {
+      console.warn('[API] Request interceptor - Chat request WITHOUT token!')
     }
   }
   
@@ -92,6 +103,16 @@ api.interceptors.response.use(
         if (backendTraceId && process.env.NODE_ENV === 'development') {
           console.log(`[Trace: ${metadata.traceId}] Backend Trace ID: ${backendTraceId}`)
         }
+      }
+      
+      // Log for chat requests to debug
+      if (response.config.url?.includes('/chat')) {
+        const duration = metadata ? `${Date.now() - metadata.startTime}ms` : 'unknown'
+        console.log('[API] ✅ Response interceptor - Chat response:', {
+          status: response.status,
+          hasData: !!response.data,
+          duration,
+        })
       }
     }
     return response

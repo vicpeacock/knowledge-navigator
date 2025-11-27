@@ -505,15 +505,26 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
     setLoading(true)
 
     try {
-      console.log('[ChatInterface] Sending chat request...')
+      console.log('[ChatInterface] Sending chat request...', {
+        sessionId,
+        messageLength: input.length,
+        messagePreview: input.substring(0, 50),
+      })
+      
+      const startTime = Date.now()
       const response = await sessionsApi.chat(sessionId, input)
-      console.log('[ChatInterface] Chat response received:', {
+      const duration = Date.now() - startTime
+      
+      console.log('[ChatInterface] ✅ Chat response received:', {
+        duration: `${duration}ms`,
+        status: response.status,
         hasData: !!response.data,
         hasResponse: !!(response.data?.response),
         responseLength: response.data?.response?.length || 0,
         responsePreview: response.data?.response?.substring(0, 100) || 'EMPTY',
         toolsUsed: response.data?.tools_used?.length || 0,
         agentActivity: response.data?.agent_activity?.length || 0,
+        fullResponse: response.data,
       })
       
       // Check if response is valid
@@ -665,17 +676,26 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
       // Note: Messages are already saved on server, we don't need to reload
       // The local messages have temporary IDs which is fine for display
     } catch (error: any) {
-      console.error('Error sending message:', error)
-      console.error('Error details:', {
+      console.error('[ChatInterface] ❌ Error sending message:', error)
+      console.error('[ChatInterface] Error details:', {
         message: error.message,
         response: error.response?.data,
         status: error.response?.status,
         code: error.code,
+        config: {
+          url: error.config?.url,
+          method: error.config?.method,
+          timeout: error.config?.timeout,
+          headers: Object.keys(error.config?.headers || {}),
+        },
       })
       
+      let errorMessage = error.response?.data?.detail || error.message || 'Errore sconosciuto'
+      
       // If it's a network error or timeout, the message might still be processing
-      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout') || error.message?.includes('Network Error')) {
-        console.log('Network error/timeout - message might be processing in background, reloading messages')
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMessage = 'Timeout: la richiesta ha impiegato troppo tempo. Riprova.'
+        console.log('[ChatInterface] Network error/timeout - message might be processing in background, reloading messages')
         setLoading(false)
         // Reload messages after a delay to get the response
         setTimeout(() => loadMessages(), 3000)
