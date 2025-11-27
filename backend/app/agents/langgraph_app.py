@@ -1696,12 +1696,47 @@ Provide a clear, factual response based on the information above. Use neutral, p
                         response_text = str(final_response) if final_response else ""
                     
                     if not response_text or not response_text.strip():
-                        raise ValueError("Gemini returned empty response")
+                        # Gemini returned empty response - likely blocked by safety filters
+                        # Even with BLOCK_NONE, it might not work without allowlist
+                        logger.error(f"❌ Gemini returned empty response after tool execution")
+                        logger.error(f"   This likely means BLOCK_NONE doesn't work without allowlist")
+                        logger.error(f"   Tool results were: {len(tool_results)} tool(s) executed")
+                        
+                        # Try one more time with a simpler, more neutral prompt
+                        logger.info(f"🔄 Retrying with simpler prompt...")
+                        simple_prompt = f"Based on the tool results, provide a brief response to: {request.message}"
+                        try:
+                            retry_response = await ollama.generate_with_context(
+                                prompt=simple_prompt,
+                                session_context=[],  # No context to avoid triggers
+                                retrieved_memory=None,
+                                tools=None,
+                                tools_description=None,
+                                disable_safety_filters=True,
+                            )
+                            if isinstance(retry_response, dict):
+                                response_text = retry_response.get("content", "")
+                            else:
+                                response_text = str(retry_response) if retry_response else ""
+                            
+                            if response_text and response_text.strip():
+                                logger.info(f"✅ Retry successful: {len(response_text)} characters")
+                            else:
+                                raise ValueError("Gemini returned empty response even on retry")
+                        except Exception as retry_error:
+                            logger.error(f"❌ Retry also failed: {retry_error}")
+                            # Last resort: format tool results directly
+                            tool_names = [tr.get('tool', 'unknown') for tr in tool_results]
+                            response_text = f"Ho eseguito {len(tool_results)} tool(s) ({', '.join(tool_names)}), ma non sono riuscito a generare una risposta sintetizzata a causa dei filtri di sicurezza di Gemini. I risultati dei tool sono disponibili ma non posso presentarli in formato testuale."
+                            logger.warning(f"⚠️  Using minimal fallback message")
                     
                     logger.info(f"✅ Successfully generated response from Gemini: {len(response_text)} characters")
                 except Exception as final_error:
                     logger.error(f"❌ Error generating final response after tools: {final_error}", exc_info=True)
-                    raise  # Re-raise to let the error propagate instead of using fallback
+                    # Don't re-raise - provide a minimal informative message instead
+                    tool_names = [tr.get('tool', 'unknown') for tr in tool_results]
+                    response_text = f"Ho eseguito {len(tool_results)} tool(s) ({', '.join(tool_names)}), ma ho riscontrato un errore nella generazione della risposta: {str(final_error)[:100]}"
+                    logger.warning(f"⚠️  Using error message as response")
         else:
             # No tool calls - use the response_text we extracted (or fallback if empty)
             logger.info(f"No tool calls, using direct response. Length: {len(response_text) if response_text else 0}")
