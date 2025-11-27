@@ -1827,13 +1827,35 @@ Rispondi alla domanda dell'utente usando le informazioni trovate. Sii chiaro e c
                                     response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "".join(summary_parts[:2])
                                     logger.info(f"   ✅ Using summary message with Gemini failure indication for empty search results")
                             elif 'get_calendar_events' in [tr.get('tool') for tr in tool_results]:
-                                # For calendar queries, use the summary parts directly (already formatted)
-                                response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "\n\n".join(summary_parts)
-                                logger.info(f"   ✅ Created fallback response for calendar events")
+                                # For calendar queries, check if it's a "no events" case (which is a valid result, not an error)
+                                calendar_result = tool_results[0].get('result', {}) if tool_results else {}
+                                count = calendar_result.get('count', 0)
+                                has_error = 'error' in calendar_result
+                                
+                                if not has_error and count == 0:
+                                    # No events found - this is a valid result, not an error
+                                    # Use a natural response without the error prefix
+                                    response_text = "\n\n".join(summary_parts)
+                                    logger.info(f"   ✅ Created natural response for empty calendar (no error prefix)")
+                                else:
+                                    # There was an error or Gemini failed to synthesize - use error prefix
+                                    response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "\n\n".join(summary_parts)
+                                    logger.info(f"   ✅ Created fallback response for calendar events with error prefix")
                             elif 'get_emails' in [tr.get('tool') for tr in tool_results]:
-                                # For email queries, use the summary parts directly (already formatted)
-                                response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "\n\n".join(summary_parts)
-                                logger.info(f"   ✅ Created fallback response for emails")
+                                # For email queries, check if it's a "no emails" case (which is a valid result, not an error)
+                                email_result = tool_results[0].get('result', {}) if tool_results else {}
+                                count = email_result.get('count', 0)
+                                has_error = 'error' in email_result
+                                
+                                if not has_error and count == 0:
+                                    # No emails found - this is a valid result, not an error
+                                    # Use a natural response without the error prefix
+                                    response_text = "\n\n".join(summary_parts)
+                                    logger.info(f"   ✅ Created natural response for empty emails (no error prefix)")
+                                else:
+                                    # There was an error or Gemini failed to synthesize - use error prefix
+                                    response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "\n\n".join(summary_parts)
+                                    logger.info(f"   ✅ Created fallback response for emails with error prefix")
                             else:
                                 response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
                         else:
