@@ -6,6 +6,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 // Flag to prevent multiple simultaneous refresh attempts
 let isRefreshing = false
 let refreshPromise: Promise<string> | null = null
+let refreshFailed = false // Flag to prevent retry after refresh failure
 
 const api = axios.create({
   baseURL: API_URL,
@@ -143,6 +144,17 @@ api.interceptors.response.use(
     // IMPORTANT: Don't retry if the request is already a refresh token request (to avoid infinite loop)
     const isRefreshRequest = originalRequest.url?.includes('/auth/refresh') || originalRequest.url?.includes('/api/v1/auth/refresh')
     
+    // If refresh already failed, don't try again - just redirect to login
+    if (refreshFailed) {
+      console.log('[API] Refresh already failed, skipping retry and redirecting to login')
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        window.location.href = '/auth/login'
+      }
+      return Promise.reject(error)
+    }
+    
     if (error.response?.status === 401 && !originalRequest._retry && !isRefreshRequest) {
       originalRequest._retry = true
 
@@ -219,7 +231,8 @@ api.interceptors.response.use(
             
             return access_token
           } catch (err) {
-            // On error, clear tokens
+            // On error, mark refresh as failed and clear tokens
+            refreshFailed = true
             if (typeof window !== 'undefined') {
               localStorage.removeItem('access_token')
               localStorage.removeItem('refresh_token')
@@ -264,7 +277,10 @@ api.interceptors.response.use(
           status: refreshError.response?.status,
         })
         
-        // Mark that we've already tried to refresh to prevent infinite loop
+        // Mark that refresh has failed to prevent infinite loop
+        refreshFailed = true
+        isRefreshing = false
+        refreshPromise = null
         originalRequest._retry = true
         
         // Refresh failed, clear tokens and redirect to login
