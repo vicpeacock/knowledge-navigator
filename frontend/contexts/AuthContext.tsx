@@ -30,20 +30,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const storedToken = localStorage.getItem('access_token')
     const storedRefreshToken = localStorage.getItem('refresh_token')
     
-    // Set a timeout to prevent infinite loading
-    const loadingTimeout = setTimeout(() => {
-      console.warn('[AuthContext] Loading timeout reached, setting isLoading to false')
-      setIsLoading(false)
-    }, 10000) // 10 second timeout
+    console.log('[AuthContext] Mounting, checking for token...', {
+      hasToken: !!storedToken,
+      hasRefreshToken: !!storedRefreshToken,
+    })
     
     if (storedToken) {
       setToken(storedToken)
       // Try to get user info
-      checkAuth().finally(() => {
-        clearTimeout(loadingTimeout)
+      checkAuth().catch((error) => {
+        // Ensure isLoading is always set to false, even if checkAuth fails unexpectedly
+        console.error('[AuthContext] checkAuth failed unexpectedly:', error)
+        setIsLoading(false)
       })
     } else {
-      clearTimeout(loadingTimeout)
+      console.log('[AuthContext] No token found, setting isLoading to false immediately')
       setIsLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -53,6 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const storedToken = localStorage.getItem('access_token')
       if (!storedToken) {
+        console.log('[AuthContext] No token found, setting isLoading to false')
         setUser(null)
         setToken(null)
         setIsLoading(false)
@@ -60,26 +62,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       setToken(storedToken)
+      console.log('[AuthContext] Checking auth with token:', storedToken.substring(0, 20) + '...')
+      console.log('[AuthContext] API URL:', process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
       
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Auth check timeout')), 8000)
-      })
-      
-      const response = await Promise.race([
-        authApi.me(),
-        timeoutPromise
-      ]) as any
-      
-      setUser(response.data)
-      setIsLoading(false)
-    } catch (error: any) {
-      // Token invalid or expired - try to refresh
-      console.error('Auth check failed:', error)
-      
-      // If timeout, don't try to refresh
-      if (error.message === 'Auth check timeout') {
-        console.warn('[AuthContext] Auth check timed out, clearing tokens')
+      try {
+        const response = await authApi.me()
+        console.log('[AuthContext] Auth check successful:', response.data)
+        setUser(response.data)
+        setIsLoading(false)
+        return
+      } catch (apiError: any) {
+        // Token invalid or expired - try to refresh
+        console.error('[AuthContext] Auth check failed:', apiError)
+        console.error('[AuthContext] Error details:', {
+          message: apiError.message,
+          response: apiError.response?.data,
+          status: apiError.response?.status,
+          code: apiError.code,
+        })
+        
+        // Try to refresh token if we have a refresh token
+        const storedRefreshToken = localStorage.getItem('refresh_token')
+        if (storedRefreshToken && apiError.response?.status === 401) {
+          try {
+            console.log('[AuthContext] Attempting token refresh...')
+            // Call refresh API directly to avoid circular dependency
+            const refreshResponse = await authApi.refresh({ refresh_token: storedRefreshToken })
+            const { access_token } = refreshResponse.data
+            
+            localStorage.setItem('access_token', access_token)
+            setToken(access_token)
+            
+            // Retry checkAuth after refresh
+            console.log('[AuthContext] Retrying auth check after refresh...')
+            const retryResponse = await authApi.me()
+            console.log('[AuthContext] Auth check successful after refresh:', retryResponse.data)
+            setUser(retryResponse.data)
+            setIsLoading(false)
+            return
+          } catch (refreshError: any) {
+            console.error('[AuthContext] Token refresh failed:', refreshError)
+            console.error('[AuthContext] Refresh error details:', {
+              message: refreshError.message,
+              response: refreshError.response?.data,
+              status: refreshError.response?.status,
+            })
+            // Fall through to clear tokens
+          }
+        }
+        
+        // Clear tokens - don't redirect here, let ProtectedRoute handle it
+        console.log('[AuthContext] Clearing tokens and setting isLoading to false')
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
         setUser(null)
@@ -87,40 +120,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(false)
         return
       }
-      
-      // Try to refresh token if we have a refresh token
-      const storedRefreshToken = localStorage.getItem('refresh_token')
-      if (storedRefreshToken && error.response?.status === 401) {
-        try {
-          // Call refresh API directly to avoid circular dependency
-          const refreshResponse = await authApi.refresh({ refresh_token: storedRefreshToken })
-          const { access_token } = refreshResponse.data
-          
-          localStorage.setItem('access_token', access_token)
-          setToken(access_token)
-          
-          // Retry checkAuth after refresh (with timeout)
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Auth check timeout')), 8000)
-          })
-          
-          const retryResponse = await Promise.race([
-            authApi.me(),
-            timeoutPromise
-          ]) as any
-          
-          setUser(retryResponse.data)
-          setIsLoading(false)
-          return
-        } catch (refreshError: any) {
-          console.error('Token refresh failed:', refreshError)
-          // Fall through to clear tokens
-        }
-      }
-      
-      // Clear tokens and redirect to login
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
+    } catch (error: any) {
+      // Catch any unexpected errors
+      console.error('[AuthContext] Unexpected error in checkAuth:', error)
+      // Always set isLoading to false, even on unexpected errors
       setUser(null)
       setToken(null)
       setIsLoading(false)
