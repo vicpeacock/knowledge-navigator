@@ -3,11 +3,6 @@ import { getCurrentTraceId, trackApiRequest, trackApiResponse } from './tracing'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-// Flag to prevent multiple simultaneous refresh attempts
-let isRefreshing = false
-let refreshPromise: Promise<string> | null = null
-let refreshFailed = false // Flag to prevent retry after refresh failure
-
 const api = axios.create({
   baseURL: API_URL,
   headers: {
@@ -142,39 +137,10 @@ api.interceptors.response.use(
 
     // If 401 and not already retrying
     // IMPORTANT: Don't retry if the request is already a refresh token request (to avoid infinite loop)
-    const isRefreshRequest = originalRequest.url?.includes('/auth/refresh') || originalRequest.url?.includes('/api/v1/auth/refresh')
-    
-    // If refresh already failed, don't try again - just redirect to login
-    if (refreshFailed) {
-      console.log('[API] Refresh already failed, skipping retry and redirecting to login')
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        window.location.href = '/auth/login'
-      }
-      return Promise.reject(error)
-    }
+    const isRefreshRequest = originalRequest.url?.includes('/auth/refresh')
     
     if (error.response?.status === 401 && !originalRequest._retry && !isRefreshRequest) {
       originalRequest._retry = true
-
-      // If already refreshing, wait for the existing refresh to complete
-      if (isRefreshing && refreshPromise) {
-        console.log('[API] Refresh already in progress, waiting...')
-        try {
-          const newToken = await refreshPromise
-          originalRequest.headers['Authorization'] = `Bearer ${newToken}`
-          return api(originalRequest)
-        } catch (refreshError) {
-          // Refresh failed, clear tokens and redirect
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('access_token')
-            localStorage.removeItem('refresh_token')
-            window.location.href = '/auth/login'
-          }
-          return Promise.reject(refreshError)
-        }
-      }
 
       try {
         // Try to refresh token
@@ -194,81 +160,53 @@ api.interceptors.response.use(
           return Promise.reject(error)
         }
 
-        // Set flag to prevent multiple refresh attempts
-        isRefreshing = true
         console.log('[API] Attempting to refresh access token...')
-        
-        // Create refresh promise that other requests can wait for
-        refreshPromise = (async () => {
-          try {
-            const response = await axios.post(`${API_URL}/api/v1/auth/refresh`, {
-              refresh_token: refreshToken
-            }, {
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              timeout: 10000, // 10 second timeout for refresh
-            })
-            
-            if (!response.data || !response.data.access_token) {
-              throw new Error('Invalid refresh token response')
-            }
-            
-            const { access_token, refresh_token } = response.data
-            
-            // Update tokens in localStorage FIRST (synchronously)
-            if (typeof window !== 'undefined') {
-              localStorage.setItem('access_token', access_token)
-              // If backend returns a new refresh_token, update it (token rotation)
-              if (refresh_token) {
-                localStorage.setItem('refresh_token', refresh_token)
-                console.log('[API] ✅ Refresh token rotated and saved to localStorage')
-              } else {
-                console.log('[API] ⚠️  No new refresh_token in response (backward compatibility)')
-              }
-              console.log('[API] ✅ Token saved to localStorage')
-            }
-            
-            return access_token
-          } catch (err) {
-            // On error, mark refresh as failed and clear tokens
-            refreshFailed = true
-            if (typeof window !== 'undefined') {
-              localStorage.removeItem('access_token')
-              localStorage.removeItem('refresh_token')
-            }
-            throw err
-          } finally {
-            isRefreshing = false
-            refreshPromise = null
-          }
-        })()
-        
-        const access_token = await refreshPromise
-        
+        const response = await api.post('/api/v1/auth/refresh', {
+          refresh_token: refreshToken
+        })
+
+        if (!response.data || !response.data.access_token) {
+          console.error('[API] Refresh token response missing access_token:', response.data)
+          throw new Error('Invalid refresh token response')
+        }
+
+        const { access_token, refresh_token } = response.data
         console.log('[API] ✅ Access token refreshed successfully')
         
-        // Update authorization header and retry original request
-        originalRequest.headers['Authorization'] = `Bearer ${access_token}`
-        
-        // Clear the _retry flag to allow future retries if needed
-        delete originalRequest._retry
-        
-        // Also clear any cached config that might have the old token
-        if (originalRequest.headers) {
+          // Update tokens in localStorage FIRST (synchronously)
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('access_token', access_token)
+            // If backend returns a new refresh_token, update it (token rotation)
+            if (refresh_token) {
+              localStorage.setItem('refresh_token', refresh_token)
+              console.log('[API] ✅ Refresh token rotated and saved to localStorage')
+            } else {
+              console.log('[API] ⚠️  No new refresh_token in response (backward compatibility)')
+            }
+            console.log('[API] ✅ Token saved to localStorage')
+          }
+
+          // Update authorization header and retry original request
           originalRequest.headers['Authorization'] = `Bearer ${access_token}`
-        }
-        
-        console.log('[API] Retrying original request with new token...', {
-          url: originalRequest.url,
-          method: originalRequest.method,
-          hasAuthHeader: !!originalRequest.headers['Authorization'],
-          tokenPreview: access_token.substring(0, 20) + '...',
-        })
-        
-        // Metadata will be preserved automatically by request interceptor
-        // But we need to ensure the request interceptor uses the new token
-        return api(originalRequest)
+          
+          // Clear the _retry flag to allow future retries if needed
+          delete originalRequest._retry
+          
+          // Also clear any cached config that might have the old token
+          if (originalRequest.headers) {
+            originalRequest.headers['Authorization'] = `Bearer ${access_token}`
+          }
+          
+          console.log('[API] Retrying original request with new token...', {
+            url: originalRequest.url,
+            method: originalRequest.method,
+            hasAuthHeader: !!originalRequest.headers['Authorization'],
+            tokenPreview: access_token.substring(0, 20) + '...',
+          })
+          
+          // Metadata will be preserved automatically by request interceptor
+          // But we need to ensure the request interceptor uses the new token
+          return api(originalRequest)
       } catch (refreshError: any) {
         console.error('[API] ❌ Token refresh failed:', refreshError)
         console.error('[API] Refresh error details:', {
@@ -277,10 +215,7 @@ api.interceptors.response.use(
           status: refreshError.response?.status,
         })
         
-        // Mark that refresh has failed to prevent infinite loop
-        refreshFailed = true
-        isRefreshing = false
-        refreshPromise = null
+        // Mark that we've already tried to refresh to prevent infinite loop
         originalRequest._retry = true
         
         // Refresh failed, clear tokens and redirect to login
