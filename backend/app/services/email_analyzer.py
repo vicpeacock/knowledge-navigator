@@ -205,6 +205,14 @@ Se non c'è azione richiesta, usa:
     
     def _parse_llm_response(self, response: str) -> Dict[str, Any]:
         """Parse JSON from LLM response, handling various formats"""
+        # Handle case where response might already be a dict
+        if isinstance(response, dict):
+            return response
+        
+        # Ensure response is a string
+        if not isinstance(response, str):
+            response = str(response)
+        
         # Try to extract JSON from response
         response = response.strip()
         
