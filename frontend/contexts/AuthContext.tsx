@@ -30,11 +30,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const storedToken = localStorage.getItem('access_token')
     const storedRefreshToken = localStorage.getItem('refresh_token')
     
+    // Set a timeout to prevent infinite loading
+    const loadingTimeout = setTimeout(() => {
+      console.warn('[AuthContext] Loading timeout reached, setting isLoading to false')
+      setIsLoading(false)
+    }, 10000) // 10 second timeout
+    
     if (storedToken) {
       setToken(storedToken)
       // Try to get user info
-      checkAuth()
+      checkAuth().finally(() => {
+        clearTimeout(loadingTimeout)
+      })
     } else {
+      clearTimeout(loadingTimeout)
       setIsLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -51,12 +60,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       setToken(storedToken)
-      const response = await authApi.me()
+      
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Auth check timeout')), 8000)
+      })
+      
+      const response = await Promise.race([
+        authApi.me(),
+        timeoutPromise
+      ]) as any
+      
       setUser(response.data)
       setIsLoading(false)
     } catch (error: any) {
       // Token invalid or expired - try to refresh
       console.error('Auth check failed:', error)
+      
+      // If timeout, don't try to refresh
+      if (error.message === 'Auth check timeout') {
+        console.warn('[AuthContext] Auth check timed out, clearing tokens')
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        setUser(null)
+        setToken(null)
+        setIsLoading(false)
+        return
+      }
       
       // Try to refresh token if we have a refresh token
       const storedRefreshToken = localStorage.getItem('refresh_token')
@@ -69,12 +99,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem('access_token', access_token)
           setToken(access_token)
           
-          // Retry checkAuth after refresh
-          const retryResponse = await authApi.me()
+          // Retry checkAuth after refresh (with timeout)
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Auth check timeout')), 8000)
+          })
+          
+          const retryResponse = await Promise.race([
+            authApi.me(),
+            timeoutPromise
+          ]) as any
+          
           setUser(retryResponse.data)
           setIsLoading(false)
           return
-        } catch (refreshError) {
+        } catch (refreshError: any) {
           console.error('Token refresh failed:', refreshError)
           // Fall through to clear tokens
         }
