@@ -78,3 +78,7 @@ others/mcp-gateway.pid
 # Test scripts - non committare su GitHub
 backend/tests/scripts/
 backend/scripts/
+# Exception: allow test files for Cursor worktree compatibility (these files were moved to backend/tests/scripts/)
+!backend/scripts/test_daily_session_manager.py
+!backend/scripts/test_daily_session_advanced.py
+!backend/scripts/test_day_transition.py

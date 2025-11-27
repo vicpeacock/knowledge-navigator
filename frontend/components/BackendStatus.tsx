@@ -119,6 +119,15 @@ export function BackendStatus({ children }: BackendStatusProps) {
     // Initial check
     performCheck()
     
+    // Timeout: if still checking after 10 seconds, assume degraded and allow rendering
+    const timeout = setTimeout(() => {
+      if (mounted && statusRef.current === 'checking') {
+        console.warn('[BackendStatus] Health check timeout, allowing rendering with degraded status')
+        setBackendStatus('degraded')
+        statusRef.current = 'degraded'
+      }
+    }, 10000)
+    
     // Retry every 5 seconds if offline or degraded
     const interval = setInterval(() => {
       if (mounted && (statusRef.current === 'offline' || statusRef.current === 'degraded')) {
@@ -131,6 +140,7 @@ export function BackendStatus({ children }: BackendStatusProps) {
     return () => {
       console.log('[BackendStatus] Component unmounting')
       mounted = false
+      clearTimeout(timeout)
       clearInterval(interval)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
