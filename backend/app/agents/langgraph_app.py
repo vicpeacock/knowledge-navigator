@@ -1707,6 +1707,43 @@ Rispondi alla domanda dell'utente usando le informazioni trovate. Sii chiaro e c
                                             logger.info(f"   ✅ Using summary field from customsearch_search")
                                     else:
                                         logger.warning(f"   ⚠️  No 'results' or 'summary' found in customsearch_search result")
+                                # For get_calendar_events, extract events
+                                elif tool_name == 'get_calendar_events':
+                                    events = tool_result.get('events', [])
+                                    count = tool_result.get('count', 0)
+                                    logger.info(f"   Found {count} events in get_calendar_events")
+                                    if events:
+                                        # Format first few events
+                                        event_texts = []
+                                        for i, event in enumerate(events[:5], 1):
+                                            summary = event.get('summary', 'Nessun titolo')
+                                            start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date', 'N/A')
+                                            event_texts.append(f"{i}. {summary} - {start}")
+                                        summary_text = f"Ho trovato {count} evento/i nel calendario:\n" + "\n".join(event_texts)
+                                        summary_parts.append(summary_text)
+                                        logger.info(f"   ✅ Extracted {count} calendar events for fallback")
+                                    elif count == 0:
+                                        summary_parts.append("Non ci sono eventi nel calendario per il periodo richiesto.")
+                                        logger.info(f"   ✅ No events found - using empty calendar message")
+                                # For get_emails, extract emails
+                                elif tool_name == 'get_emails':
+                                    emails = tool_result.get('emails', [])
+                                    count = tool_result.get('count', 0)
+                                    logger.info(f"   Found {count} emails in get_emails")
+                                    if emails:
+                                        # Format first few emails
+                                        email_texts = []
+                                        for i, email in enumerate(emails[:5], 1):
+                                            subject = email.get('subject', 'Nessun oggetto')
+                                            sender = email.get('from', 'N/A')
+                                            date = email.get('date', 'N/A')
+                                            email_texts.append(f"{i}. Da: {sender} - Oggetto: {subject} ({date})")
+                                        summary_text = f"Ho trovato {count} email:\n" + "\n".join(email_texts)
+                                        summary_parts.append(summary_text)
+                                        logger.info(f"   ✅ Extracted {count} emails for fallback")
+                                    elif count == 0:
+                                        summary_parts.append("Non ci sono email nella casella di posta per i criteri richiesti.")
+                                        logger.info(f"   ✅ No emails found - using empty email message")
                                 # For other tools, try to extract useful info
                                 elif 'error' not in tool_result:
                                     # Try to extract a summary from the result
@@ -1753,6 +1790,14 @@ Rispondi alla domanda dell'utente usando le informazioni trovate. Sii chiaro e c
                                     # No results - use the summary message but indicate Gemini failure
                                     response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "".join(summary_parts[:2])
                                     logger.info(f"   ✅ Using summary message with Gemini failure indication for empty search results")
+                            elif 'get_calendar_events' in [tr.get('tool') for tr in tool_results]:
+                                # For calendar queries, use the summary parts directly (already formatted)
+                                response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "\n\n".join(summary_parts)
+                                logger.info(f"   ✅ Created fallback response for calendar events")
+                            elif 'get_emails' in [tr.get('tool') for tr in tool_results]:
+                                # For email queries, use the summary parts directly (already formatted)
+                                response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + "\n\n".join(summary_parts)
+                                logger.info(f"   ✅ Created fallback response for emails")
                             else:
                                 response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
                         else:
