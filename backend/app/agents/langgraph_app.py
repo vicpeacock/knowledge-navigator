@@ -1715,6 +1715,16 @@ Rispondi alla domanda dell'utente usando le informazioni trovate. Sii chiaro e c
                             logger.info(f"   Tool: {tool_name}, result type: {type(tool_result)}")
                             if isinstance(tool_result, dict):
                                 logger.info(f"   Result keys: {list(tool_result.keys())}")
+                                # Log full result structure for debugging
+                                if tool_name == 'get_calendar_events':
+                                    logger.info(f"   🔍 Full calendar result: {json.dumps(tool_result, default=str, ensure_ascii=False)[:500]}")
+                                    logger.info(f"   🔍 Has 'error' key: {'error' in tool_result}")
+                                    logger.info(f"   🔍 Has 'success' key: {'success' in tool_result}")
+                                    logger.info(f"   🔍 Has 'count' key: {'count' in tool_result}")
+                                    if 'error' in tool_result:
+                                        logger.info(f"   🔍 Error value: {tool_result.get('error', 'N/A')[:200]}")
+                                    if 'count' in tool_result:
+                                        logger.info(f"   🔍 Count value: {tool_result.get('count', 'N/A')}")
                                 # For customsearch_search, extract search results
                                 if tool_name == 'customsearch_search':
                                     # Check for results in the result dict
