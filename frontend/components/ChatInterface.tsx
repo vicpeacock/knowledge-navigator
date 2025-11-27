@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { sessionsApi } from '@/lib/api'
 import { Message, ChatResponse } from '@/types'
 // FileUpload, FileManager, MemoryViewer, ToolsPreferences moved to SessionDetails
@@ -17,6 +18,7 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ sessionId, readOnly = false }: ChatInterfaceProps) {
+  const router = useRouter()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -28,6 +30,8 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
   const [initialLoad, setInitialLoad] = useState(true)
   const { addStatusMessage } = useStatus()
   const { ingestBatch } = useAgentActivity()
+  const isMountedRef = useRef(true)
+  const pendingMessageTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const [dayTransitionDialog, setDayTransitionDialog] = useState<{
     isOpen: boolean
     newSessionId: string
@@ -59,6 +63,9 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
 
   // Load messages when component mounts or sessionId changes
   useEffect(() => {
+    // Reset mounted flag when session changes
+    isMountedRef.current = true
+    
     if (!sessionId) {
       setMessages([])
       setLoadingMessages(false)
@@ -90,8 +97,142 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
       }
     }
     
-    loadMessagesDirect()
-  }, [sessionId]) // Only depend on sessionId
+    loadMessagesDirect().then(() => {
+      // After messages are loaded, check if there's a pending message for this session (from day transition)
+      const pendingMessage = sessionStorage.getItem(`pending_message_${sessionId}`)
+      console.log(`[ChatInterface] Checking for pending message for session ${sessionId}:`, pendingMessage ? 'FOUND' : 'NOT FOUND')
+      
+      if (pendingMessage && isMountedRef.current) {
+        console.log(`[ChatInterface] Found pending message, will send after delay:`, pendingMessage.substring(0, 50))
+        // Remove from storage immediately to avoid duplicate sends
+        sessionStorage.removeItem(`pending_message_${sessionId}`)
+        
+        // Clear any existing timeout
+        if (pendingMessageTimeoutRef.current) {
+          clearTimeout(pendingMessageTimeoutRef.current)
+        }
+        
+        // Wait a bit more to ensure everything is ready, then send the pending message
+        pendingMessageTimeoutRef.current = setTimeout(async () => {
+          // Double-check component is still mounted and sessionId hasn't changed
+          if (!isMountedRef.current) {
+            console.log('[ChatInterface] Component unmounted, skipping pending message')
+            return
+          }
+          
+          if (!sessionId || !pendingMessage.trim()) {
+            console.log('[ChatInterface] Invalid sessionId or message, skipping:', { sessionId, messageLength: pendingMessage?.length })
+            return
+          }
+          
+          const currentSessionId = sessionId // Capture current sessionId
+          console.log(`[ChatInterface] Processing pending message for session ${currentSessionId}`)
+          
+          setInput('')
+          
+          // Add user message to local state immediately for better UX
+          const userMessage: Message = {
+            id: '',
+            session_id: currentSessionId,
+            role: 'user',
+            content: pendingMessage,
+            timestamp: new Date().toISOString(),
+            metadata: {},
+          }
+          setMessages((prev) => [...prev, userMessage])
+          
+          // Verify session exists before sending
+          try {
+            console.log(`[ChatInterface] Verifying session ${currentSessionId} exists...`)
+            await sessionsApi.get(currentSessionId)
+            console.log(`[ChatInterface] Session ${currentSessionId} verified`)
+          } catch (error: any) {
+            console.error(`[ChatInterface] Session ${currentSessionId} does not exist yet:`, error)
+            addStatusMessage('error', 'La sessione non è ancora pronta. Riprova tra un momento.')
+            // Remove the user message if session doesn't exist
+            setMessages((prev) => prev.filter(m => m.content !== pendingMessage || m.role !== 'user'))
+            return
+          }
+          
+          // Send message to new session
+          setLoading(true)
+          try {
+            console.log(`[ChatInterface] ===== SENDING PENDING MESSAGE =====`)
+            console.log(`[ChatInterface] Session ID: ${currentSessionId}`)
+            console.log(`[ChatInterface] Message:`, pendingMessage.substring(0, 50))
+            console.log(`[ChatInterface] API URL:`, process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
+            console.log(`[ChatInterface] Component mounted:`, isMountedRef.current)
+            
+            const response = await sessionsApi.chat(currentSessionId, pendingMessage, false)
+            
+            console.log(`[ChatInterface] ===== RESPONSE RECEIVED =====`)
+            console.log(`[ChatInterface] Session ID: ${currentSessionId}`)
+            console.log(`[ChatInterface] Response status:`, response.status)
+            console.log(`[ChatInterface] Response has data:`, !!response.data)
+            console.log(`[ChatInterface] Response has response text:`, !!response.data?.response)
+            
+            // Handle response normally
+            if (response.data?.response) {
+              const assistantMessage: Message = {
+                id: '',
+                session_id: response.data.session_id || currentSessionId,
+                role: 'assistant',
+                content: response.data.response,
+                timestamp: new Date().toISOString(),
+                metadata: {},
+              }
+              setMessages((prev) => [...prev, assistantMessage])
+            }
+            if (response.data?.agent_activity) {
+              ingestBatch(response.data.agent_activity)
+            }
+          } catch (error: any) {
+            console.error('Error sending pending message to new session:', error)
+            console.error('Error details:', {
+              message: error.message,
+              code: error.code,
+              response: error.response?.data,
+              status: error.response?.status,
+              request: error.request,
+            })
+            
+            // Handle different types of errors
+            let errorMessage = 'Errore di rete. Verifica la connessione.'
+            
+            if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+              errorMessage = 'Timeout: la richiesta ha impiegato troppo tempo. Riprova.'
+            } else if (error.message === 'Network Error' || !error.response) {
+              errorMessage = 'Errore di rete: impossibile raggiungere il server. Verifica la connessione.'
+            } else if (error.response?.data?.detail) {
+              errorMessage = error.response.data.detail
+            } else if (error.response?.status === 404) {
+              errorMessage = 'Sessione non trovata. La sessione potrebbe non essere ancora stata creata.'
+            } else if (error.response?.status === 401) {
+              errorMessage = 'Non autorizzato. Effettua nuovamente il login.'
+            } else if (error.response?.status >= 500) {
+              errorMessage = 'Errore del server. Riprova più tardi.'
+            }
+            
+            addStatusMessage('error', `Errore: ${errorMessage}`)
+            
+            // Remove the user message if sending failed
+            setMessages((prev) => prev.filter(m => m.content !== pendingMessage || m.role !== 'user'))
+          } finally {
+            setLoading(false)
+          }
+        }, 1500) // Wait 1.5 seconds for everything to be ready
+      }
+    })
+    
+    // Cleanup function
+    return () => {
+      isMountedRef.current = false
+      if (pendingMessageTimeoutRef.current) {
+        clearTimeout(pendingMessageTimeoutRef.current)
+        pendingMessageTimeoutRef.current = null
+      }
+    }
+  }, [sessionId, ingestBatch, addStatusMessage]) // Only depend on sessionId
 
   // Scroll to bottom when messages are loaded or updated (but only if user is at bottom)
   useEffect(() => {
@@ -564,50 +705,21 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
   }
 
   const handleDayTransitionConfirm = async () => {
-    // User confirmed day transition - resend the message with proceed_with_new_day flag
+    // User confirmed day transition - send the message to the NEW session
     const messageToResend = dayTransitionDialog.pendingMessage
-    if (messageToResend && messageToResend.trim()) {
+    const newSessionId = dayTransitionDialog.newSessionId
+    
+    if (messageToResend && messageToResend.trim() && newSessionId) {
       setInput('')
-      setDayTransitionDialog({ isOpen: false, newSessionId: '' })
+      setDayTransitionDialog({ isOpen: false, newSessionId: '', pendingMessage: undefined })
       
-      // Add user message to local state immediately for better UX
-      const userMessage: Message = {
-        id: '',
-        session_id: dayTransitionDialog.newSessionId, // Use new session ID
-        role: 'user',
-        content: messageToResend,
-        timestamp: new Date().toISOString(),
-        metadata: {},
-      }
-      setMessages((prev) => [...prev, userMessage])
+      // Store message in sessionStorage to send it after navigation
+      sessionStorage.setItem(`pending_message_${newSessionId}`, messageToResend)
       
-      // Resend with proceed_with_new_day flag
-      setLoading(true)
-      try {
-        const response = await sessionsApi.chat(sessionId, messageToResend, true)
-        // Handle response normally
-        if (response.data?.response) {
-          const assistantMessage: Message = {
-            id: '',
-            session_id: response.data.session_id,
-            role: 'assistant',
-            content: response.data.response,
-            timestamp: new Date().toISOString(),
-            metadata: {},
-          }
-          setMessages((prev) => [...prev, assistantMessage])
-        }
-        if (response.data?.agent_activity) {
-          ingestBatch(response.data.agent_activity)
-        }
-      } catch (error: any) {
-        console.error('Error resending message after day transition:', error)
-        addStatusMessage('error', `Errore: ${error.response?.data?.detail || error.message}`)
-      } finally {
-        setLoading(false)
-      }
+      // Navigate to new session - the message will be sent when component mounts
+      router.push(`/sessions/${newSessionId}`)
     } else {
-      setDayTransitionDialog({ isOpen: false, newSessionId: '' })
+      setDayTransitionDialog({ isOpen: false, newSessionId: '', pendingMessage: undefined })
     }
   }
 

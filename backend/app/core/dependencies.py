@@ -60,7 +60,10 @@ def init_clients():
                 _ollama_client = OllamaClient()
         except Exception as exc:
             logger.error("Failed to initialize main LLM client: %s", exc, exc_info=True)
-            raise
+            # Don't raise - allow app to start even if LLM client fails
+            # The client will be initialized lazily when needed
+            logger.warning("⚠️  Main LLM client initialization failed. App will start but LLM features may not work.")
+            _ollama_client = None
 
     if _planner_client is None:
         try:
@@ -93,7 +96,10 @@ def init_clients():
                     )
         except Exception as exc:
             logger.error("Failed to initialize planner LLM client: %s", exc, exc_info=True)
-            raise
+            # Don't raise - allow app to start even if planner client fails
+            # The client will be initialized lazily when needed
+            logger.warning("⚠️  Planner LLM client initialization failed. App will start but planning features may not work.")
+            _planner_client = None
 
     if _mcp_client is None:
         try:
@@ -107,7 +113,10 @@ def init_clients():
             _memory_manager = MemoryManager()
         except Exception as exc:
             logger.error("Failed to initialize memory manager: %s", exc, exc_info=True)
-            raise
+            # Don't raise - allow app to start even if memory manager fails
+            # The memory manager will be initialized lazily when needed
+            logger.warning("⚠️  Memory manager initialization failed. App will start but memory features may not work.")
+            _memory_manager = None
 
     if _agent_activity_stream is None:
         _agent_activity_stream = AgentActivityStream()
@@ -198,7 +207,16 @@ def get_ollama_client():
     
     Returns OllamaClient or GeminiClient depending on llm_provider setting.
     Both implement the same interface, so the return type is compatible.
+    
+    If client is None, tries to initialize it lazily.
     """
+    global _ollama_client
+    if _ollama_client is None:
+        # Lazy initialization if startup failed
+        try:
+            init_clients()
+        except Exception as e:
+            logger.warning(f"Failed to lazily initialize LLM client: {e}")
     return _ollama_client
 
 
@@ -208,7 +226,16 @@ def get_planner_client():
     
     Returns OllamaClient or GeminiClient depending on llm_provider setting.
     Both implement the same interface, so the return type is compatible.
+    
+    If client is None, tries to initialize it lazily.
     """
+    global _planner_client
+    if _planner_client is None:
+        # Lazy initialization if startup failed
+        try:
+            init_clients()
+        except Exception as e:
+            logger.warning(f"Failed to lazily initialize planner LLM client: {e}")
     return _planner_client
 
 
@@ -241,6 +268,20 @@ def get_mcp_client() -> MCPClient:
 
 
 def get_memory_manager() -> MemoryManager:
+    """
+    Get memory manager instance.
+    
+    If memory manager is None, tries to initialize it lazily.
+    """
+    global _memory_manager
+    if _memory_manager is None:
+        # Lazy initialization if startup failed
+        try:
+            _memory_manager = MemoryManager()
+        except Exception as e:
+            logger.warning(f"Failed to lazily initialize memory manager: {e}")
+            # Return a dummy object that will fail gracefully when used
+            raise RuntimeError("Memory manager is not available. ChromaDB connection failed.")
     return _memory_manager
 
 
