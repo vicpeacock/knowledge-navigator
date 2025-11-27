@@ -242,8 +242,13 @@ class GeminiClient:
                 logger.error(f"Error calling Gemini API: {e}", exc_info=True)
                 raise
     
-    async def _generate_async(self, chat, message: str, generation_config: Optional[Dict[str, Any]] = None, safety_settings: Optional[List[Dict[str, Any]]] = None):
-        """Helper to generate response asynchronously"""
+    async def _generate_async(self, chat, message: str, generation_config: Optional[Dict[str, Any]] = None, safety_settings: Optional[List[Any]] = None):
+        """
+        Helper to generate response asynchronously.
+        
+        Note: safety_settings should typically be set in model_config when creating GenerativeModel.
+        They are only passed here if they were NOT set in model_config (rare case).
+        """
         import asyncio
         import logging
         logger = logging.getLogger(__name__)
@@ -254,25 +259,23 @@ class GeminiClient:
             if generation_config:
                 kwargs["generation_config"] = generation_config
             if safety_settings:
+                # Only pass safety_settings if they were not already set in model_config
                 kwargs["safety_settings"] = safety_settings
-                # Log what we're passing to verify format
-                logger.info(f"🔍 _generate_async: Passing safety_settings to send_message")
-                logger.info(f"   Safety settings type: {type(safety_settings)}")
-                logger.info(f"   Safety settings length: {len(safety_settings) if safety_settings else 0}")
+                logger.debug(f"🔍 _generate_async: Passing safety_settings to send_message (not in model_config)")
+                # Log format verification
                 if safety_settings and len(safety_settings) > 0:
                     first_setting = safety_settings[0]
-                    logger.info(f"   First setting type: {type(first_setting)}")
-                    logger.info(f"   First setting keys: {list(first_setting.keys()) if isinstance(first_setting, dict) else 'N/A'}")
                     if isinstance(first_setting, dict):
                         category = first_setting.get("category")
                         threshold = first_setting.get("threshold")
-                        logger.info(f"   Category type: {type(category)}, value: {category}")
-                        logger.info(f"   Threshold type: {type(threshold)}, value: {threshold}")
+                        logger.debug(f"   Safety settings format: dict (category={category}, threshold={threshold})")
+                    else:
+                        logger.debug(f"   Safety settings format: {type(first_setting)}")
             if kwargs:
-                logger.info(f"🔍 _generate_async: Calling send_message with {len(kwargs)} kwargs: {list(kwargs.keys())}")
+                logger.debug(f"🔍 _generate_async: Calling send_message with {len(kwargs)} kwargs: {list(kwargs.keys())}")
                 return chat.send_message(message, **kwargs)
             else:
-                logger.info(f"🔍 _generate_async: Calling send_message without kwargs")
+                logger.debug(f"🔍 _generate_async: Calling send_message without kwargs (safety_settings should be in model)")
                 return chat.send_message(message)
         return await loop.run_in_executor(None, _send)
     
@@ -311,26 +314,16 @@ class GeminiClient:
         
         # Build system prompt with memory if available
         # System prompt for Gemini - optimized to reduce safety filter triggers
-        base_system_prompt = """You are Knowledge Navigator, a personal AI assistant that helps users manage information, knowledge, and daily activities.
+        # Use neutral, factual language to avoid triggering safety filters
+        # Keep it simple and direct to minimize safety filter triggers
+        base_system_prompt = """You are a helpful assistant that uses tools to provide accurate information.
 
-You have access to multi-level memory (short/medium/long-term), integrations (Gmail, Calendar, web search), and tools to perform actions.
+Available tools:
+- get_emails: Read emails
+- get_calendar_events: Check calendar
+- customsearch_search: Search the web
 
-CRITICAL - Tool Usage Rules:
-1. EMAIL: When the user asks to read, view, check emails, or questions like "are there unread emails?", "new emails", "read emails" → ALWAYS use get_emails (NOT customsearch_search)
-2. CALENDAR: When the user asks about events, appointments, meetings, commitments → use get_calendar_events (NOT customsearch_search)
-3. WEB SEARCH: Use customsearch_search for general information that is NOT email/calendar related (e.g., "search for information about X", "news about Y", "weather in Bussigny", "information about the band Swisspulse")
-4. NEVER use customsearch_search for questions about the user's email or calendar
-5. CRITICAL: When the user asks to search for information on the web, you MUST ALWAYS call customsearch_search - do not say the API key is not configured without first trying to call the tool!
-
-Examples:
-- "Are there unread emails?" → use get_emails with query='is:unread'
-- "What do I have in my calendar tomorrow?" → use get_calendar_events
-- "Search for information about Python" → use customsearch_search
-- "Information about the band Swisspulse" → use customsearch_search
-- "Weather in Bussigny" → use customsearch_search
-- "Today's emails" → use get_emails (NOT customsearch_search)
-
-Respond naturally and directly based on the data obtained from tools. Use clear, factual language and avoid unnecessary complexity."""
+When the user asks a question, use the appropriate tool to find the answer. Respond with clear, factual information."""
         
         enhanced_system = system_prompt or base_system_prompt
         
@@ -461,91 +454,131 @@ Respond naturally and directly based on the data obtained from tools. Use clear,
             import google.generativeai as genai
             import google.generativeai.types as genai_types
             logger.info(f"🔍 Successfully imported genai and genai_types")
-            if disable_safety_filters:
-                logger.info(f"🔍 Configuring BLOCK_NONE safety settings...")
-                logger.warning(f"   ⚠️  NOTE: BLOCK_NONE requires allowlist approval from Google. If not approved, this may not work.")
-                # Disable all safety filters for tool result synthesis
-                # This is safe because tool results come from trusted sources (our own tools)
-                # Try multiple formats to find what works
-                safety_settings = None
-                
-                # Method 1: Try using genai.types.SafetySetting objects (newer API)
-                try:
-                    if hasattr(genai_types, 'SafetySetting'):
-                        safety_settings = [
-                            genai_types.SafetySetting(
-                                category=genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                                threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
-                            ),
-                            genai_types.SafetySetting(
-                                category=genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                                threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
-                            ),
-                            genai_types.SafetySetting(
-                                category=genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                                threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
-                            ),
-                            genai_types.SafetySetting(
-                                category=genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                                threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
-                            ),
-                        ]
-                        logger.info(f"🔓 Using SafetySetting objects (BLOCK_NONE)")
-                    else:
-                        raise AttributeError("SafetySetting not available")
-                except (AttributeError, TypeError) as e:
-                    logger.warning(f"   ⚠️  SafetySetting objects not available: {e}, trying dict format")
-                    # Method 2: Fallback to dictionary format
-                    try:
-                        safety_settings = [
-                            {
-                                "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                                "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                            },
-                            {
-                                "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                                "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                            },
-                            {
-                                "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                                "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                            },
-                            {
-                                "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                                "threshold": genai_types.HarmBlockThreshold.BLOCK_NONE,
-                            },
-                        ]
-                        logger.info(f"🔓 Using dict format (BLOCK_NONE)")
-                    except Exception as e2:
-                        logger.error(f"   ❌ Failed to create safety settings: {e2}")
-                        safety_settings = None
-                
-                if safety_settings:
-                    logger.info(f"🔓 Safety settings configured: {len(safety_settings)} categories with BLOCK_NONE")
-                else:
-                    logger.error(f"   ❌ Could not configure BLOCK_NONE safety settings, will use default (may cause blocks)")
+            
+            # IMPORTANT: Use dict format with enum values for safety_settings
+            # The google.generativeai SDK accepts dict format: {"category": HarmCategory, "threshold": HarmBlockThreshold}
+            # SafetySetting class doesn't exist in google.generativeai.types, so dict format is correct
+            # Verified: dict format works correctly with GenerativeModel and send_message
+            HarmCategory = genai_types.HarmCategory
+            HarmBlockThreshold = genai_types.HarmBlockThreshold
+            
+            # Check if SafetySetting class is available (it's not, but we check for completeness)
+            if not hasattr(genai_types, 'SafetySetting'):
+                # SafetySetting doesn't exist - use dict format (which is correct)
+                use_objects = False
+                logger.debug("SafetySetting class not available, using dict format (correct)")
             else:
-                logger.info(f"🔍 Configuring BLOCK_ONLY_HIGH safety settings...")
-                # Block only the most harmful content (BLOCK_ONLY_HIGH) for normal interactions
-                safety_settings = [
-                    {
-                        "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                    },
-                    {
-                        "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                    },
-                    {
-                        "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                    },
-                    {
-                        "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                        "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                    },
-                ]
-                logger.debug("✅ Configured Gemini safety settings to BLOCK_ONLY_HIGH")
+                # If SafetySetting exists in future versions, use it
+                SafetySetting = genai_types.SafetySetting
+                use_objects = True
+                logger.info(f"✅ Using SafetySetting objects (if available)")
+            
+            if disable_safety_filters:
+                logger.info(f"🔍 Configuring BLOCK_ONLY_HIGH safety settings for tool result synthesis...")
+                logger.info(f"   Using BLOCK_ONLY_HIGH (most permissive without allowlist)")
+                # Use BLOCK_ONLY_HIGH for tool result synthesis (most permissive without allowlist)
+                # BLOCK_ONLY_HIGH blocks only HIGH probability harmful content
+                try:
+                    if use_objects:
+                        safety_settings = [
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                threshold=HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            ),
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                threshold=HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            ),
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                                threshold=HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            ),
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                                threshold=HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            ),
+                        ]
+                        logger.info(f"🔓 Safety settings configured: {len(safety_settings)} categories with BLOCK_ONLY_HIGH (using SafetySetting objects)")
+                    else:
+                        # Fallback to dict format if SafetySetting not available
+                        safety_settings = [
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            },
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            },
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                                "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            },
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                                "threshold": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            },
+                        ]
+                        logger.warning(f"⚠️  Using dict format (SafetySetting objects not available)")
+                except Exception as e:
+                    logger.error(f"   ❌ Failed to create safety settings: {e}", exc_info=True)
+                    safety_settings = None
+                    logger.warning(f"   Will use default safety settings (may cause blocks)")
+            else:
+                # Use BLOCK_ONLY_HIGH when tools are available (most permissive without allowlist)
+                # BLOCK_ONLY_HIGH blocks only HIGH probability harmful content, allowing tool calls
+                # When no tools, also use BLOCK_ONLY_HIGH for consistency
+                threshold_to_use = HarmBlockThreshold.BLOCK_ONLY_HIGH
+                threshold_name = "BLOCK_ONLY_HIGH"
+                logger.info(f"🔍 Configuring {threshold_name} safety settings...")
+                if gemini_tools:
+                    logger.info(f"   Using BLOCK_ONLY_HIGH to allow tool calling (most permissive without allowlist)")
+                try:
+                    if use_objects:
+                        safety_settings = [
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                threshold=threshold_to_use,
+                            ),
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                threshold=threshold_to_use,
+                            ),
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                                threshold=threshold_to_use,
+                            ),
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                                threshold=threshold_to_use,
+                            ),
+                        ]
+                        logger.info(f"✅ Configured Gemini safety settings to {threshold_name} (using SafetySetting objects)")
+                    else:
+                        # Fallback to dict format if SafetySetting not available
+                        safety_settings = [
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                "threshold": threshold_to_use,
+                            },
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                "threshold": threshold_to_use,
+                            },
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                                "threshold": threshold_to_use,
+                            },
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                                "threshold": threshold_to_use,
+                            },
+                        ]
+                        logger.warning(f"⚠️  Using dict format (SafetySetting objects not available)")
+                except Exception as e:
+                    logger.error(f"❌ Failed to create safety settings: {e}", exc_info=True)
+                    safety_settings = None
+                    logger.warning(f"   Will use default safety settings (may cause blocks)")
         except Exception as e:
             logger.error(f"❌ Could not configure safety settings: {e}", exc_info=True)
             logger.warning(f"   Using default safety settings (may cause blocks)")
@@ -586,18 +619,28 @@ Respond naturally and directly based on the data obtained from tools. Use clear,
                 
                 try:
                     if model_config:
-                        # Add safety_settings to model_config if available
+                        # CRITICAL: Add safety_settings to model_config so they are applied to the model instance
+                        # Once set in model_config, they will be used automatically in all chat.send_message() calls
+                        # No need to pass them again to send_message
                         if safety_settings:
                             model_config["safety_settings"] = safety_settings
                             if disable_safety_filters:
-                                logger.info(f"🔓 Safety filters DISABLED (BLOCK_NONE) for this request")
+                                logger.info(f"🔓 Safety filters set to BLOCK_ONLY_HIGH for tool result synthesis (in model_config)")
                             else:
-                                logger.debug(f"✅ Safety filters enabled (BLOCK_ONLY_HIGH) for this request")
+                                threshold_name = "BLOCK_ONLY_HIGH"
+                                logger.info(f"✅ Safety filters enabled ({threshold_name}) for this request (in model_config)")
+                                # Log the safety_settings format (dict format is correct for google.generativeai SDK)
+                                if safety_settings and len(safety_settings) > 0:
+                                    first_setting = safety_settings[0]
+                                    if isinstance(first_setting, dict):
+                                        logger.debug(f"   Safety settings format: dict (category={first_setting.get('category')}, threshold={first_setting.get('threshold')})")
+                                    else:
+                                        logger.debug(f"   Safety settings format: {type(first_setting)}")
                         model = genai.GenerativeModel(self.model_name, **model_config)
                         logger.info(f"✅ Created Gemini model with {len(gemini_tools) if gemini_tools else 0} tools, safety_settings={'configured' if safety_settings else 'default'}")
                     else:
                         model = self._get_model()
-                        # If no model_config, we'll pass safety_settings to send_message
+                        # If no model_config, we'll pass safety_settings to send_message in _generate_async
                     
                     # Start chat with history
                     chat = model.start_chat(history=history)
@@ -615,15 +658,28 @@ Respond naturally and directly based on the data obtained from tools. Use clear,
                 # Send last message
                 last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
                 
-                # Pass generation_config and safety_settings to _generate_async
-                # safety_settings should be passed to send_message if not already in model_config
+                # IMPORTANT: If safety_settings are already in model_config, they are applied to the model instance
+                # and will be used automatically in all chat.send_message() calls. No need to pass them again.
+                # Only pass safety_settings to _generate_async if they were NOT added to model_config
                 safety_settings_to_pass = None
                 if safety_settings and not (model_config and "safety_settings" in model_config):
+                    # Safety settings were not added to model_config, so we need to pass them to send_message
                     safety_settings_to_pass = safety_settings
                     if disable_safety_filters:
-                        logger.info(f"🔓 Passing safety_settings (BLOCK_NONE) to send_message")
+                        logger.info(f"🔓 Passing safety_settings (BLOCK_ONLY_HIGH) to send_message (not in model_config)")
                     else:
-                        logger.debug(f"✅ Passing safety_settings (BLOCK_ONLY_HIGH) to send_message")
+                        threshold_name = "BLOCK_ONLY_HIGH"
+                        logger.info(f"✅ Passing safety_settings ({threshold_name}) to send_message (not in model_config)")
+                        # Log the safety_settings format
+                        if safety_settings_to_pass and len(safety_settings_to_pass) > 0:
+                            first_setting = safety_settings_to_pass[0]
+                            if hasattr(first_setting, 'category'):
+                                logger.info(f"   Safety settings format: SafetySetting objects (category={first_setting.category}, threshold={first_setting.threshold})")
+                            elif isinstance(first_setting, dict):
+                                logger.info(f"   Safety settings format: dict (category={first_setting.get('category')}, threshold={first_setting.get('threshold')})")
+                else:
+                    if safety_settings:
+                        logger.debug(f"✅ Safety settings already in model_config, will be used automatically by chat.send_message()")
                 
                 response = await self._generate_async(chat, last_msg, generation_config=generation_config, safety_settings=safety_settings_to_pass)
                 
@@ -654,7 +710,17 @@ Respond naturally and directly based on the data obtained from tools. Use clear,
                 # Handle safety blocks ONLY if there are no function calls
                 # If there are function calls, process them normally (safety block might be only on text response)
                 if finish_reason == 1 and not has_function_calls:  # SAFETY and no function calls
-                    logger.warning(f"Gemini response blocked by safety filters (finish_reason=1) in generate_with_tools, no function calls available")
+                    logger.warning(f"Gemini response blocked by safety filters (finish_reason=1) in generate_with_context, no function calls available")
+                    # IMPORTANT: If tools were available but Gemini was blocked before calling them,
+                    # this might be a false positive. Log this case for debugging.
+                    if gemini_tools and len(gemini_tools) > 0:
+                        logger.warning(f"⚠️  Gemini was blocked BEFORE calling tools even though {len(gemini_tools)} tools were available!")
+                        logger.warning(f"   This suggests the prompt or context triggered safety filters before tool selection.")
+                        tool_names = [t.get('function_declarations', [{}])[0].get('name', 'unknown') for t in gemini_tools[:10]]
+                        logger.warning(f"   Available tools: {tool_names}")
+                        # Log the prompt that triggered the block (first 200 chars)
+                        logger.warning(f"   Prompt preview: {last_msg[:200] if 'last_msg' in locals() else 'N/A'}")
+                        logger.warning(f"   System instruction length: {len(system_content) if system_content else 0}")
                     # Return empty string instead of generic error message
                     # This allows the caller to extract results from tool execution
                     return {

@@ -1666,35 +1666,60 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             if tool_results:
                 logger.info(f"Generating final response after {len(tool_results)} tool execution(s)")
                 try:
-                    # Format tool results with simple, clean format to avoid safety filter triggers
-                    formatted_results = _format_tool_results_for_llm(tool_results, simple_format=True)
+                    # Check if we can use tool results directly without synthesis
+                    # Some tools (like customsearch_search with no results) already provide clear messages
+                    can_use_direct = False
+                    direct_response = None
                     
-                    # Create a simple, direct prompt for synthesizing results
-                    # Avoid complex instructions that might trigger safety filters
-                    synthesis_prompt = f"""Domanda dell'utente: {request.message}
+                    # Check if all tools returned clear summary messages that don't need synthesis
+                    if len(tool_results) == 1:
+                        tr = tool_results[0]
+                        tool_name = tr.get('tool', '')
+                        tool_result = tr.get('result', {})
+                        
+                        # For customsearch_search with no results, use the summary directly
+                        if tool_name == 'customsearch_search' and isinstance(tool_result, dict):
+                            results = tool_result.get('results', [])
+                            summary = tool_result.get('summary', '')
+                            # If no results and we have a clear summary, use it directly
+                            if not results and summary and "Non ho trovato risultati" in summary:
+                                can_use_direct = True
+                                direct_response = summary
+                                logger.info(f"✅ Using direct response from {tool_name} (no results, clear summary available)")
+                    
+                    if can_use_direct and direct_response:
+                        response_text = direct_response
+                    else:
+                        # Format tool results with simple, clean format to avoid safety filter triggers
+                        formatted_results = _format_tool_results_for_llm(tool_results, simple_format=True)
+                        
+                        # Create a simple, direct prompt for synthesizing results
+                        # Avoid complex instructions that might trigger safety filters
+                        # Use a more neutral, factual tone to avoid safety filter triggers
+                        synthesis_prompt = f"""L'utente ha chiesto: {request.message}
 
-Risultati trovati:
+Informazioni disponibili:
 {formatted_results}
 
-Rispondi alla domanda dell'utente usando le informazioni trovate. Sii chiaro e conciso."""
-                    
-                    # CRITICAL: Disable safety filters for tool result synthesis
-                    # Tool results come from trusted sources (our own tools), so it's safe to disable filters
-                    # This prevents Gemini from blocking legitimate responses about calendar events, emails, search results, etc.
-                    final_response = await ollama.generate_with_context(
-                        prompt=synthesis_prompt,
-                        session_context=session_context,
-                        retrieved_memory=retrieved_memory if retrieved_memory else None,
-                        tools=None,  # No tools needed for final response
-                        tools_description=None,
-                        disable_safety_filters=True,  # Disable safety filters - tool results are from trusted sources
-                    )
-                    
-                    # Extract response text
-                    if isinstance(final_response, dict):
-                        response_text = final_response.get("content", "")
-                    else:
-                        response_text = str(final_response) if final_response else ""
+Fornisci una risposta chiara e utile basata sulle informazioni sopra. Se non ci sono informazioni rilevanti, indica che non sono state trovate informazioni sufficienti."""
+                        
+                        # CRITICAL: Disable safety filters for tool result synthesis
+                        # Tool results come from trusted sources (our own tools), so it's safe to disable filters
+                        # This prevents Gemini from blocking legitimate responses about calendar events, emails, search results, etc.
+                        final_response = await ollama.generate_with_context(
+                            prompt=synthesis_prompt,
+                            session_context=session_context,
+                            retrieved_memory=retrieved_memory if retrieved_memory else None,
+                            tools=None,  # No tools needed for final response
+                            tools_description=None,
+                            disable_safety_filters=True,  # Disable safety filters - tool results are from trusted sources
+                        )
+                        
+                        # Extract response text
+                        if isinstance(final_response, dict):
+                            response_text = final_response.get("content", "")
+                        else:
+                            response_text = str(final_response) if final_response else ""
                     
                     # Check if response is empty or is the generic safety block message
                     is_safety_block = response_text and "bloccata dai filtri di sicurezza" in response_text
