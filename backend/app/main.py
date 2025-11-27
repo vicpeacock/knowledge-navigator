@@ -139,9 +139,17 @@ async def lifespan(app: FastAPI):
     from app.db.database import get_db
     from app.core.tenant_context import initialize_default_tenant
     try:
-        async for db in get_db():
-            await initialize_default_tenant(db)
-            break
+        # Add timeout to prevent infinite blocking (30 seconds max)
+        async def init_tenant_with_timeout():
+            async for db in get_db():
+                await initialize_default_tenant(db)
+                break
+        
+        await asyncio.wait_for(init_tenant_with_timeout(), timeout=30.0)
+        logging.info("✅ Default tenant initialized")
+    except asyncio.TimeoutError:
+        logging.warning("⚠️  Tenant initialization timed out after 30 seconds")
+        logging.warning("⚠️  Multi-tenant features may not work correctly.")
     except Exception as e:
         logging.warning(f"⚠️  Failed to initialize default tenant: {e}")
         logging.warning("⚠️  Multi-tenant features may not work correctly.")
@@ -154,10 +162,35 @@ async def lifespan(app: FastAPI):
     else:
         logging.info("ℹ️  SMTP email sending is not configured (emails will not be sent)")
     
-    # Health check all services
+    # Health check all services (with timeout to prevent blocking)
     from app.core.health_check import get_health_check_service
     health_service = get_health_check_service()
-    health_status = await health_service.check_all_services()
+    try:
+        # Add timeout to health check (60 seconds max)
+        health_status = await asyncio.wait_for(
+            health_service.check_all_services(),
+            timeout=60.0
+        )
+    except asyncio.TimeoutError:
+        logging.error("❌ Health check timed out after 60 seconds")
+        logging.warning("⚠️  Some services may not be available. Backend will start anyway.")
+        health_status = {
+            "all_healthy": False,
+            "all_mandatory_healthy": False,
+            "services": {},
+            "unhealthy_services": [],
+            "unhealthy_mandatory_services": [],
+        }
+    except Exception as e:
+        logging.error(f"❌ Health check failed: {e}", exc_info=True)
+        logging.warning("⚠️  Some services may not be available. Backend will start anyway.")
+        health_status = {
+            "all_healthy": False,
+            "all_mandatory_healthy": False,
+            "services": {},
+            "unhealthy_services": [],
+            "unhealthy_mandatory_services": [],
+        }
     
     # Log summary
     all_healthy = health_status.get("all_healthy", False)
@@ -175,8 +208,12 @@ async def lifespan(app: FastAPI):
             from app.core.dependencies import get_agent_activity_stream
             agent_activity_stream = get_agent_activity_stream()
             event_monitor = EventMonitor(agent_activity_stream=agent_activity_stream)
-            await event_monitor.start()
+            # Add timeout to prevent infinite blocking (30 seconds max)
+            await asyncio.wait_for(event_monitor.start(), timeout=30.0)
             logging.info("✅ Event Monitor started (proactive email/calendar monitoring)")
+        except asyncio.TimeoutError:
+            logging.warning("⚠️  Event Monitor start timed out after 30 seconds")
+            logging.warning("⚠️  Proactive event monitoring will not be available.")
         except Exception as e:
             logging.warning(f"⚠️  Failed to start Event Monitor: {e}")
             logging.warning("⚠️  Proactive event monitoring will not be available.")
