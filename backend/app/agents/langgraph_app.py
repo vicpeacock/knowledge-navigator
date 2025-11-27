@@ -1678,15 +1678,16 @@ Risultati trovati:
 
 Rispondi alla domanda dell'utente usando le informazioni trovate. Sii chiaro e conciso."""
                     
-                    # Use BLOCK_ONLY_HIGH instead of BLOCK_NONE (doesn't require allowlist)
-                    # The simple format should reduce safety filter triggers
+                    # CRITICAL: Disable safety filters for tool result synthesis
+                    # Tool results come from trusted sources (our own tools), so it's safe to disable filters
+                    # This prevents Gemini from blocking legitimate responses about calendar events, emails, search results, etc.
                     final_response = await ollama.generate_with_context(
                         prompt=synthesis_prompt,
                         session_context=session_context,
                         retrieved_memory=retrieved_memory if retrieved_memory else None,
                         tools=None,  # No tools needed for final response
                         tools_description=None,
-                        disable_safety_filters=False,  # Use BLOCK_ONLY_HIGH instead - should be sufficient with simple format
+                        disable_safety_filters=True,  # Disable safety filters - tool results are from trusted sources
                     )
                     
                     # Extract response text
