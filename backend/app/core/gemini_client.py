@@ -316,14 +316,9 @@ class GeminiClient:
         # System prompt for Gemini - optimized to reduce safety filter triggers
         # Use neutral, factual language to avoid triggering safety filters
         # Keep it simple and direct to minimize safety filter triggers
-        base_system_prompt = """You are a helpful assistant that uses tools to provide accurate information.
+        base_system_prompt = """You are an assistant that provides factual information based on tool results.
 
-Available tools:
-- get_emails: Read emails
-- get_calendar_events: Check calendar
-- customsearch_search: Search the web
-
-When the user asks a question, use the appropriate tool to find the answer. Respond with clear, factual information."""
+Your role is to synthesize information from tools and present it clearly to users. Use neutral, professional language. Focus on facts and avoid subjective interpretations."""
         
         enhanced_system = system_prompt or base_system_prompt
         
@@ -625,7 +620,7 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                         if safety_settings:
                             model_config["safety_settings"] = safety_settings
                             if disable_safety_filters:
-                                logger.info(f"🔓 Safety filters set to BLOCK_ONLY_HIGH for tool result synthesis (in model_config)")
+                                logger.info(f"🔓 Safety filters DISABLED (BLOCK_NONE) for tool result synthesis (in model_config)")
                             else:
                                 threshold_name = "BLOCK_ONLY_HIGH"
                                 logger.info(f"✅ Safety filters enabled ({threshold_name}) for this request (in model_config)")
