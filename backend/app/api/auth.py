@@ -54,6 +54,7 @@ class RefreshTokenRequest(BaseModel):
 
 class RefreshTokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None  # New refresh token (optional for backward compatibility)
     expires_in: int
 
 
@@ -278,7 +279,7 @@ async def refresh_token(
             detail="User not found or inactive"
         )
     
-    # Create new access token
+    # Create new access token and refresh token (token rotation)
     token_data = {
         "sub": str(user.id),
         "email": user.email,
@@ -287,9 +288,14 @@ async def refresh_token(
     }
     
     access_token = create_access_token(token_data)
+    # Generate new refresh token to implement token rotation (security best practice)
+    new_refresh_token = create_refresh_token(token_data)
+    
+    logger.info(f"Token refreshed for user: {user.email} (tenant: {user.tenant_id})")
     
     return RefreshTokenResponse(
         access_token=access_token,
+        refresh_token=new_refresh_token,  # Return new refresh token for rotation
         expires_in=15 * 60,  # 15 minutes
     )
 

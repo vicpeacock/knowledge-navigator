@@ -167,12 +167,19 @@ api.interceptors.response.use(
           throw new Error('Invalid refresh token response')
         }
 
-        const { access_token } = response.data
+        const { access_token, refresh_token } = response.data
         console.log('[API] ✅ Access token refreshed successfully')
         
-          // Update token in localStorage FIRST (synchronously)
+          // Update tokens in localStorage FIRST (synchronously)
           if (typeof window !== 'undefined') {
             localStorage.setItem('access_token', access_token)
+            // If backend returns a new refresh_token, update it (token rotation)
+            if (refresh_token) {
+              localStorage.setItem('refresh_token', refresh_token)
+              console.log('[API] ✅ Refresh token rotated and saved to localStorage')
+            } else {
+              console.log('[API] ⚠️  No new refresh_token in response (backward compatibility)')
+            }
             console.log('[API] ✅ Token saved to localStorage')
           }
 
