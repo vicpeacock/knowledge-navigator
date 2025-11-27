@@ -26,8 +26,9 @@ class EmbeddingService:
                 raise self._initialization_error
             
             # Retry logic for HuggingFace rate limits (429 errors)
-            max_retries = 3
-            retry_delay = 5  # Start with 5 seconds
+            # Increased retries and delays for Cloud Run environments
+            max_retries = 5
+            retry_delay = 10  # Start with 10 seconds (longer for rate limits)
             
             for attempt in range(max_retries):
                 try:
@@ -48,11 +49,14 @@ class EmbeddingService:
                     is_rate_limit = "429" in error_str or "Too Many Requests" in error_str
                     
                     if is_rate_limit and attempt < max_retries - 1:
-                        # Exponential backoff for rate limits
-                        wait_time = retry_delay * (2 ** attempt)
+                        # Exponential backoff for rate limits with jitter
+                        import random
+                        base_wait = retry_delay * (2 ** attempt)
+                        jitter = random.uniform(0, base_wait * 0.3)  # Add up to 30% jitter
+                        wait_time = base_wait + jitter
                         logger.warning(
                             f"⚠️  Rate limit error (429) when loading model. "
-                            f"Retrying in {wait_time} seconds... (attempt {attempt + 1}/{max_retries})"
+                            f"Retrying in {wait_time:.1f} seconds... (attempt {attempt + 1}/{max_retries})"
                         )
                         time.sleep(wait_time)
                         continue

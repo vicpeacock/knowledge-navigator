@@ -2240,9 +2240,15 @@ def build_langgraph_app() -> StateGraph:
     logger.info("✅ LangGraph application built successfully")
     logger.info("   Graph structure: event_handler -> orchestrator -> tool_loop -> knowledge_agent -> notification_collector -> response_formatter -> END")
     
-    # Add recursion limit to prevent infinite loops
-    compiled = graph.compile(recursion_limit=50)
-    logger.info("✅ LangGraph compiled with recursion_limit=50")
+    # Compile graph (recursion_limit is not available in all LangGraph versions)
+    # Instead, we handle recursion limits in the state management
+    try:
+        compiled = graph.compile(recursion_limit=50)
+        logger.info("✅ LangGraph compiled with recursion_limit=50")
+    except TypeError:
+        # Fallback for LangGraph versions that don't support recursion_limit
+        compiled = graph.compile()
+        logger.info("✅ LangGraph compiled (recursion_limit not supported in this version)")
     return compiled
 
 
