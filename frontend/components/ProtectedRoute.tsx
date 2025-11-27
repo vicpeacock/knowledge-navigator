@@ -10,8 +10,11 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
+  console.log('[ProtectedRoute] Component rendering')
   const { isAuthenticated, user, isLoading } = useAuth()
   const router = useRouter()
+  
+  console.log('[ProtectedRoute] Auth state:', { isAuthenticated, isLoading, hasUser: !!user })
 
   useEffect(() => {
     if (!isLoading) {
