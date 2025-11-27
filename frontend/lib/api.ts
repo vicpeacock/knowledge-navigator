@@ -12,16 +12,6 @@ const api = axios.create({
   timeout: 300000, // 5 minutes - increased for long-running operations (Gmail API, LangGraph, tool execution)
 })
 
-// Separate axios instance for refresh token requests to avoid infinite loops
-// This instance doesn't have the response interceptor that retries on 401
-const refreshApi = axios.create({
-  baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  withCredentials: false,
-  timeout: 10000, // 10 seconds timeout for refresh
-})
 
 // Request interceptor: Add JWT token, multi-tenant headers, and trace ID
 api.interceptors.request.use((config) => {
@@ -93,7 +83,7 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Response interceptor: Track responses and handle 401 (token expired) with automatic refresh
+// Response interceptor: Track responses only - let AuthContext handle 401/refresh
 api.interceptors.response.use(
   (response) => {
     // Track successful response (only if config exists)
@@ -146,104 +136,11 @@ api.interceptors.response.use(
       )
     }
 
-    // If 401 and not already retrying
-    // IMPORTANT: Don't retry if the request is already a refresh token request (to avoid infinite loop)
-    const isRefreshRequest = originalRequest.url?.includes('/auth/refresh') || originalRequest._skipRefreshRetry
-    
-    if (error.response?.status === 401 && !originalRequest._retry && !isRefreshRequest) {
-      originalRequest._retry = true
-
-      try {
-        // Try to refresh token
-        const refreshToken = typeof window !== 'undefined' 
-          ? localStorage.getItem('refresh_token')
-          : null
-
-        if (!refreshToken) {
-          console.warn('[API] No refresh token available, cannot refresh access token')
-          // Clear tokens and redirect to login
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('access_token')
-            localStorage.removeItem('refresh_token')
-            // Redirect to login
-            window.location.href = '/auth/login'
-          }
-          return Promise.reject(error)
-        }
-
-        console.log('[API] Attempting to refresh access token...')
-        // Use separate axios instance to avoid infinite loop
-        // This instance doesn't have the response interceptor that retries on 401
-        const response = await refreshApi.post('/api/v1/auth/refresh', {
-          refresh_token: refreshToken
-        })
-
-        if (!response.data || !response.data.access_token) {
-          console.error('[API] Refresh token response missing access_token:', response.data)
-          throw new Error('Invalid refresh token response')
-        }
-
-        const { access_token, refresh_token } = response.data
-        console.log('[API] ✅ Access token refreshed successfully')
-        
-          // Update tokens in localStorage FIRST (synchronously)
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('access_token', access_token)
-            // If backend returns a new refresh_token, update it (token rotation)
-            if (refresh_token) {
-              localStorage.setItem('refresh_token', refresh_token)
-              console.log('[API] ✅ Refresh token rotated and saved to localStorage')
-            } else {
-              console.log('[API] ⚠️  No new refresh_token in response (backward compatibility)')
-            }
-            console.log('[API] ✅ Token saved to localStorage')
-          }
-
-          // Update authorization header and retry original request
-          originalRequest.headers['Authorization'] = `Bearer ${access_token}`
-          
-          // Clear the _retry flag to allow future retries if needed
-          delete originalRequest._retry
-          
-          // Also clear any cached config that might have the old token
-          if (originalRequest.headers) {
-            originalRequest.headers['Authorization'] = `Bearer ${access_token}`
-          }
-          
-          console.log('[API] Retrying original request with new token...', {
-            url: originalRequest.url,
-            method: originalRequest.method,
-            hasAuthHeader: !!originalRequest.headers['Authorization'],
-            tokenPreview: access_token.substring(0, 20) + '...',
-          })
-          
-          // Metadata will be preserved automatically by request interceptor
-          // But we need to ensure the request interceptor uses the new token
-          return api(originalRequest)
-      } catch (refreshError: any) {
-        console.error('[API] ❌ Token refresh failed:', refreshError)
-        console.error('[API] Refresh error details:', {
-          message: refreshError.message,
-          response: refreshError.response?.data,
-          status: refreshError.response?.status,
-        })
-        
-        // Mark that we've already tried to refresh to prevent infinite loop
-        originalRequest._retry = true
-        originalRequest._skipRefreshRetry = true
-        
-        // Refresh failed, clear tokens immediately to prevent further retries
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          console.log('[API] Tokens cleared, redirecting to login page...')
-          // Use setTimeout to avoid blocking the error propagation
-          setTimeout(() => {
-            window.location.href = '/auth/login'
-          }, 100)
-        }
-        return Promise.reject(refreshError)
-      }
+    // If 401, let AuthContext handle it - don't try to refresh here to avoid infinite loops
+    if (error.response?.status === 401) {
+      console.warn('[API] 401 Unauthorized - token may be expired, letting AuthContext handle refresh')
+      // Don't clear tokens here - let AuthContext handle it
+      // This prevents infinite loops while still allowing AuthContext to refresh if needed
     }
 
     return Promise.reject(error)
