@@ -20,13 +20,10 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  console.log('[AuthContext] AuthProvider component rendering')
   const [user, setUser] = useState<User | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
-  
-  console.log('[AuthContext] Initial state:', { isLoading, hasUser: !!user, hasToken: !!token })
 
   // Load token from localStorage on mount
   useEffect(() => {
