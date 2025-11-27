@@ -168,8 +168,37 @@ def _format_tool_results_for_llm(tool_results: List[Dict[str, Any]], simple_form
                     formatted_lines.append(f"Errore in {tool_name}: {tool_result['error']}")
                     continue
                 
+                # For get_calendar_events, extract events cleanly
+                if tool_name == 'get_calendar_events' and "events" in tool_result:
+                    events = tool_result.get("events", [])
+                    count = tool_result.get("count", 0)
+                    if events:
+                        formatted_lines.append(f"Eventi calendario ({count} trovati):")
+                        for i, event in enumerate(events[:5], 1):  # Limit to 5 events
+                            summary = event.get("summary", "Nessun titolo")
+                            start = event.get("start", {})
+                            start_time = start.get("dateTime") or start.get("date", "N/A")
+                            formatted_lines.append(f"{i}. {summary} - {start_time}")
+                        formatted_lines.append("")  # Empty line
+                    elif count == 0:
+                        formatted_lines.append("Nessun evento trovato nel calendario per il periodo richiesto.")
+                
+                # For get_emails, extract emails cleanly
+                elif tool_name == 'get_emails' and "emails" in tool_result:
+                    emails = tool_result.get("emails", [])
+                    count = tool_result.get("count", 0)
+                    if emails:
+                        formatted_lines.append(f"Email ({count} trovate):")
+                        for i, email in enumerate(emails[:5], 1):  # Limit to 5 emails
+                            subject = email.get("subject", "Nessun oggetto")
+                            sender = email.get("from", "N/A")
+                            formatted_lines.append(f"{i}. Da: {sender} - Oggetto: {subject}")
+                        formatted_lines.append("")  # Empty line
+                    elif count == 0:
+                        formatted_lines.append("Nessuna email trovata per i criteri richiesti.")
+                
                 # For search results, extract cleanly
-                if tool_name == 'customsearch_search' and "results" in tool_result:
+                elif tool_name == 'customsearch_search' and "results" in tool_result:
                     results = tool_result.get("results", [])
                     if results:
                         formatted_lines.append(f"Risultati ricerca ({len(results)} trovati):")
@@ -193,6 +222,12 @@ def _format_tool_results_for_llm(tool_results: List[Dict[str, Any]], simple_form
                     # Use content field
                     content = str(tool_result["content"])[:300]  # Limit length
                     formatted_lines.append(content)
+                elif "success" in tool_result and tool_result.get("success"):
+                    # Tool succeeded but no specific data - try to extract what we can
+                    if "count" in tool_result:
+                        formatted_lines.append(f"Operazione completata: {tool_result['count']} elementi trovati.")
+                    else:
+                        formatted_lines.append("Operazione completata con successo.")
                 else:
                     # Minimal JSON for other results
                     result_str = json.dumps(tool_result, ensure_ascii=False, default=str)[:300]
@@ -1801,8 +1836,17 @@ Rispondi alla domanda dell'utente usando le informazioni trovate. Sii chiaro e c
                             else:
                                 response_text = "⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. " + " ".join(summary_parts[:3])  # Limit to first 3 summaries
                         else:
-                            logger.warning(f"   ⚠️  No summary parts extracted from tool results, using generic message")
-                            response_text = f"⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. Ho eseguito {len(tool_results)} tool(s) ma non sono riuscito a generare una risposta sintetizzata."
+                            logger.warning(f"   ⚠️  No summary parts extracted from tool results, trying to extract from formatted results")
+                            # Last resort: try to use the formatted_results we already created
+                            if formatted_results and formatted_results.strip():
+                                # Use the formatted results directly as response
+                                response_text = f"⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. Ecco comunque i risultati trovati:\n\n{formatted_results}"
+                                logger.info(f"   ✅ Using formatted_results as fallback response")
+                            else:
+                                # Final fallback: show tool names and basic info
+                                tool_names = [tr.get('tool', 'unknown') for tr in tool_results]
+                                response_text = f"⚠️ Mi scuso, ma ho riscontrato un problema nell'interpretazione dei risultati. Ho eseguito {len(tool_results)} tool(s) ({', '.join(tool_names)}) ma non sono riuscito a generare una risposta sintetizzata."
+                                logger.warning(f"   ⚠️  Using final fallback with tool names only")
                 except Exception as final_error:
                     logger.error(f"Error generating final response after tools: {final_error}", exc_info=True)
                     response_text = f"Ho eseguito {len(tool_results)} tool(s). Risultati: {json.dumps(tool_results, indent=2, ensure_ascii=False, default=str)[:500]}"
