@@ -112,6 +112,7 @@ api.interceptors.response.use(
           status: response.status,
           hasData: !!response.data,
           duration,
+          url: response.config.url,
         })
       }
     }

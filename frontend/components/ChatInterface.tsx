@@ -509,11 +509,14 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
         sessionId,
         messageLength: input.length,
         messagePreview: input.substring(0, 50),
+        timestamp: new Date().toISOString(),
       })
       
       const startTime = Date.now()
+      console.log('[ChatInterface] Calling sessionsApi.chat...')
       const response = await sessionsApi.chat(sessionId, input)
       const duration = Date.now() - startTime
+      console.log('[ChatInterface] sessionsApi.chat returned after', duration, 'ms')
       
       console.log('[ChatInterface] ✅ Chat response received:', {
         duration: `${duration}ms`,
