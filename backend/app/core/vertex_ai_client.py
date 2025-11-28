@@ -366,7 +366,7 @@ class VertexAIClient:
                                 ))]
                             ))
                         elif isinstance(part, str):
-                            contents.append(types.Content(role="function", parts=[part]))
+                            contents.append(types.Content(role="function", parts=[types.Part(text=part)]))
                 elif role == "model" and parts:
                     # Handle model messages with function_call
                     model_parts = []
@@ -378,14 +378,14 @@ class VertexAIClient:
                                 args=func_call.get("args", {})
                             )))
                         elif isinstance(part, str):
-                            model_parts.append(part)
+                            model_parts.append(types.Part(text=part))
                     if model_parts:
                         contents.append(types.Content(role="model", parts=model_parts))
                 elif content:  # Regular user message
-                    contents.append(types.Content(role=role, parts=[content]))
+                    contents.append(types.Content(role=role, parts=[types.Part(text=content)]))
             
             # Add current prompt
-            contents.append(types.Content(role="user", parts=[prompt]))
+            contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
             
             # Prepare config
             config = {}
