@@ -355,6 +355,28 @@ class VertexAIClient:
             if system_prompt:
                 config["system_instruction"] = system_prompt
             
+            # Add tool usage instructions if tools are available
+            if tools and len(tools) > 0:
+                tool_names = [tool.get("name", "unknown") for tool in tools if isinstance(tool, dict)]
+                if tool_names:
+                    tool_instruction = f"""
+IMPORTANTE - Uso dei Tool:
+Hai accesso ai seguenti tool: {', '.join(tool_names[:10])}{'...' if len(tool_names) > 10 else ''}
+
+Quando l'utente chiede informazioni o azioni che richiedono questi tool, DEVI chiamarli:
+- Per controllare il calendario → usa mcp_get_events o mcp_list_calendars
+- Per leggere email → usa mcp_search_gmail_messages o mcp_get_gmail_message_content
+- Per cercare informazioni → usa customsearch_search
+
+NON rispondere con informazioni generiche o ipotetiche. Usa SEMPRE i tool appropriati per ottenere informazioni reali e aggiornate.
+"""
+                    current_system = config.get("system_instruction", "")
+                    if current_system:
+                        config["system_instruction"] = current_system + tool_instruction
+                    else:
+                        config["system_instruction"] = tool_instruction
+
+            
             # Add time/location context if provided (like GeminiClient)
             time_context = getattr(self, '_time_context', None)
             if time_context:
