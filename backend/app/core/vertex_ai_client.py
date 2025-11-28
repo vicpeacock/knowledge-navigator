@@ -274,17 +274,17 @@ class VertexAIClient:
                 set_trace_attribute("vertex_ai.project", self.project_id)
                 
                 # Generate content
-                # Pass tools directly as parameter (not in config) according to Vertex AI docs
-                generate_kwargs = {
-                    "model": self.model_name,
-                    "contents": contents,
-                    "config": config,
-                }
+                # Tools must be in config according to Vertex AI SDK
+                # Tools must be in config, not as direct parameter
                 if vertex_tools_list:
-                    generate_kwargs["tools"] = vertex_tools_list
-                    logger.info(f"🔧 Passing {len(vertex_tools_list)} Tool objects directly to generate_content")
+                    config["tools"] = vertex_tools_list
+                    logger.info(f"🔧 Adding {len(vertex_tools_list)} Tool objects to config")
                 
-                response = self.client.models.generate_content(**generate_kwargs)
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=config,
+                )
                 
                 response_text = response.text if hasattr(response, 'text') and response.text else None
                 
@@ -418,17 +418,16 @@ class VertexAIClient:
                     logger.warning("⚠️  No valid tools found after conversion")
             
             try:
-                # Pass tools directly as parameter (not in config) according to Vertex AI docs
-                generate_kwargs = {
-                    "model": self.model_name,
-                    "contents": contents,
-                    "config": config,
-                }
+                # Tools must be in config, not as direct parameter
                 if vertex_tools_list:
-                    generate_kwargs["tools"] = vertex_tools_list
-                    logger.info(f"🔧 Passing {len(vertex_tools_list)} Tool objects directly to generate_content")
+                    config["tools"] = vertex_tools_list
+                    logger.info(f"🔧 Adding {len(vertex_tools_list)} Tool objects to config")
                 
-                response = self.client.models.generate_content(**generate_kwargs)
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=config,
+                )
                 
                 # Parse response - check for function calls first (like GeminiClient)
                 content = ""
