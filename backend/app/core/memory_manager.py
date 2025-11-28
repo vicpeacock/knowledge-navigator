@@ -89,7 +89,7 @@ class MemoryManager:
         strategies = [
             lambda: self.chroma_client.get_or_create_collection(name=collection_name, metadata=metadata),
             lambda: self.chroma_client.get_collection(name=collection_name),
-            lambda: self.chroma_client.create_collection(name=collection_name, metadata={"tenant_id": tenant_id_str if (tenant_id or self.tenant_id) else "00000000-0000-0000-0000-000000000000", "_type": "collection"}),
+            lambda: self.chroma_client.create_collection(name=collection_name, metadata={"tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "00000000-0000-0000-0000-000000000000", "_type": "collection"}),
             lambda: self.chroma_client.create_collection(name=collection_name, metadata={}),
             lambda: self.chroma_client.create_collection(name=collection_name),
         ]
