@@ -1509,6 +1509,29 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 tools_description=tools_description,
                 return_raw=True,
             )
+        except ValueError as llm_error:
+            # ValueError from Gemini usually means safety filter block
+            error_msg = str(llm_error)
+            if "blocked by safety filters" in error_msg.lower():
+                logger.error(f"❌ Gemini blocked response: {error_msg}")
+                log_agent_activity(
+                    state,
+                    agent_id="tool_loop",
+                    status="error",
+                    message=f"Gemini safety filter block: {error_msg}",
+                )
+                # Don't set a hardcoded fallback - let the graph continue with empty response
+                # The knowledge_agent_node or response_formatter_node can handle this
+                state["response"] = ""  # Empty response - let downstream nodes handle it
+                state["tools_used"] = []
+                state.setdefault("tool_results", [])
+                state["plan_completed"] = True
+                state["assistant_message_saved"] = False
+                log_agent_activity(state, agent_id="tool_loop", status="completed")
+                return state
+            else:
+                # Other ValueError - re-raise
+                raise
         except Exception as llm_error:
             logger.error(f"❌ LLM error in tool_loop_node: {llm_error}", exc_info=True)
             log_agent_activity(
@@ -1517,7 +1540,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                 status="error",
                 message=f"LLM connection failed: {str(llm_error)}",
             )
-            # Return a fallback response so the graph can continue
+            # For connection/configuration errors, set error response
             from app.core.config import settings
             llm_provider = settings.llm_provider.upper() if hasattr(settings, 'llm_provider') else "LLM"
             state["response"] = f"Mi dispiace, ma al momento non posso rispondere perché il servizio di intelligenza artificiale ({llm_provider}) non è disponibile. Verifica la configurazione."
@@ -1633,15 +1656,28 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         else:
             response_text = str(response_data) if response_data else ""
         
-        # Ensure response_text is never empty - if it is and there are no tool_calls, provide fallback
+        # If response_text is empty and no tool_calls, this is an error condition
+        # This should have been caught as an exception (ValueError) when Gemini blocks
+        # But if we reach here, it means Gemini returned empty content without raising
         if not response_text or not response_text.strip():
             if tool_calls:
                 # If we have tool_calls but no text, that's OK - we'll generate response after tool execution
                 logger.info("Response text is empty but tool_calls present - will generate response after tool execution")
             else:
-                # No tool_calls and no text - provide fallback
-                logger.warning("⚠️  Response text is empty and no tool_calls - using fallback")
-                response_text = "Ho ricevuto il tuo messaggio. Come posso aiutarti?"
+                # No tool_calls and no text - Gemini likely blocked or returned empty
+                logger.error("❌ Response text is empty and no tool_calls - Gemini likely blocked the response")
+                logger.error("   This should have been caught as ValueError in generate_with_context")
+                # Set empty response - the graph will continue and downstream nodes can handle it
+                # Don't use hardcoded fallback - let the error be visible
+                response_text = ""  # Explicitly empty - will be handled by response_formatter_node
+                # Ensure state["response"] is set so the graph can continue
+                state["response"] = ""
+                state["tools_used"] = []
+                state.setdefault("tool_results", [])
+                state["plan_completed"] = True
+                state["assistant_message_saved"] = False
+                log_agent_activity(state, agent_id="tool_loop", status="completed")
+                return state  # Return early - no need to continue processing
         
         # Execute tool calls if any
         if tool_calls:

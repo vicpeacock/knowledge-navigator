@@ -1141,18 +1141,34 @@ class GeminiClient:
                         logger.warning(f"   Prompt preview: {last_msg[:200] if 'last_msg' in locals() else 'N/A'}")
                         logger.warning(f"   System instruction length: {len(system_content) if system_content else 0}")
                     
-                    # Return empty string instead of generic error message
-                    # This allows the caller to extract results from tool execution
-                    return {
-                        "model": self.model_name,
-                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-                        "message": {
-                            "role": "assistant",
-                            "content": ""  # Empty content to trigger fallback in caller
-                        },
-                        "tool_calls": [],
-                        "done": True
-                    }
+                    # Raise ValueError when Gemini blocks - let the caller handle it properly
+                    # This is better than returning empty content which triggers hardcoded fallbacks
+                    prompt_feedback_summary = "No details"
+                    if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                        pf = response.prompt_feedback
+                        block_reason = getattr(pf, 'block_reason', None)
+                        if block_reason:
+                            block_reason_name = getattr(block_reason, 'name', str(block_reason))
+                            prompt_feedback_summary = f"Block reason: {block_reason_name}"
+                    
+                    output_safety_ratings_summary = "No ratings"
+                    if output_safety_ratings:
+                        categories = []
+                        for rating in output_safety_ratings:
+                            cat = getattr(rating, 'category', None)
+                            prob = getattr(rating, 'probability', None)
+                            if cat and prob:
+                                cat_name = getattr(cat, 'name', str(cat))
+                                prob_name = getattr(prob, 'name', str(prob))
+                                categories.append(f"{cat_name}={prob_name}")
+                        if categories:
+                            output_safety_ratings_summary = ", ".join(categories)
+                    
+                    raise ValueError(
+                        f"Gemini response blocked by safety filters (finish_reason=1). "
+                        f"Prompt feedback: {prompt_feedback_summary}. "
+                        f"Output safety ratings: {output_safety_ratings_summary}"
+                    )
                 
                 # Continue processing function calls if they exist (even if finish_reason=1)
                 if has_function_calls:
