@@ -337,16 +337,50 @@ class VertexAIClient:
             set_trace_attribute("vertex_ai.model", self.model_name)
             set_trace_attribute("vertex_ai.has_tools", bool(tools))
             
-                        # Build contents from session context
-            # Vertex AI expects simple string or list of strings
+            # Build contents from session context
+            # Vertex AI expects Content objects or dicts with role/parts for function_response
             contents = []
             
             for msg in session_context:
+                role = msg.get("role", "user")
                 content = msg.get("content", "")
-                if content:  # Skip empty messages
-                    contents.append(content)
+                parts = msg.get("parts", [])
+                
+                # Handle function_response format (from langgraph_app synthesis_context)
+                if role == "function" and parts:
+                    # Vertex AI expects function_response in Content format
+                    for part in parts:
+                        if isinstance(part, dict) and "function_response" in part:
+                            func_resp = part["function_response"]
+                            func_name = func_resp.get("name", "")
+                            func_response = func_resp.get("response", {})
+                            # Create Content dict with function_response
+                            contents.append({
+                                "role": "function",
+                                "parts": [{
+                                    "function_response": {
+                                        "name": func_name,
+                                        "response": func_response
+                                    }
+                                }]
+                            })
+                        elif isinstance(part, str):
+                            contents.append({"role": "function", "parts": [part]})
+                elif role == "model" and parts:
+                    # Handle model messages with function_call
+                    model_parts = []
+                    for part in parts:
+                        if isinstance(part, dict) and "function_call" in part:
+                            model_parts.append(part)
+                        elif isinstance(part, str):
+                            model_parts.append(part)
+                    if model_parts:
+                        contents.append({"role": "model", "parts": model_parts})
+                elif content:  # Regular user message
+                    contents.append({"role": role, "parts": [content]})
             
             # Add current prompt
+            contents.append({"role": "user", "parts": [prompt]})
             contents.append(prompt)
             
             # Prepare config
