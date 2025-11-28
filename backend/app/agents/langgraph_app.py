@@ -1090,6 +1090,8 @@ class LangGraphChatState(TypedDict, total=False):
     agent_activity_manager: AgentActivityStream
     task_queue: TaskQueue
     current_task: Optional[Task]
+    current_user: Optional[Any]  # User model for tool filtering
+    current_user_id: Optional[UUID]  # User ID as backup if current_user is lost
 
 
 async def event_handler_node(state: LangGraphChatState) -> LangGraphChatState:
@@ -1199,6 +1201,12 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
 
         tool_manager = ToolManager(db=db, tenant_id=tenant_id)
         current_user = state.get("current_user")
+        if current_user is None:
+            logger.warning("⚠️  current_user is None in planner_node! Tools will not be filtered by user preferences.")
+            logger.warning(f"   State keys: {list(state.keys())}")
+            logger.warning(f"   State['current_user'] value: {state.get('current_user')}")
+        else:
+            logger.info(f"✅ current_user found in planner_node: {current_user.email if hasattr(current_user, 'email') else 'unknown'}")
         available_tools = await tool_manager.get_available_tools(current_user=current_user)
         available_tool_names = [tool.get("name") for tool in available_tools if tool.get("name")]
 
@@ -1252,10 +1260,15 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             try:
                 logger.info(f"🔍 Planning for message: {request.message[:100]}")
                 logger.info(f"   Message length: {len(message_content)}, is_auto_task: {is_auto_task}, acknowledgement: {acknowledgement}")
+                logger.info(f"   Available tools for planner: {len(available_tools)} (already filtered by user preferences)")
+                
+                # Use available_tools as-is - they are already filtered by get_available_tools()
+                # based on user preferences (enabled_tools, mcp_tools_preferences)
+                # If no MCP tools are activated, they won't be in available_tools
                 analysis = await analyze_message_for_plan(
                     planner_client,
                     request,
-                    available_tools,
+                    available_tools,  # Use tools as filtered by user preferences
                     state.get("session_context", []),
                     ollama_client=state.get("ollama"),
                 )
@@ -1430,14 +1443,42 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         tenant_id = tenant_result.scalar_one_or_none()
         
         current_user = state.get("current_user")
+        if current_user is None:
+            # Try to reload from database using user_id (but don't modify state - LangGraph doesn't like that)
+            current_user_id = state.get("current_user_id")
+            if current_user_id:
+                logger.warning(f"⚠️  current_user is None, but current_user_id={current_user_id}. Reloading from database...")
+                try:
+                    from app.models.database import User
+                    from sqlalchemy import select
+                    user_result = await state["db"].execute(select(User).where(User.id == current_user_id))
+                    current_user = user_result.scalar_one_or_none()
+                    if current_user:
+                        logger.info(f"✅ Reloaded current_user from database: {current_user.email}")
+                    else:
+                        logger.error(f"❌ Could not reload user with ID {current_user_id}")
+                except Exception as e:
+                    logger.error(f"❌ Error reloading user: {e}", exc_info=True)
+                    current_user = None
+            else:
+                logger.warning("⚠️  current_user is None and no current_user_id in state! Tools will not be filtered by user preferences.")
+                logger.warning(f"   State keys: {list(state.keys())}")
+        else:
+            logger.info(f"✅ current_user found in state: {current_user.email if hasattr(current_user, 'email') else 'unknown'}")
         tool_manager = ToolManager(db=state["db"], tenant_id=tenant_id)
         available_tools = await tool_manager.get_available_tools(current_user=current_user)
         
         # Generate response using Ollama with tool calling capability
         # This allows Ollama to decide if it needs tools or can respond directly
-        ollama = state["ollama"]
-        session_context = state["session_context"]
-        retrieved_memory = list(state["retrieved_memory"])
+        ollama = state.get("ollama")
+        if ollama is None:
+            logger.error("❌ CRITICAL: ollama is None in tool_loop_node!")
+            logger.error(f"   State keys: {list(state.keys())}")
+            logger.error(f"   State['ollama'] type: {type(state.get('ollama'))}")
+            raise ValueError("ollama client is None - cannot generate response")
+        
+        session_context = state.get("session_context", [])
+        retrieved_memory = list(state.get("retrieved_memory", []))
         
         # Check if user explicitly requests a search - if so, filter memory to avoid using old search results
         search_keywords = ["cerca", "search", "ricerca", "google scholar", "cerca su", "trova", "find", "lookup"]
@@ -1669,6 +1710,19 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     # Format tool results with clean, factual format
                     formatted_results = _format_tool_results_for_llm(tool_results, simple_format=True)
                     
+                    # Log tool results for debugging
+                    logger.info(f"📊 Tool results summary:")
+                    for tr in tool_results:
+                        tool_name = tr.get('tool', 'unknown')
+                        tool_result = tr.get('result', {})
+                        if isinstance(tool_result, dict):
+                            if 'error' in tool_result:
+                                logger.warning(f"  ❌ {tool_name}: {tool_result.get('error', 'Unknown error')}")
+                            elif 'count' in tool_result:
+                                logger.info(f"  ✅ {tool_name}: {tool_result.get('count', 0)} items found")
+                            else:
+                                logger.info(f"  ✅ {tool_name}: {tool_result.get('success', False)}")
+                    
                     # Create a neutral, factual prompt for synthesizing results
                     # Use simple, direct language to avoid safety filter triggers
                     synthesis_prompt = f"""User question: {request.message}
@@ -1677,6 +1731,14 @@ Tool results:
 {formatted_results}
 
 Provide a clear, factual response based on the information above. Use neutral, professional language."""
+                    
+                    # DEBUG: Log the exact prompt being sent
+                    logger.info(f"🔍 DEBUG: Synthesis prompt for Gemini:")
+                    logger.info(f"   Prompt length: {len(synthesis_prompt)}")
+                    logger.info(f"   User question: {request.message}")
+                    logger.info(f"   Formatted results length: {len(formatted_results)}")
+                    logger.info(f"   Formatted results preview (first 500 chars): {formatted_results[:500]}")
+                    logger.info(f"   Full prompt preview (first 1000 chars): {synthesis_prompt[:1000]}")
                     
                     # Use Gemini to synthesize the response
                     # Tool results come from trusted sources, so we can disable safety filters
@@ -1703,13 +1765,15 @@ Provide a clear, factual response based on the information above. Use neutral, p
                         logger.error(f"   Tool results were: {len(tool_results)} tool(s) executed")
                         
                         # Try one more time with a simpler, more neutral prompt
-                        logger.info(f"🔄 Retrying with simpler prompt...")
+                        # Remove complex memory and system prompts to isolate the issue
+                        logger.info(f"🔄 Retrying with simpler prompt (no memory, no system prompt)...")
                         simple_prompt = f"Based on the tool results, provide a brief response to: {request.message}"
                         try:
                             retry_response = await ollama.generate_with_context(
                                 prompt=simple_prompt,
                                 session_context=[],  # No context to avoid triggers
-                                retrieved_memory=None,
+                                retrieved_memory=None,  # No memory to avoid triggers
+                                system_prompt=None,  # No system prompt to avoid triggers
                                 tools=None,
                                 tools_description=None,
                                 disable_safety_filters=True,
@@ -2084,6 +2148,28 @@ Rispondi all'utente basandoti sui risultati dei tool sopra. Se ci sono errori, s
                                 results = tool_result.get('results', [])
                                 if results:
                                     summary_parts.append(f"Ho trovato {len(results)} risultati nella ricerca. Primo risultato: {results[0].get('title', 'N/A')}")
+                            # For calendar/email tools, check for errors and provide helpful messages
+                            elif tool_name in ['get_calendar_events', 'get_emails']:
+                                if 'error' in tool_result:
+                                    error_msg = tool_result['error']
+                                    if 'scaduta' in error_msg or 'revocata' in error_msg or 'decryption' in error_msg.lower() or 'Nessuna integrazione' in error_msg:
+                                        summary_parts.append(f"⚠️ {error_msg}")
+                                    else:
+                                        summary_parts.append(f"Errore: {error_msg}")
+                                elif 'events' in tool_result:
+                                    events = tool_result.get('events', [])
+                                    count = tool_result.get('count', 0)
+                                    if count > 0:
+                                        summary_parts.append(f"Trovati {count} eventi nel calendario.")
+                                    else:
+                                        summary_parts.append("Nessun evento trovato nel calendario per il periodo richiesto.")
+                                elif 'emails' in tool_result or 'messages' in tool_result:
+                                    emails = tool_result.get('emails') or tool_result.get('messages', [])
+                                    count = tool_result.get('count', len(emails))
+                                    if count > 0:
+                                        summary_parts.append(f"Trovate {count} email.")
+                                    else:
+                                        summary_parts.append("Nessuna email trovata.")
                             # For other tools, try to extract useful info
                             elif 'error' not in tool_result:
                                 if 'summary' in tool_result:
@@ -2312,6 +2398,7 @@ async def run_langgraph_chat(
         "task_queue": get_task_queue(),
         "current_task": None,
         "current_user": current_user,  # Store current_user for tool filtering
+        "current_user_id": current_user.id if current_user else None,  # Store user ID as backup
     }
     logger = logging.getLogger(__name__)
     logger.debug("🚀 Starting LangGraph execution for session %s", session_id)

@@ -38,7 +38,7 @@ class ToolManager:
         return [
             {
                 "name": "get_calendar_events",
-                "description": "Recupera eventi dal calendario Google. Usa questo tool quando l'utente chiede informazioni su eventi, appuntamenti, meeting, impegni, o vuole vedere il calendario. Esempi di quando usarlo: 'eventi domani', 'cosa ho in calendario', 'meeting questa settimana', 'appuntamenti', 'impegni prossimi'.",
+                "description": "Retrieves calendar events. Use for questions about events, appointments, or schedule.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -59,7 +59,7 @@ class ToolManager:
             },
             {
                 "name": "get_emails",
-                "description": "Recupera email da Gmail. Usa questo tool quando l'utente chiede di leggere, vedere, controllare, o recuperare email. Esempi: 'leggi le email', 'email non lette', 'ci sono email nuove', 'mostrami le email', 'email di oggi'. Se l'utente chiede 'email non lette' o 'email nuove', usa query='is:unread'. Se chiede tutte le email senza specificare 'non lette', usa query vuota o None.",
+                "description": "Retrieves email messages. Use for questions about emails or messages.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -82,7 +82,7 @@ class ToolManager:
             },
             {
                 "name": "summarize_emails",
-                "description": "Riassume automaticamente le email non lette usando AI. Usa questo tool quando l'utente chiede un riassunto delle email o vuole una panoramica delle email non lette.",
+                "description": "Summarizes unread emails. Use when user requests email summaries.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -96,7 +96,7 @@ class ToolManager:
             },
             {
                 "name": "archive_email",
-                "description": "Archivia un'email rimuovendola dalla Posta in arrivo. Usa questo tool quando l'utente chiede di archiviare, rimuovere dalla posta in arrivo, o nascondere un'email specifica.",
+                "description": "Archives an email message. Use when user requests to archive an email.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -110,7 +110,7 @@ class ToolManager:
             },
             {
                 "name": "send_email",
-                "description": "Invia un'email tramite Gmail. Usa questo tool quando l'utente chiede di inviare, mandare, o spedire un'email a qualcuno.",
+                "description": "Sends an email message. Use when user requests to send an email.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -136,7 +136,7 @@ class ToolManager:
             },
             {
                 "name": "reply_to_email",
-                "description": "Risponde a un'email esistente tramite Gmail. Usa questo tool quando l'utente chiede di rispondere, replicare, o rispondere a un'email specifica.",
+                "description": "Replies to an email message. Use when user requests to reply to an email.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -186,7 +186,7 @@ class ToolManager:
             },
             {
                 "name": "customsearch_search",
-                "description": "Esegue una ricerca sul web per trovare informazioni generali. Usa questo tool quando l'utente chiede di cercare, trovare, o ottenere informazioni su qualsiasi argomento che NON riguarda email o calendario. Esempi: 'cerca informazioni su X', 'notizie su Y', 'cosa è Z', 'meteo a Bussigny', 'informazioni sulla band Swisspulse'. IMPORTANTE: Usa sempre questo tool per ricerche web - non dire che la chiave API non è configurata senza prima provare a chiamare il tool. NON usare per domande su email ('ci sono email non lette?' → usa get_emails) o calendario ('cosa ho domani?' → usa get_calendar_events).",
+                "description": "Performs web search to find general information. Use for questions requiring web search.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -833,18 +833,39 @@ class ToolManager:
             # Decrypt credentials
             # Import settings locally to avoid potential import issues
             from app.core.config import settings as config_settings
-            credentials = _decrypt_credentials(
-                integration.credentials_encrypted,
-                config_settings.credentials_encryption_key
-            )
+            try:
+                credentials = _decrypt_credentials(
+                    integration.credentials_encrypted,
+                    config_settings.credentials_encryption_key
+                )
+            except ValueError as decrypt_error:
+                # Credentials decryption failed - user needs to reconnect
+                error_msg = str(decrypt_error)
+                if "Error decrypting credentials" in error_msg:
+                    return {
+                        "error": "Autorizzazione Google Calendar scaduta o non valida. Ricollega l'integrazione calendario e riprova.",
+                        "reason": "credentials_decryption_failed",
+                        "integration_id": str(integration.id)
+                    }
+                else:
+                    return {"error": f"Errore nella decriptazione delle credenziali: {error_msg}"}
             
             # Setup service
-            await self.calendar_service.setup_google(credentials, str(integration.id))
+            try:
+                await self.calendar_service.setup_google(credentials, str(integration.id))
+            except IntegrationAuthError as auth_error:
+                return {
+                    "error": "Autorizzazione Google Calendar scaduta o revocata. Ricollega l'integrazione calendario e riprova.",
+                    "provider": auth_error.provider,
+                    "reason": auth_error.reason,
+                }
             
             # Parse dates
             query = parameters.get("query", "")
             start_time = None
             end_time = None
+            
+            logger.info(f"📅 get_calendar_events: Query='{query}', Integration ID={integration.id}, User ID={integration.user_id}, Purpose={integration.purpose}")
             
             if parameters.get("start_time"):
                 start_time = datetime.fromisoformat(parameters["start_time"])
@@ -864,11 +885,19 @@ class ToolManager:
                 integration_id=str(integration.id),
             )
             
-            return {
+            result = {
                 "success": True,
                 "events": events,
                 "count": len(events),
             }
+            
+            logger.info(f"📅 get_calendar_events result: {len(events)} eventi trovati tra {start_time} e {end_time}")
+            if events:
+                logger.info(f"   Primo evento: {events[0].get('summary', 'N/A')} - {events[0].get('start', {}).get('dateTime', 'N/A')}")
+            else:
+                logger.info(f"   Nessun evento trovato per il periodo richiesto")
+            
+            return result
         except IntegrationAuthError as exc:
             return {
                 "error": (
