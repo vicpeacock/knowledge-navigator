@@ -338,6 +338,7 @@ class VertexAIClient:
             set_trace_attribute("vertex_ai.has_tools", bool(tools))
             
             # Build contents from session context
+            from google.genai import types
             # Vertex AI SDK expects Content objects from google.genai.types
             from google.genai import types
             
@@ -385,7 +386,6 @@ class VertexAIClient:
             
             # Add current prompt
             contents.append(types.Content(role="user", parts=[prompt]))
-            contents.append(prompt)
             
             # Prepare config
             config = {}
