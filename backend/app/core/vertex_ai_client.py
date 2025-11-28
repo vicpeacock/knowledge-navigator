@@ -268,6 +268,8 @@ class VertexAIClient:
             config["system_instruction"] = system
         config["safety_settings"] = safety_settings
         
+        vertex_tools_list = None
+
         try:
             with trace_span("vertex_ai.generate"):
                 set_trace_attribute("vertex_ai.model", self.model_name)
