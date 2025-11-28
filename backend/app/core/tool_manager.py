@@ -1173,13 +1173,21 @@ class ToolManager:
         result = await db.execute(query)
         integrations = result.scalars().all()
         
-        # Filter: if user_id is set, prefer user's integration, fallback to global
+        # Filter: if user_id is set, ONLY use user's integration (NO global fallback)
         if user_id:
             user_integrations = [i for i in integrations if i.user_id == user_id]
             global_integrations = [i for i in integrations if i.user_id is None]
-            # Prefer user's integration, but include global as fallback
-            integrations = user_integrations + global_integrations
-            logger.info(f"   Found {len(user_integrations)} user MCP integration(s) and {len(global_integrations)} global MCP integration(s)")
+            # CRITICAL: Only use user's integration, NO global fallback
+            integrations = user_integrations
+            logger.info(f"   Found {len(user_integrations)} user MCP integration(s) and {len(global_integrations)} global MCP integration(s) (ignoring global)")
+            if not integrations:
+                # User has no personal integration - return error instead of using global
+                logger.error(f"   ❌ No personal MCP integration found for user {user_id}")
+                return {
+                    "error": "Nessun conto Google autorizzato nel tuo profilo. Per favore, vai nella pagina Profilo e autorizza il tuo account Google per utilizzare i servizi di calendario e email.",
+                    "integration_required": True,
+                    "user_id": str(user_id)
+                }
         else:
             logger.info(f"   Found {len(integrations)} enabled MCP integration(s) (no user_id, using all)")
         
