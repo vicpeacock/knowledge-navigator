@@ -338,7 +338,9 @@ class VertexAIClient:
             set_trace_attribute("vertex_ai.has_tools", bool(tools))
             
             # Build contents from session context
-            # Vertex AI expects Content objects or dicts with role/parts for function_response
+            # Vertex AI SDK expects Content objects from google.genai.types
+            from google.genai import types
+            
             contents = []
             
             for msg in session_context:
@@ -354,33 +356,35 @@ class VertexAIClient:
                             func_resp = part["function_response"]
                             func_name = func_resp.get("name", "")
                             func_response = func_resp.get("response", {})
-                            # Create Content dict with function_response
-                            contents.append({
-                                "role": "function",
-                                "parts": [{
-                                    "function_response": {
-                                        "name": func_name,
-                                        "response": func_response
-                                    }
-                                }]
-                            })
+                            # Create Content object with function_response
+                            contents.append(types.Content(
+                                role="function",
+                                parts=[types.Part(function_response=types.FunctionResponse(
+                                    name=func_name,
+                                    response=func_response
+                                ))]
+                            ))
                         elif isinstance(part, str):
-                            contents.append({"role": "function", "parts": [part]})
+                            contents.append(types.Content(role="function", parts=[part]))
                 elif role == "model" and parts:
                     # Handle model messages with function_call
                     model_parts = []
                     for part in parts:
                         if isinstance(part, dict) and "function_call" in part:
-                            model_parts.append(part)
+                            func_call = part["function_call"]
+                            model_parts.append(types.Part(function_call=types.FunctionCall(
+                                name=func_call.get("name", ""),
+                                args=func_call.get("args", {})
+                            )))
                         elif isinstance(part, str):
                             model_parts.append(part)
                     if model_parts:
-                        contents.append({"role": "model", "parts": model_parts})
+                        contents.append(types.Content(role="model", parts=model_parts))
                 elif content:  # Regular user message
-                    contents.append({"role": role, "parts": [content]})
+                    contents.append(types.Content(role=role, parts=[content]))
             
             # Add current prompt
-            contents.append({"role": "user", "parts": [prompt]})
+            contents.append(types.Content(role="user", parts=[prompt]))
             contents.append(prompt)
             
             # Prepare config
