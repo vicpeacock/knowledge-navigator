@@ -123,7 +123,78 @@ class GeminiClient:
             increment_counter("llm_requests_total", labels={"model": self.model_name, "provider": "gemini", "stream": str(stream)})
             
             try:
-                model = self._get_model()
+                # CRITICAL FIX: Configure safety_settings and pass them to GenerativeModel constructor
+                # (like we do in generate_with_context)
+                import google.generativeai.types as genai_types
+                model_config = {}
+                safety_settings_simple = None
+                
+                try:
+                    # Try to use SafetySetting objects (preferred)
+                    if hasattr(genai_types, 'SafetySetting'):
+                        SafetySetting = genai_types.SafetySetting
+                        HarmCategory = genai_types.HarmCategory
+                        HarmBlockThreshold = genai_types.HarmBlockThreshold
+                        threshold_to_use = HarmBlockThreshold.BLOCK_ONLY_HIGH
+                        
+                        safety_settings_simple = [
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                threshold=threshold_to_use,
+                            ),
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                threshold=threshold_to_use,
+                            ),
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                                threshold=threshold_to_use,
+                            ),
+                            SafetySetting(
+                                category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                                threshold=threshold_to_use,
+                            ),
+                        ]
+                        logger.info(f"✅ Configured safety_settings for generate() using SafetySetting objects")
+                    else:
+                        # Fallback to dict format if SafetySetting not available
+                        HarmCategory = genai_types.HarmCategory
+                        HarmBlockThreshold = genai_types.HarmBlockThreshold
+                        threshold_to_use = HarmBlockThreshold.BLOCK_ONLY_HIGH
+                        
+                        safety_settings_simple = [
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                "threshold": threshold_to_use,
+                            },
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                "threshold": threshold_to_use,
+                            },
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                                "threshold": threshold_to_use,
+                            },
+                            {
+                                "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                                "threshold": threshold_to_use,
+                            },
+                        ]
+                        logger.info(f"✅ Configured safety_settings for generate() using dict format (SafetySetting not available)")
+                except (ImportError, AttributeError) as e:
+                    logger.warning(f"⚠️  Could not configure safety_settings in generate(): {e}, will use default")
+                    safety_settings_simple = None
+                
+                # Pass safety_settings to model constructor (not to send_message)
+                if safety_settings_simple:
+                    model_config["safety_settings"] = safety_settings_simple
+                
+                # Create configured model
+                if model_config:
+                    model = genai.GenerativeModel(self.model_name, **model_config)
+                    logger.info(f"✅ Created configured Gemini model for generate() with safety_settings")
+                else:
+                    model = self._get_model()
                 
                 # Convert messages to Gemini chat format
                 # Gemini uses a chat history format with alternating user/assistant messages
@@ -158,34 +229,9 @@ class GeminiClient:
                 
                 # Send the last message and get response
                 last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
-                # Configure safety settings for generate() method too
-                safety_settings_simple = None
-                try:
-                    import google.generativeai.types as genai_types
-                    safety_settings_simple = [
-                        {
-                            "category": genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                            "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                        },
-                        {
-                            "category": genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                            "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                        },
-                        {
-                            "category": genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                            "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                        },
-                        {
-                            "category": genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                            "threshold": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                        },
-                    ]
-                except Exception:
-                    pass
                 
+                # DON'T pass safety_settings to send_message - they're already in the model
                 send_kwargs = {}
-                if safety_settings_simple:
-                    send_kwargs["safety_settings"] = safety_settings_simple
                 
                 if stream:
                     # Streaming not fully implemented yet - return non-streaming for now
@@ -751,24 +797,36 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                 
                 logger.debug(f"📝 Built history with {len(history)} messages, last role: {history[-1]['role'] if history else 'empty'}")
                 
-                # Configure model with tools only (NOT system_instruction)
-                # CRITICAL: Don't use system_instruction in model_config - put it in the message instead
-                # This matches the working behavior of generate() method which puts system in [SYSTEM]: prefix
+                # CRITICAL FIX (per Gemini 3): Pass system_instruction, tools, and safety_settings to GenerativeModel constructor
+                # This is the correct way to configure the model - all parameters must be in model_config
                 model_config = {}
                 
+                if system_content:
+                    # System Instruction MUST be passed to the model constructor
+                    model_config["system_instruction"] = system_content
+                    logger.info(f"✅ Passing system_instruction to GenerativeModel (length: {len(system_content)} chars)")
+                
                 if gemini_tools:
+                    # Tools MUST be passed to the model constructor
                     model_config["tools"] = gemini_tools
                     logger.info(f"🔧 Configured {len(gemini_tools)} tools for Gemini model")
                 
+                if safety_settings:
+                    # Safety settings MUST be passed to the model constructor
+                    model_config["safety_settings"] = safety_settings
+                    threshold_name = "BLOCK_NONE" if disable_safety_filters else "BLOCK_ONLY_HIGH"
+                    logger.info(f"🛡️  Passing safety_settings ({threshold_name}) to GenerativeModel")
+                
                 try:
-                    if model_config:
-                        model = genai.GenerativeModel(self.model_name, **model_config)
-                        logger.info(f"✅ Created Gemini model with {len(gemini_tools) if gemini_tools else 0} tools")
-                    else:
-                        model = self._get_model()
+                    # Create a NEW configured instance of the model with all parameters
+                    configured_model = genai.GenerativeModel(self.model_name, **model_config)
+                    logger.info(f"✅ Created configured Gemini model with: system_instruction={'yes' if system_content else 'no'}, tools={len(gemini_tools) if gemini_tools else 0}, safety_settings={'yes' if safety_settings else 'default'}")
                     
-                    # Start chat with history
-                    chat = model.start_chat(history=history)
+                    # Use the CONFIGURED model to start chat
+                    if history:
+                        chat = configured_model.start_chat(history=history)
+                    else:
+                        chat = configured_model.start_chat(history=[])
                 except Exception as e:
                     logger.error(f"❌ Error creating Gemini model or starting chat: {e}", exc_info=True)
                     logger.error(f"   Model name: {self.model_name}")
@@ -857,48 +915,19 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                 logger.error("🔍🔍🔍 END OF EXACT INPUT TO GEMINI 🔍🔍🔍")
                 logger.error("=" * 80)
                 
-                # CRITICAL: If we have system_content, prepend it to the first user message (like generate() does)
-                # NOTE: last_msg was already defined above (line 784), don't redefine it here
-                # This is the key difference - generate() works because it doesn't use system_instruction in model_config
-                if system_content:
-                    logger.info(f"✅ Adding system_instruction to first message (length: {len(system_content)} chars) - like generate() method")
-                    # Prepend system instruction to the first user message in history, or to last_msg if no history
-                    if history and len(history) > 0 and history[0].get("role") == "user":
-                        # Prepend to first user message in history
-                        first_user_parts = history[0].get("parts", [])
-                        if first_user_parts and isinstance(first_user_parts, list) and len(first_user_parts) > 0:
-                            first_user_parts[0] = f"[SYSTEM]: {system_content}\n\n{first_user_parts[0]}"
-                        else:
-                            history[0]["parts"] = [f"[SYSTEM]: {system_content}"]
-                    else:
-                        # Prepend to last_msg (no history or history doesn't start with user)
-                        last_msg = f"[SYSTEM]: {system_content}\n\n{last_msg}"
-                        logger.info(f"   Prepended system instruction to last_msg")
+                # CRITICAL FIX: System instruction, tools, and safety_settings are now in model_config (passed to GenerativeModel constructor)
+                # No need to prepend system instruction to messages - it's already configured in the model
+                # last_msg was already defined above (line 784)
                 
-                # CRITICAL: Always pass safety_settings to send_message(), NOT in model_config
-                # This matches the working behavior of generate() method
-                # Passing safety_settings in model_config seems to cause stricter filtering
-                safety_settings_to_pass = safety_settings
-                if safety_settings:
-                    threshold_name = "BLOCK_NONE" if disable_safety_filters else "BLOCK_ONLY_HIGH"
-                    logger.info(f"🔓 Passing safety_settings ({threshold_name}) to send_message() (not in model_config)")
-                    # Log the safety_settings format
-                    if safety_settings_to_pass and len(safety_settings_to_pass) > 0:
-                        first_setting = safety_settings_to_pass[0]
-                        if hasattr(first_setting, 'category'):
-                            logger.info(f"   Safety settings format: SafetySetting objects (category={first_setting.category}, threshold={first_setting.threshold})")
-                        elif isinstance(first_setting, dict):
-                            logger.info(f"   Safety settings format: dict (category={first_setting.get('category')}, threshold={first_setting.get('threshold')})")
-                else:
-                    safety_settings_to_pass = None
-                
-                # Do not pass safety_settings if they're already in model_config
+                # CRITICAL FIX: Safety settings are already in the model_config, so DON'T pass them to send_message()
+                # This avoids double application and potential conflicts
                 logger.info(f"🔍 DEBUG: About to call _generate_async with:")
                 logger.info(f"   Message length: {len(last_msg) if last_msg else 0}")
                 logger.info(f"   Generation config: {generation_config}")
-                logger.info(f"   Safety settings to pass: {safety_settings_to_pass is not None}")
+                logger.info(f"   Safety settings: already in model (NOT passed to send_message)")
                 
-                response = await self._generate_async(chat, last_msg, generation_config=generation_config, safety_settings=safety_settings_to_pass)
+                # Call _generate_async WITHOUT safety_settings (they're already in the configured model)
+                response = await self._generate_async(chat, last_msg, generation_config=generation_config, safety_settings=None)
                 
                 # ==========================================================
                 # 🚨 CRITICAL DEBUG BLOCK FOR SAFETY FILTERS (INPUT)
