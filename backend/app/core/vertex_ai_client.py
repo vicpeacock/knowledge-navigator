@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from google import genai
-    from google.genai.types import HttpOptions, SafetySetting, HarmCategory, HarmBlockThreshold
+    from google.genai.types import HttpOptions, SafetySetting, HarmCategory, HarmBlockThreshold, Tool, FunctionDeclaration
     from google.auth import default
     import google.auth.transport.requests
     VERTEX_AI_AVAILABLE = True
@@ -382,8 +382,31 @@ class VertexAIClient:
                         logger.warning(f"   Tool keys: {list(tool.keys())}")
                 
                 if vertex_tools:
-                    config["tools"] = [{"function_declarations": vertex_tools}]
-                    logger.info(f"✅ Configured {len(vertex_tools)} tools for Vertex AI: {[t.get('name', 'unknown') for t in vertex_tools]}")
+                    # Convert to Vertex AI Tool objects (according to official docs)
+                    # Vertex AI requires Tool objects with FunctionDeclaration objects
+                    function_declarations = []
+                    for tool_dict in vertex_tools:
+                        tool_name = tool_dict.get("name", "unknown")
+                        try:
+                            # FunctionDeclaration accepts dict for parameters and converts to Schema automatically
+                            func_decl = FunctionDeclaration(
+                                name=tool_name,
+                                description=tool_dict.get("description", ""),
+                                parameters=tool_dict.get("parameters", {})
+                            )
+                            function_declarations.append(func_decl)
+                            logger.debug(f"   ✅ Created FunctionDeclaration for {tool_name}")
+                        except Exception as e:
+                            logger.error(f"   ❌ Error creating FunctionDeclaration for {tool_name}: {e}", exc_info=True)
+                            logger.error(f"   Tool dict: {tool_dict}")
+                            # Skip this tool instead of adding dict (dict format won't work)
+                            continue
+                    
+                    if function_declarations:
+                        # Create Tool object with function_declarations (official format)
+                        tools_list = [Tool(function_declarations=function_declarations)]
+                        config["tools"] = tools_list
+                        logger.info(f"✅ Configured {len(function_declarations)} tools for Vertex AI: {[fd.name if hasattr(fd, 'name') else fd.get('name', 'unknown') for fd in function_declarations]}")
                 else:
                     logger.warning("⚠️  No valid tools found after conversion")
             
