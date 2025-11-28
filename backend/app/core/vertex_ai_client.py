@@ -355,9 +355,20 @@ class VertexAIClient:
             if system_prompt:
                 config["system_instruction"] = system_prompt
             
+            # Add time/location context if provided (like GeminiClient)
+            time_context = getattr(self, '_time_context', None)
+            if time_context:
+                # Combine time_context with system_instruction
+                current_system = config.get("system_instruction", "")
+                if current_system:
+                    config["system_instruction"] = time_context + "\n\n" + current_system
+                else:
+                    config["system_instruction"] = time_context
+            
             safety_settings = self._create_safety_settings(block_none=disable_safety_filters)
             config["safety_settings"] = safety_settings
             
+            vertex_tools_list = None  # Initialize before processing tools
             if tools:
                 logger.info(f"🔧 Processing {len(tools)} tools for Vertex AI")
                 vertex_tools = []
