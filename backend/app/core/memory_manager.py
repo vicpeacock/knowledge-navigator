@@ -87,42 +87,7 @@ class MemoryManager:
             "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "default"
         }
         
-        # ChromaDB 0.6.0+ doesn't support HNSW parameters in metadata the same way
-        # Let ChromaDB use its optimized defaults
-        try:
-            collection = self.chroma_client.get_or_create_collection(
-                name=collection_name,
-                metadata=metadata,
-            )
-        except Exception as e:
-            # Handle ChromaDB internal errors (e.g., KeyError('_type'))
-            # This is a known issue with some ChromaDB versions
-            logger = logging.getLogger(__name__)
-            logger.warning(f"⚠️  Error creating/getting collection '{collection_name}': {e}")
-            logger.warning(f"   Attempting to get existing collection or create with minimal metadata...")
-            
-            # Try to get existing collection first
-            try:
-                collection = self.chroma_client.get_collection(name=collection_name)
-                logger.info(f"✅ Successfully retrieved existing collection '{collection_name}'")
-            except Exception:
-                # If collection doesn't exist, try creating with minimal/no metadata
-                try:
-                    collection = self.chroma_client.create_collection(
-                        name=collection_name,
-                        metadata={},  # Try with empty metadata to avoid _type issues
-                    )
-                    logger.info(f"✅ Successfully created collection '{collection_name}' with empty metadata")
-                except Exception as create_error:
-                    # Last resort: try without metadata parameter
-                    try:
-                        collection = self.chroma_client.create_collection(name=collection_name)
-                        logger.info(f"✅ Successfully created collection '{collection_name}' without metadata")
-                    except Exception as final_error:
-                        logger.error(f"❌ Failed to create collection '{collection_name}' after all retries: {final_error}")
-                        # Re-raise the original error
-                        raise e
-        
+        # ChromaDB 0.6.0+ doesn't support HNSW parameters in metadata the same way        # Let ChromaDB use its optimized defaults        logger = logging.getLogger(__name__)        collection = None                # Try multiple strategies to create/get collection        strategies = [            # Strategy 1: Try get_or_create with metadata (normal case)            lambda: self.chroma_client.get_or_create_collection(                name=collection_name,                metadata=metadata,            ),            # Strategy 2: Try to get existing collection first            lambda: self.chroma_client.get_collection(name=collection_name),            # Strategy 3: Try create with empty metadata            lambda: self.chroma_client.create_collection(                name=collection_name,                metadata={},            ),            # Strategy 4: Try create without metadata parameter            lambda: self.chroma_client.create_collection(name=collection_name),        ]                strategy_names = [            "get_or_create with metadata",            "get existing collection",            "create with empty metadata",            "create without metadata",        ]                last_error = None        for strategy, strategy_name in zip(strategies, strategy_names):            try:                collection = strategy()                if collection:                    logger.info(f"✅ Successfully got/created collection '{collection_name}' using: {strategy_name}")                    break            except Exception as e:                # Check if it's the KeyError('_type') issue                error_str = str(e)                if "'_type'" in error_str or "KeyError" in error_str:                    logger.warning(f"⚠️  ChromaDB KeyError('_type') detected, trying next strategy...")                last_error = e                continue                if collection is None:            # All strategies failed            error_msg = f"Failed to create collection '{collection_name}' after all retries"            if last_error:                error_msg += f": {last_error}"            logger.error(f"❌ {error_msg}")            # Don't raise - return None and let caller handle it gracefully            # This prevents the entire request from failing due to ChromaDB issues            return None        
         # Cache it
         self._collections_cache[collection_name] = collection
         return collection
@@ -435,7 +400,16 @@ class MemoryManager:
         # Get tenant-specific collection
         effective_tenant_id = tenant_id or self.tenant_id
         collection = self._get_collection("long_term_memory", effective_tenant_id)
-        
+
+        # Handle case where collection creation failed (e.g., ChromaDB KeyError)
+        if collection is None:
+            logger.warning(
+                "⚠️  Could not get/create long_term_memory collection for tenant %s, "
+                "skipping add_long_term_memory",
+                effective_tenant_id,
+            )
+            return (False, None)
+
         # Store in ChromaDB
         embedding_id = f"long_{datetime.now().isoformat()}"
         # ChromaDB doesn't accept lists in metadata, so convert to comma-separated string
@@ -491,6 +465,11 @@ class MemoryManager:
             # Get tenant-specific collection
             effective_tenant_id = tenant_id or self.tenant_id
             collection = self._get_collection("long_term_memory", effective_tenant_id)
+            
+            # Handle case where collection creation failed (e.g., ChromaDB KeyError)
+            if collection is None:
+                logger.warning(f"⚠️  Could not get/create long_term_memory collection for tenant {effective_tenant_id}, returning empty results")
+                return []
             
             where = {}
             if min_importance is not None:
