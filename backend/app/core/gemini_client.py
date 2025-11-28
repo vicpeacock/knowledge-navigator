@@ -319,10 +319,17 @@ class GeminiClient:
         start_time = time.time()
         
         # Build system prompt with memory if available
-        # System prompt for Gemini - simplified to reduce safety filter triggers
-        # Use neutral, factual language to avoid triggering safety filters
-        # Keep it simple and direct to minimize safety filter triggers
-        base_system_prompt = """You are Knowledge Navigator, a personal AI assistant. Use the available tools (get_emails, get_calendar_events, customsearch_search) to provide accurate information. Use factual language."""
+        # System prompt for Gemini - using the version that worked (commit 4b6122c)
+        # Keep it simple, neutral, and factual to avoid triggering safety filters
+        # Avoid imperative language (CRITICAL, ALWAYS, NEVER, MUST) that triggers Gemini's safety filters
+        base_system_prompt = """You are a helpful assistant that uses tools to provide accurate information.
+
+Available tools:
+- get_emails: Read emails
+- get_calendar_events: Check calendar
+- customsearch_search: Search the web
+
+When the user asks a question, use the appropriate tool to find the answer. Respond with clear, factual information."""
         
         enhanced_system = system_prompt or base_system_prompt
         
@@ -332,7 +339,7 @@ class GeminiClient:
             enhanced_system = time_context + "\n\n" + enhanced_system
         
         if retrieved_memory:
-            # Format memory context - simplified, less imperative language
+            # Format memory context - neutral, factual language (no imperatives)
             memory_context = "\n\n=== Context Information from Files and Memory ===\n"
             memory_context += "The following information has been retrieved from uploaded files and previous conversations.\n\n"
             
@@ -344,7 +351,7 @@ class GeminiClient:
                     memory_context += f"{i}. {mem}\n\n"
             
             memory_context += "\n=== End of Context Information ===\n"
-            # Removed imperative instructions about using memory - let the model use it naturally
+            # No imperative instructions - let the model use memory naturally
             enhanced_system += memory_context
         
         # Add tools description if provided
