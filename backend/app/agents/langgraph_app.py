@@ -1707,8 +1707,23 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             if tool_results:
                 logger.info(f"Generating final response after {len(tool_results)} tool execution(s)")
                 try:
-                    # Format tool results with clean, factual format
-                    formatted_results = _format_tool_results_for_llm(tool_results, simple_format=True)
+                    # Format tool results for function_response
+                    # Gemini expects function_response.response to be a dict (struct), not a JSON string
+                    import json
+                    function_responses = []
+                    for tr in tool_results:
+                        tool_name = tr.get('tool', 'unknown')
+                        tool_result = tr.get('result', {})
+                        # Convert result to dict for function_response
+                        # Gemini expects response to be a dict (struct), not a JSON string
+                        if isinstance(tool_result, dict):
+                            result_dict = tool_result
+                        else:
+                            result_dict = {"result": str(tool_result)}
+                        function_responses.append({
+                            "name": tool_name,
+                            "response": result_dict  # Pass as dict, not JSON string
+                        })
                     
                     # Log tool results for debugging
                     logger.info(f"📊 Tool results summary:")
@@ -1723,28 +1738,62 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                             else:
                                 logger.info(f"  ✅ {tool_name}: {tool_result.get('success', False)}")
                     
-                    # Create a neutral, factual prompt for synthesizing results
-                    # Use simple, direct language to avoid safety filter triggers
-                    synthesis_prompt = f"""User question: {request.message}
-
-Tool results:
-{formatted_results}
-
-Provide a clear, factual response based on the information above. Use neutral, professional language."""
+                    # Build history with function_response for Gemini
+                    # History format: user -> model (with function_call) -> function (with function_response) -> user (synthesis request)
+                    synthesis_context = list(session_context) if session_context else []
                     
-                    # DEBUG: Log the exact prompt being sent
-                    logger.info(f"🔍 DEBUG: Synthesis prompt for Gemini:")
-                    logger.info(f"   Prompt length: {len(synthesis_prompt)}")
-                    logger.info(f"   User question: {request.message}")
-                    logger.info(f"   Formatted results length: {len(formatted_results)}")
-                    logger.info(f"   Formatted results preview (first 500 chars): {formatted_results[:500]}")
-                    logger.info(f"   Full prompt preview (first 1000 chars): {synthesis_prompt[:1000]}")
+                    # Add the user's original question
+                    synthesis_context.append({
+                        "role": "user",
+                        "parts": [request.message]
+                    })
+                    
+                    # Add model response with function_call (from the previous Gemini call)
+                    # We need to reconstruct the function_call from tool_calls
+                    function_call_parts = []
+                    for tc in tool_calls:
+                        tool_name = tc.get("name")
+                        tool_params = tc.get("parameters", {})
+                        # Gemini function_call format
+                        function_call_parts.append({
+                            "function_call": {
+                                "name": tool_name,
+                                "args": tool_params
+                            }
+                        })
+                    
+                    synthesis_context.append({
+                        "role": "model",
+                        "parts": function_call_parts if function_call_parts else [""]
+                    })
+                    
+                    # Add function_response for each tool result
+                    for fr in function_responses:
+                        synthesis_context.append({
+                            "role": "function",
+                            "parts": [{
+                                "function_response": {
+                                    "name": fr["name"],
+                                    "response": fr["response"]
+                                }
+                            }]
+                        })
+                    
+                    # Synthesis request - will be added as last message by generate_with_context
+                    synthesis_prompt = "Sintetizza una risposta chiara e fattuale basandoti sui risultati dei tool eseguiti."
+                    
+                    logger.info(f"🔍 DEBUG: Built synthesis context with function_response:")
+                    logger.info(f"   Context length: {len(synthesis_context)} messages")
+                    logger.info(f"   Function responses: {len(function_responses)}")
+                    for fr in function_responses:
+                        logger.info(f"      - {fr['name']}: {len(fr['response'])} chars")
                     
                     # Use Gemini to synthesize the response
                     # Tool results come from trusted sources, so we can disable safety filters
+                    # Note: synthesis_prompt will be added as the last user message by generate_with_context
                     final_response = await ollama.generate_with_context(
                         prompt=synthesis_prompt,
-                        session_context=session_context,
+                        session_context=synthesis_context,
                         retrieved_memory=retrieved_memory if retrieved_memory else None,
                         tools=None,  # No tools needed for final response
                         tools_description=None,
