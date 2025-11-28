@@ -319,10 +319,11 @@ class GeminiClient:
         start_time = time.time()
         
         # Build system prompt with memory if available
-        # System prompt for Gemini - using the version that worked (commit 4b6122c)
-        # Keep it simple, neutral, and factual to avoid triggering safety filters
-        # Avoid imperative language (CRITICAL, ALWAYS, NEVER, MUST) that triggers Gemini's safety filters
-        base_system_prompt = """You are a helpful assistant that uses tools to provide accurate information.
+        # System prompt for Gemini - keep it minimal and neutral
+        # Only mention tools if they are actually available
+        if tools and len(tools) > 0:
+            # Tools available - mention them
+            base_system_prompt = """You are a helpful assistant that uses tools to provide accurate information.
 
 Available tools:
 - get_emails: Read emails
@@ -330,6 +331,9 @@ Available tools:
 - customsearch_search: Search the web
 
 When the user asks a question, use the appropriate tool to find the answer. Respond with clear, factual information."""
+        else:
+            # No tools - use minimal prompt without mentioning tools
+            base_system_prompt = """You are a helpful assistant. Respond clearly and factually to user questions."""
         
         enhanced_system = system_prompt or base_system_prompt
         
@@ -370,18 +374,50 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
             logger.debug(f"   System instruction preview: {system_content[:200]}...")
         
         # Add session context (without system prompt - it will be passed as system_instruction)
-        # Preserve function_response format if already present in session_context
+        # CRITICAL: Filter out error/fallback messages that trigger Gemini's safety filters
+        # These messages contain patterns that Gemini interprets as attempts to bypass safety filters
+        error_patterns = [
+            "Ho ricevuto il tuo messaggio. Come posso aiutarti?",
+            "non sono riuscito a generare una risposta",
+            "filtri di sicurezza di Gemini",
+            "safety filter block",
+            "blocked by safety filters",
+            "Mi dispiace, non sono riuscito",
+            "Potresti riprovare?",
+        ]
+        
         for msg in session_context:
             role = msg.get("role", "user")
             # Skip system messages from context - they're handled by system_instruction
             if role != "system":
+                # Extract content to check for error patterns
+                content = ""
+                if "parts" in msg and isinstance(msg["parts"], list):
+                    # Extract text from parts (skip function_response parts)
+                    for part in msg["parts"]:
+                        if isinstance(part, str):
+                            content = part
+                            break
+                        elif isinstance(part, dict) and "text" in part:
+                            content = part["text"]
+                            break
+                else:
+                    content = msg.get("content", "")
+                
+                # Skip messages that match error/fallback patterns
+                content_lower = content.lower()
+                is_error_message = any(pattern.lower() in content_lower for pattern in error_patterns)
+                
+                if is_error_message:
+                    logger.debug(f"🔍 Filtering out error/fallback message from history: {content[:100]}...")
+                    continue  # Skip this message
+                
                 # Check if message already has "parts" with function_response format
                 if "parts" in msg and isinstance(msg["parts"], list):
                     # Preserve the parts as-is (may contain function_response)
                     messages.append({"role": role, "parts": msg["parts"]})
                 else:
                     # Legacy format: convert content to parts
-                    content = msg.get("content", "")
                     messages.append({"role": role, "parts": [content]})
         
         # Add current prompt
@@ -715,11 +751,10 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                 
                 logger.debug(f"📝 Built history with {len(history)} messages, last role: {history[-1]['role'] if history else 'empty'}")
                 
-                # Configure model with system instruction and tools
+                # Configure model with tools only (NOT system_instruction)
+                # CRITICAL: Don't use system_instruction in model_config - put it in the message instead
+                # This matches the working behavior of generate() method which puts system in [SYSTEM]: prefix
                 model_config = {}
-                if system_content:
-                    model_config["system_instruction"] = system_content
-                    logger.info(f"✅ Passing system_instruction to GenerativeModel (length: {len(system_content)} chars)")
                 
                 if gemini_tools:
                     model_config["tools"] = gemini_tools
@@ -727,28 +762,10 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                 
                 try:
                     if model_config:
-                        # CRITICAL: Add safety_settings to model_config so they are applied to the model instance
-                        # Once set in model_config, they will be used automatically in all chat.send_message() calls
-                        # No need to pass them again to send_message
-                        if safety_settings:
-                            model_config["safety_settings"] = safety_settings
-                            if disable_safety_filters:
-                                logger.info(f"🔓 Safety filters DISABLED (BLOCK_NONE) for tool result synthesis (in model_config)")
-                            else:
-                                threshold_name = "BLOCK_ONLY_HIGH"
-                                logger.info(f"✅ Safety filters enabled ({threshold_name}) for this request (in model_config)")
-                                # Log the safety_settings format (dict format is correct for google.generativeai SDK)
-                                if safety_settings and len(safety_settings) > 0:
-                                    first_setting = safety_settings[0]
-                                    if isinstance(first_setting, dict):
-                                        logger.debug(f"   Safety settings format: dict (category={first_setting.get('category')}, threshold={first_setting.get('threshold')})")
-                                    else:
-                                        logger.debug(f"   Safety settings format: {type(first_setting)}")
                         model = genai.GenerativeModel(self.model_name, **model_config)
-                        logger.info(f"✅ Created Gemini model with {len(gemini_tools) if gemini_tools else 0} tools, safety_settings={'configured' if safety_settings else 'default'}")
+                        logger.info(f"✅ Created Gemini model with {len(gemini_tools) if gemini_tools else 0} tools")
                     else:
                         model = self._get_model()
-                        # If no model_config, we'll pass safety_settings to send_message in _generate_async
                     
                     # Start chat with history
                     chat = model.start_chat(history=history)
@@ -763,7 +780,7 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                             logger.error(f"   First tool: {gemini_tools[0]}")
                     raise
                 
-                # Send last message
+                # Send last message (system_content will be prepended above if present)
                 last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
                 
                 # DEBUG: Log the EXACT input being sent to Gemini (FULL CONTENT)
@@ -840,16 +857,33 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                 logger.error("🔍🔍🔍 END OF EXACT INPUT TO GEMINI 🔍🔍🔍")
                 logger.error("=" * 80)
                 
-                # CRITICAL: If safety_settings are already in model_config, they are applied to the model instance
-                # and will be used automatically in all chat.send_message() calls. 
-                # DO NOT pass them again to send_message - this is redundant and can cause issues.
-                # Only pass safety_settings to _generate_async if they were NOT added to model_config
-                safety_settings_to_pass = None
-                if safety_settings and not (model_config and "safety_settings" in model_config):
-                    # Safety settings were not added to model_config, so we need to pass them to send_message
-                    safety_settings_to_pass = safety_settings
+                # Send last message
+                last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
+                
+                # CRITICAL: If we have system_content, prepend it to the first user message (like generate() does)
+                # This is the key difference - generate() works because it doesn't use system_instruction in model_config
+                if system_content:
+                    logger.info(f"✅ Adding system_instruction to first message (length: {len(system_content)} chars) - like generate() method")
+                    # Prepend system instruction to the first user message in history, or to last_msg if no history
+                    if history and len(history) > 0 and history[0].get("role") == "user":
+                        # Prepend to first user message in history
+                        first_user_parts = history[0].get("parts", [])
+                        if first_user_parts and isinstance(first_user_parts, list) and len(first_user_parts) > 0:
+                            first_user_parts[0] = f"[SYSTEM]: {system_content}\n\n{first_user_parts[0]}"
+                        else:
+                            history[0]["parts"] = [f"[SYSTEM]: {system_content}"]
+                    else:
+                        # Prepend to last_msg (no history or history doesn't start with user)
+                        last_msg = f"[SYSTEM]: {system_content}\n\n{last_msg}"
+                        logger.info(f"   Prepended system instruction to last_msg")
+                
+                # CRITICAL: Always pass safety_settings to send_message(), NOT in model_config
+                # This matches the working behavior of generate() method
+                # Passing safety_settings in model_config seems to cause stricter filtering
+                safety_settings_to_pass = safety_settings
+                if safety_settings:
                     threshold_name = "BLOCK_NONE" if disable_safety_filters else "BLOCK_ONLY_HIGH"
-                    logger.info(f"🔓 Passing safety_settings ({threshold_name}) to send_message (not in model_config)")
+                    logger.info(f"🔓 Passing safety_settings ({threshold_name}) to send_message() (not in model_config)")
                     # Log the safety_settings format
                     if safety_settings_to_pass and len(safety_settings_to_pass) > 0:
                         first_setting = safety_settings_to_pass[0]
@@ -857,9 +891,8 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                             logger.info(f"   Safety settings format: SafetySetting objects (category={first_setting.category}, threshold={first_setting.threshold})")
                         elif isinstance(first_setting, dict):
                             logger.info(f"   Safety settings format: dict (category={first_setting.get('category')}, threshold={first_setting.get('threshold')})")
-                
-                if safety_settings:
-                    logger.debug(f"✅ Safety settings already in model_config, will be used automatically by chat.send_message()")
+                else:
+                    safety_settings_to_pass = None
                 
                 # Do not pass safety_settings if they're already in model_config
                 logger.info(f"🔍 DEBUG: About to call _generate_async with:")
