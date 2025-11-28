@@ -124,19 +124,38 @@ class GeminiClient:
             
             try:
                 # CRITICAL FIX: Configure safety_settings and pass them to GenerativeModel constructor
-                # (like we do in generate_with_context)
+                # Use the SAME logic as generate_with_context() for consistency
                 import google.generativeai.types as genai_types
                 model_config = {}
                 safety_settings_simple = None
                 
                 try:
-                    # Try to use SafetySetting objects (preferred)
-                    if hasattr(genai_types, 'SafetySetting'):
-                        SafetySetting = genai_types.SafetySetting
-                        HarmCategory = genai_types.HarmCategory
-                        HarmBlockThreshold = genai_types.HarmBlockThreshold
-                        threshold_to_use = HarmBlockThreshold.BLOCK_ONLY_HIGH
-                        
+                    # Use the same logic as generate_with_context() - try SafetySetting objects first
+                    HarmCategory = genai_types.HarmCategory
+                    HarmBlockThreshold = genai_types.HarmBlockThreshold
+                    threshold_to_use = HarmBlockThreshold.BLOCK_ONLY_HIGH
+                    
+                    # Try to use SafetySetting objects (preferred method, same as generate_with_context)
+                    SafetySetting = None
+                    use_objects = False
+                    try:
+                        if hasattr(genai_types, 'SafetySetting'):
+                            SafetySetting = genai_types.SafetySetting
+                            use_objects = True
+                            logger.info(f"✅ Using SafetySetting objects in generate() (preferred method)")
+                        else:
+                            logger.debug(f"⚠️  SafetySetting class not found in genai_types, will try to import directly")
+                            # Try importing directly from google.generativeai
+                            from google.generativeai.types import SafetySetting as DirectSafetySetting
+                            SafetySetting = DirectSafetySetting
+                            use_objects = True
+                            logger.info(f"✅ Using SafetySetting objects in generate() (imported directly)")
+                    except (ImportError, AttributeError) as e:
+                        logger.debug(f"⚠️  SafetySetting not available in generate(): {e}, will use dict format as fallback")
+                        use_objects = False
+                    
+                    # Create safety_settings using the same format as generate_with_context()
+                    if use_objects and SafetySetting:
                         safety_settings_simple = [
                             SafetySetting(
                                 category=HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -155,13 +174,9 @@ class GeminiClient:
                                 threshold=threshold_to_use,
                             ),
                         ]
-                        logger.info(f"✅ Configured safety_settings for generate() using SafetySetting objects")
+                        logger.info(f"✅ Configured safety_settings for generate() using SafetySetting objects (uniform with generate_with_context)")
                     else:
-                        # Fallback to dict format if SafetySetting not available
-                        HarmCategory = genai_types.HarmCategory
-                        HarmBlockThreshold = genai_types.HarmBlockThreshold
-                        threshold_to_use = HarmBlockThreshold.BLOCK_ONLY_HIGH
-                        
+                        # Fallback to dict format (same as generate_with_context when SafetySetting not available)
                         safety_settings_simple = [
                             {
                                 "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -180,7 +195,7 @@ class GeminiClient:
                                 "threshold": threshold_to_use,
                             },
                         ]
-                        logger.info(f"✅ Configured safety_settings for generate() using dict format (SafetySetting not available)")
+                        logger.info(f"✅ Configured safety_settings for generate() using dict format (uniform with generate_with_context fallback)")
                 except (ImportError, AttributeError) as e:
                     logger.warning(f"⚠️  Could not configure safety_settings in generate(): {e}, will use default")
                     safety_settings_simple = None
@@ -390,19 +405,43 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
         
         if retrieved_memory:
             # Format memory context - neutral, factual language (no imperatives)
+            # RISK MITIGATION: Limit memory context to reduce prompt complexity and safety filter triggers
+            # Gemini 3 suggests that very long prompts (5000+ chars) with technical/sensitive content
+            # can trigger HARM_CATEGORY_DANGEROUS_CONTENT or HARM_CATEGORY_HARASSMENT filters
             memory_context = "\n\n=== Context Information from Files and Memory ===\n"
             memory_context += "The following information has been retrieved from uploaded files and previous conversations.\n\n"
             
-            for i, mem in enumerate(retrieved_memory, 1):
-                max_chars = 5000
-                if len(mem) > max_chars:
-                    memory_context += f"{i}. {mem[:max_chars]}... [content truncated - file is {len(mem)} chars total]\n\n"
+            # Reduce max_chars per memory item to mitigate safety filter triggers
+            # Original: 5000 chars per item (could be too much)
+            # New: 2000 chars per item, max 3 items (total ~6000 chars max instead of potentially 15000+)
+            max_chars_per_item = 2000
+            max_memory_items = 3
+            total_memory_chars = 0
+            max_total_memory_chars = 6000  # Total limit for all memory combined
+            
+            for i, mem in enumerate(retrieved_memory[:max_memory_items], 1):
+                if total_memory_chars >= max_total_memory_chars:
+                    logger.debug(f"⚠️  Memory context truncated: reached total limit of {max_total_memory_chars} chars")
+                    break
+                
+                remaining_chars = max_total_memory_chars - total_memory_chars
+                item_max_chars = min(max_chars_per_item, remaining_chars)
+                
+                if len(mem) > item_max_chars:
+                    truncated = mem[:item_max_chars]
+                    memory_context += f"{i}. {truncated}... [content truncated - file is {len(mem)} chars total]\n\n"
+                    total_memory_chars += item_max_chars
                 else:
                     memory_context += f"{i}. {mem}\n\n"
+                    total_memory_chars += len(mem)
+            
+            if len(retrieved_memory) > max_memory_items:
+                memory_context += f"\n[Note: {len(retrieved_memory) - max_memory_items} additional memory items were omitted to reduce prompt complexity]\n"
             
             memory_context += "\n=== End of Context Information ===\n"
             # No imperative instructions - let the model use memory naturally
             enhanced_system += memory_context
+            logger.debug(f"📊 Memory context added: {len(retrieved_memory)} items, {total_memory_chars} chars total (limited to reduce safety filter triggers)")
         
         # Add tools description if provided
         if tools_description:
