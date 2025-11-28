@@ -1,0 +1,421 @@
+"""
+Vertex AI Client - Alternative to Gemini REST API
+
+This client uses Google Vertex AI instead of the direct Gemini REST API.
+Vertex AI may have different safety policies and could resolve blocking issues.
+"""
+import logging
+from typing import List, Dict, Optional, Any
+from app.core.config import settings
+import json
+import time
+
+logger = logging.getLogger(__name__)
+
+try:
+    from google import genai
+    from google.genai.types import HttpOptions, SafetySetting, HarmCategory, HarmBlockThreshold
+    from google.auth import default
+    import google.auth.transport.requests
+    VERTEX_AI_AVAILABLE = True
+except ImportError as e:
+    VERTEX_AI_AVAILABLE = False
+    logger.warning(f"Vertex AI SDK not installed: {e}. Install with: pip install google-genai")
+
+class VertexAIClient:
+    """
+    Vertex AI client compatible with GeminiClient interface.
+    
+    Uses Google Vertex AI instead of direct Gemini REST API.
+    This may resolve safety filter blocking issues.
+    """
+    
+    def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None):
+        """
+        Initialize Vertex AI client.
+        
+        Args:
+            base_url: Ignored for Vertex AI (uses Google Cloud auth)
+            model: Gemini model name (default: settings.gemini_model)
+        """
+        if not VERTEX_AI_AVAILABLE:
+            raise ImportError(
+                "google-genai is not installed. "
+                "Install with: pip install google-genai"
+            )
+        
+        if not settings.google_cloud_project_id:
+            raise ValueError(
+                "GOOGLE_CLOUD_PROJECT_ID is required for Vertex AI but not set. "
+                "Set it in your .env file or environment variables."
+            )
+        
+        self.model_name = model or settings.gemini_model
+        self.project_id = settings.google_cloud_project_id
+        self.location = settings.google_cloud_location or "us-central1"
+        self.client = None
+        self.credentials = None
+        
+        # Initialize authentication
+        try:
+            # Priority 1: Use GOOGLE_APPLICATION_CREDENTIALS if set (Service Account JSON file)
+            import os
+            if os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+                from google.oauth2 import service_account
+                credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+                self.credentials = service_account.Credentials.from_service_account_file(
+                    credentials_path,
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+                logger.info(f"✅ Vertex AI authentication using Service Account JSON file: {credentials_path}")
+            else:
+                # Use Application Default Credentials
+                self.credentials, _ = default()
+                logger.info("✅ Vertex AI authentication using Application Default Credentials")
+        except Exception as e:
+            logger.error(f"❌ Vertex AI authentication failed: {e}")
+            logger.error("💡 Tip: Configure Application Default Credentials with: gcloud auth application-default login")
+            raise ValueError(f"Failed to authenticate with Google Cloud: {e}")
+        
+        # Initialize client
+        self._init_client()
+
+    def _init_client(self):
+        try:
+            # Vertex AI requires vertexai=True, project, and location parameters
+            self.client = genai.Client(
+                vertexai=True,
+                project=self.project_id,
+                location=self.location,
+                credentials=self.credentials,
+                http_options=HttpOptions(api_version="v1"),
+            )
+            logger.info(f"✅ Vertex AI client initialized (model: {self.model_name}, project: {self.project_id}, location: {self.location})")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Vertex AI client: {e}")
+            raise
+    
+    def _convert_parameters_to_gemini_schema(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert JSON Schema parameters to Gemini function calling schema"""
+        # Gemini uses a simplified schema format
+        # Convert from JSON Schema to Gemini format
+        properties = params.get("properties", {})
+        required = params.get("required", [])
+        
+        gemini_properties = {}
+        gemini_required = []
+        
+        for prop_name, prop_schema in properties.items():
+            prop_type = prop_schema.get("type", "string")
+            prop_desc = prop_schema.get("description", "")
+            
+            # Map JSON Schema types to Gemini types
+            gemini_type = "STRING"
+            if prop_type == "integer" or prop_type == "number":
+                gemini_type = "NUMBER"
+            elif prop_type == "boolean":
+                gemini_type = "BOOLEAN"
+            elif prop_type == "array":
+                gemini_type = "ARRAY"
+            elif prop_type == "object":
+                gemini_type = "OBJECT"
+            
+            gemini_prop = {
+                "type": gemini_type,
+                "description": prop_desc
+            }
+            
+            # For arrays, preserve the items schema (required by Gemini)
+            if prop_type == "array":
+                if "items" in prop_schema:
+                    items_schema = prop_schema["items"]
+                    items_type = items_schema.get("type", "string")
+                    
+                    # Map items type to Gemini type
+                    if items_type == "array":
+                        # Nested array - preserve items recursively
+                        # For nested arrays, we need to create an ARRAY type with its own items
+                        nested_items_schema = {}
+                        if "items" in items_schema:
+                            nested_items_type = items_schema["items"].get("type", "string")
+                            nested_gemini_type = "STRING"
+                            if nested_items_type == "integer" or nested_items_type == "number":
+                                nested_gemini_type = "NUMBER"
+                            elif nested_items_type == "boolean":
+                                nested_gemini_type = "BOOLEAN"
+                            elif nested_items_type == "object":
+                                nested_gemini_type = "OBJECT"
+                            nested_items_schema = {"type": nested_gemini_type}
+                        else:
+                            # Nested array without items - default to STRING
+                            nested_items_schema = {"type": "STRING"}
+                        # Create ARRAY with nested items
+                        gemini_prop["items"] = {
+                            "type": "ARRAY",
+                            "items": nested_items_schema
+                        }
+                    else:
+                        # Simple array (not nested)
+                        gemini_items_type = "STRING"
+                        if items_type == "integer" or items_type == "number":
+                            gemini_items_type = "NUMBER"
+                        elif items_type == "boolean":
+                            gemini_items_type = "BOOLEAN"
+                        elif items_type == "object":
+                            gemini_items_type = "OBJECT"
+                        gemini_prop["items"] = {"type": gemini_items_type}
+                else:
+                    # Array without items specified - default to STRING array (required by Gemini)
+                    gemini_prop["items"] = {"type": "STRING"}
+            
+            gemini_properties[prop_name] = gemini_prop
+            
+            if prop_name in required:
+                gemini_required.append(prop_name)
+        
+        return {
+            "type": "OBJECT",
+            "properties": gemini_properties,
+            "required": gemini_required
+        }
+
+    async def list_models(self) -> List[str]:
+        """List available Gemini models"""
+        try:
+            # Gemini has a fixed set of models
+            # Return common models
+            return [
+                "gemini-1.5-pro",
+                "gemini-1.5-flash",
+                "gemini-1.5-pro-latest",
+                "gemini-1.5-flash-latest",
+                "gemini-pro",
+                "gemini-pro-vision"
+            ]
+        except Exception as e:
+            logger.error(f"Error listing Gemini models: {e}", exc_info=True)
+            return []
+    
+    async def close(self):
+        """Close the client (no-op for Gemini as it is stateless)"""
+        self.client = None
+
+    def _create_safety_settings(self, block_none: bool = False) -> List[SafetySetting]:
+        """
+        Create safety settings for Vertex AI.
+        
+            block_none: If True, set all categories to BLOCK_NONE
+            
+        Returns:
+            List of SafetySetting objects
+        """
+        threshold = HarmBlockThreshold.BLOCK_NONE if block_none else HarmBlockThreshold.BLOCK_ONLY_HIGH
+        
+        return [
+            SafetySetting(
+                category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+                threshold=threshold,
+            ),
+            SafetySetting(
+                category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                threshold=threshold,
+            ),
+            SafetySetting(
+                category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                threshold=threshold,
+            ),
+            SafetySetting(
+                category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                threshold=threshold,
+            ),
+        ]
+    
+    async def generate(
+        self,
+        prompt: str,
+        context: Optional[List[Dict[str, str]]] = None,
+        system: Optional[str] = None,
+        stream: bool = False,
+    ) -> Dict[str, Any]:
+        """Generate a response from Vertex AI (compatible with GeminiClient.generate)
+        """
+        from app.core.tracing import trace_span, set_trace_attribute, add_trace_event
+        from app.core.metrics import increment_counter, observe_histogram
+        
+        start_time = time.time()
+        
+        # Build contents for Vertex AI
+        # Vertex AI expects simple string or list of strings, not dict with role/parts
+        if context:
+            # Build conversation history as list of strings
+            contents = []
+            for msg in context:
+                content = msg.get("content", "")
+                if content:  # Skip empty messages
+                    contents.append(content)
+            # Add current prompt
+            contents.append(prompt)
+        else:
+            # Simple prompt without context
+            contents = prompt
+        
+        # Create safety settings
+        safety_settings = self._create_safety_settings(block_none=False)
+        
+        # Prepare config
+        config = {}
+        if system:
+            config["system_instruction"] = system
+        config["safety_settings"] = safety_settings
+        
+        try:
+            with trace_span("vertex_ai.generate"):
+                set_trace_attribute("vertex_ai.model", self.model_name)
+                set_trace_attribute("vertex_ai.project", self.project_id)
+                
+                # Generate content
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=config,
+                )
+                
+                response_text = response.text if hasattr(response, 'text') and response.text else None
+                
+                if response_text is None:
+                    # Try to extract text from response object
+                    if hasattr(response, 'candidates') and response.candidates:
+                        candidate = response.candidates[0]
+                        if hasattr(candidate, 'content') and candidate.content:
+                            if hasattr(candidate.content, 'parts'):
+                                parts = candidate.content.parts
+                                if parts:
+                                    response_text = parts[0].text if hasattr(parts[0], 'text') else str(parts[0])
+                    
+                    if response_text is None:
+                        response_text = str(response) if response else ""
+                
+                # Return in Ollama-compatible format
+                return {
+                    "model": self.model_name,
+                    "response": response_text,
+                    "done": True,
+                    "context": context + [{"role": "user", "content": prompt}] if context else [{"role": "user", "content": prompt}],
+                }
+        
+        except Exception as e:
+            logger.error(f"❌ Vertex AI generate error: {e}", exc_info=True)
+            raise
+    
+    async def generate_with_context(
+        self,
+        prompt: str,
+        session_context: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+        retrieved_memory: Optional[List[str]] = None,
+        tools_description: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        format: Optional[str] = None,
+        return_raw: bool = False,
+        disable_safety_filters: bool = False,
+    ) -> str:
+        """Generate response with full context (compatible with GeminiClient.generate_with_context)
+        """
+        from app.core.tracing import trace_span, set_trace_attribute
+        
+        start_time = time.time()
+        
+        with trace_span("vertex_ai.generate_with_context"):
+            set_trace_attribute("vertex_ai.model", self.model_name)
+            set_trace_attribute("vertex_ai.has_tools", bool(tools))
+            
+                        # Build contents from session context
+            # Vertex AI expects simple string or list of strings
+            contents = []
+            
+            for msg in session_context:
+                content = msg.get("content", "")
+                if content:  # Skip empty messages
+                    contents.append(content)
+            
+            # Add current prompt
+            contents.append(prompt)
+            
+            # Prepare config
+            config = {}
+            
+            if system_prompt:
+                config["system_instruction"] = system_prompt
+            
+            safety_settings = self._create_safety_settings(block_none=disable_safety_filters)
+            config["safety_settings"] = safety_settings
+            
+            if tools:
+                logger.info(f"🔧 Processing {len(tools)} tools for Vertex AI")
+                vertex_tools = []
+                for tool in tools:
+                    tool_name = tool.get("name", "unknown")
+                    if "function_declarations" in tool:
+                        logger.info(f"   Tool {tool_name}: Already in function_declarations format")
+                        vertex_tools.extend(tool["function_declarations"])
+                    elif "name" in tool and "parameters" in tool:
+                        logger.info(f"   Tool {tool_name}: Converting to function_declarations format")
+                        try:
+                            # Convert parameters to Vertex AI schema format (same as Gemini)
+                            vertex_schema = self._convert_parameters_to_gemini_schema(tool["parameters"])
+                            vertex_tools.append({
+                                "name": tool["name"],
+                                "description": tool.get("description", ""),
+                                "parameters": vertex_schema,
+                            })
+                        except Exception as e:
+                            logger.error(f"   ❌ Error converting tool {tool_name} parameters: {e}", exc_info=True)
+                            logger.error(f"   Tool params: {tool.get('parameters', {})}")
+                            # Fallback to original parameters
+                            vertex_tools.append({
+                                "name": tool["name"],
+                                "description": tool.get("description", ""),
+                                "parameters": tool["parameters"],
+                            })
+                    else:
+                        logger.warning(f"   Tool {tool_name}: Unknown format, skipping")
+                        logger.warning(f"   Tool keys: {list(tool.keys())}")
+                
+                if vertex_tools:
+                    config["tools"] = [{"function_declarations": vertex_tools}]
+                    logger.info(f"✅ Configured {len(vertex_tools)} tools for Vertex AI: {[t.get('name', 'unknown') for t in vertex_tools]}")
+                else:
+                    logger.warning("⚠️  No valid tools found after conversion")
+            
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=config,
+                )
+                
+                response_text = response.text if hasattr(response, 'text') and response.text else None
+                
+                if response_text is None:
+                    # Try to extract text from response object
+                    if hasattr(response, 'candidates') and response.candidates:
+                        candidate = response.candidates[0]
+                        if hasattr(candidate, 'content') and candidate.content:
+                            if hasattr(candidate.content, 'parts'):
+                                parts = candidate.content.parts
+                                if parts:
+                                    response_text = parts[0].text if hasattr(parts[0], 'text') else str(parts[0])
+                    
+                    if response_text is None:
+                        response_text = str(response) if response else ""
+                
+                logger.info(f"✅ Vertex AI response generated (length: {len(response_text) if response_text else 0} chars)")
+                return response_text or ""
+                return response_text or ""
+            
+            except Exception as e:
+                logger.error(f"❌ Vertex AI generate_with_context error: {e}", exc_info=True)
+                if hasattr(e, 'finish_reason') and e.finish_reason == 1:
+                    logger.error("⚠️  Vertex AI blocked the request due to safety filters")
+                    raise ValueError("La risposta è stata bloccata dai filtri di sicurezza di Vertex AI.")
+                raise
