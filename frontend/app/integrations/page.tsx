@@ -197,6 +197,11 @@ export default function IntegrationsPage() {
       ])
       let calendarList: Integration[] = calendarResponse.data.integrations || []
       let emailList: Integration[] = emailResponse.data.integrations || []
+      
+      // Debug logging
+      console.log('📧 loadIntegrations - emailList:', emailList)
+      console.log('📧 loadIntegrations - isAdmin:', isAdmin)
+      console.log('📧 loadIntegrations - emailResponse:', emailResponse.data)
 
       if (promptCleanup) {
         const cleanupResult = await maybeCleanupDuplicates(calendarList, emailList)

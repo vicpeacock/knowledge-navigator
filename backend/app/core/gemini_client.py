@@ -52,6 +52,7 @@ class GeminiClient:
         genai.configure(api_key=settings.gemini_api_key)
         
         self.model_name = model or settings.gemini_model
+        self.alternative_model = settings.gemini_alternative_model  # Alternative model to try if main model fails
         self.client = None  # Will be initialized on first use
         
     def _get_model(self):
@@ -321,9 +322,9 @@ class GeminiClient:
         # System prompt for Gemini - optimized to reduce safety filter triggers
         # Use neutral, factual language to avoid triggering safety filters
         # Keep it simple and direct to minimize safety filter triggers
-        base_system_prompt = """You are an assistant that provides factual information based on tool results.
+        base_system_prompt = """You are a helpful assistant with access to tools for calendar, email, and web search.
 
-Your role is to synthesize information from tools and present it clearly to users. Use neutral, professional language. Focus on facts and avoid subjective interpretations."""
+Use the appropriate tool based on user requests. Provide factual responses based on tool results."""
         
         enhanced_system = system_prompt or base_system_prompt
         
@@ -597,6 +598,8 @@ Your role is to synthesize information from tools and present it clearly to user
         }):
             try:
                 # Build chat history from messages
+                # CRITICAL: Gemini requires perfect alternation: user -> model -> user -> model
+                # The last message in history MUST be "model" before sending new user message
                 history = []
                 for i in range(0, len(messages) - 1, 2):
                     if i + 1 < len(messages):
@@ -609,9 +612,17 @@ Your role is to synthesize information from tools and present it clearly to user
                                 history.append({"role": "user", "parts": [user_content]})
                                 history.append({"role": "model", "parts": [assistant_content]})
                             else:
-                                # If no assistant response, add empty one
+                                # If no assistant response, add empty one to maintain alternation
                                 history.append({"role": "user", "parts": [user_content]})
                                 history.append({"role": "model", "parts": [""]})
+                
+                # CRITICAL: Verify history ends with "model" role
+                if history and history[-1]["role"] != "model":
+                    logger.warning(f"⚠️  History does not end with 'model' role! Last role: {history[-1]['role']}")
+                    logger.warning(f"   Adding empty model message to fix alternation...")
+                    history.append({"role": "model", "parts": [""]})
+                
+                logger.debug(f"📝 Built history with {len(history)} messages, last role: {history[-1]['role'] if history else 'empty'}")
                 
                 # Configure model with system instruction and tools
                 model_config = {}
@@ -664,6 +675,80 @@ Your role is to synthesize information from tools and present it clearly to user
                 # Send last message
                 last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
                 
+                # DEBUG: Log the EXACT input being sent to Gemini (FULL CONTENT)
+                logger.error("=" * 80)
+                logger.error("🔍🔍🔍 EXACT INPUT TO GEMINI - FULL CONTENT 🔍🔍🔍")
+                logger.error("=" * 80)
+                logger.error(f"📋 Model: {self.model_name}")
+                logger.error(f"")
+                logger.error(f"📝 SYSTEM INSTRUCTION (length: {len(system_content) if system_content else 0} chars):")
+                logger.error("-" * 80)
+                if system_content:
+                    logger.error(system_content)
+                else:
+                    logger.error("(empty)")
+                logger.error("-" * 80)
+                logger.error(f"")
+                logger.error(f"💬 HISTORY (length: {len(history)} messages):")
+                logger.error("-" * 80)
+                if history:
+                    for i, h in enumerate(history):
+                        role = h.get('role', 'unknown')
+                        parts = h.get('parts', [])
+                        parts_str = str(parts) if parts else "(empty)"
+                        logger.error(f"  [{i+1}] Role: {role}")
+                        logger.error(f"      Parts: {parts_str[:500]}{'...' if len(parts_str) > 500 else ''}")
+                else:
+                    logger.error("  (empty)")
+                logger.error("-" * 80)
+                logger.error(f"")
+                logger.error(f"📨 LAST MESSAGE (user input, length: {len(last_msg) if last_msg else 0} chars):")
+                logger.error("-" * 80)
+                if last_msg:
+                    logger.error(last_msg)
+                else:
+                    logger.error("(empty)")
+                logger.error("-" * 80)
+                logger.error(f"")
+                logger.error(f"🔧 TOOLS (count: {len(gemini_tools) if gemini_tools else 0}):")
+                logger.error("-" * 80)
+                if gemini_tools:
+                    for i, tool in enumerate(gemini_tools):
+                        func_decl = tool.get("function_declarations", [{}])[0] if tool.get("function_declarations") else {}
+                        name = func_decl.get("name", "unknown")
+                        desc = func_decl.get("description", "")
+                        params = func_decl.get("parameters", {})
+                        logger.error(f"  [{i+1}] {name}")
+                        logger.error(f"      Description: {desc[:200]}{'...' if len(desc) > 200 else ''}")
+                        logger.error(f"      Parameters: {str(params)[:300]}{'...' if len(str(params)) > 300 else ''}")
+                else:
+                    logger.error("  (no tools)")
+                logger.error("-" * 80)
+                logger.error(f"")
+                logger.error(f"🛡️  SAFETY SETTINGS (count: {len(safety_settings) if safety_settings else 0} categories):")
+                logger.error("-" * 80)
+                if safety_settings:
+                    for i, setting in enumerate(safety_settings):
+                        if isinstance(setting, dict):
+                            cat = setting.get('category', 'unknown')
+                            thresh = setting.get('threshold', 'unknown')
+                            logger.error(f"  [{i+1}] Category: {cat}, Threshold: {thresh}")
+                        else:
+                            cat = getattr(setting, 'category', 'unknown')
+                            thresh = getattr(setting, 'threshold', 'unknown')
+                            logger.error(f"  [{i+1}] Category: {cat}, Threshold: {thresh}")
+                else:
+                    logger.error("  (default safety settings)")
+                logger.error("-" * 80)
+                logger.error(f"")
+                logger.error(f"⚙️  GENERATION CONFIG:")
+                logger.error("-" * 80)
+                logger.error(f"  {generation_config}")
+                logger.error("-" * 80)
+                logger.error("=" * 80)
+                logger.error("🔍🔍🔍 END OF EXACT INPUT TO GEMINI 🔍🔍🔍")
+                logger.error("=" * 80)
+                
                 # CRITICAL: If safety_settings are already in model_config, they are applied to the model instance
                 # and will be used automatically in all chat.send_message() calls. 
                 # DO NOT pass them again to send_message - this is redundant and can cause issues.
@@ -681,12 +766,51 @@ Your role is to synthesize information from tools and present it clearly to user
                             logger.info(f"   Safety settings format: SafetySetting objects (category={first_setting.category}, threshold={first_setting.threshold})")
                         elif isinstance(first_setting, dict):
                             logger.info(f"   Safety settings format: dict (category={first_setting.get('category')}, threshold={first_setting.get('threshold')})")
-                else:
-                    if safety_settings:
-                        logger.debug(f"✅ Safety settings already in model_config, will be used automatically by chat.send_message()")
+                
+                if safety_settings:
+                    logger.debug(f"✅ Safety settings already in model_config, will be used automatically by chat.send_message()")
                 
                 # Do not pass safety_settings if they're already in model_config
+                logger.info(f"🔍 DEBUG: About to call _generate_async with:")
+                logger.info(f"   Message length: {len(last_msg) if last_msg else 0}")
+                logger.info(f"   Generation config: {generation_config}")
+                logger.info(f"   Safety settings to pass: {safety_settings_to_pass is not None}")
+                
                 response = await self._generate_async(chat, last_msg, generation_config=generation_config, safety_settings=safety_settings_to_pass)
+                
+                logger.info(f"🔍 DEBUG: Response received from Gemini:")
+                logger.info(f"   Response type: {type(response)}")
+                if hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    logger.info(f"   Finish reason: {getattr(candidate, 'finish_reason', 'N/A')}")
+                    
+                    # Check for function calls FIRST before trying to access response.text
+                    has_function_calls = False
+                    if hasattr(candidate, 'content') and candidate.content:
+                        parts = getattr(candidate.content, 'parts', None)
+                        if parts is not None:
+                            for part in parts:
+                                if hasattr(part, 'function_call') and part.function_call:
+                                    has_function_calls = True
+                                    break
+                    
+                    logger.info(f"   Has function calls: {has_function_calls}")
+                    
+                    # Only try to access response.text if there are NO function calls
+                    if not has_function_calls:
+                        try:
+                            # Use getattr with default to avoid accessing response.text property
+                            # which raises ValueError if function calls are present
+                            text_attr = getattr(response, 'text', None)
+                            if text_attr is not None:
+                                text_preview = str(text_attr)[:200] if text_attr else "Empty"
+                                logger.info(f"   Text preview: {text_preview}")
+                            else:
+                                logger.info(f"   No text attribute available")
+                        except (ValueError, AttributeError) as e:
+                            logger.info(f"   Text access failed: {e}")
+                    else:
+                        logger.info(f"   Skipping text access (function calls present)")
                 
                 duration = time.time() - start_time
                 observe_histogram("llm_request_duration_seconds", duration, labels={"model": self.model_name, "provider": "gemini"})
@@ -715,7 +839,117 @@ Your role is to synthesize information from tools and present it clearly to user
                 # Handle safety blocks ONLY if there are no function calls
                 # If there are function calls, process them normally (safety block might be only on text response)
                 if finish_reason == 1 and not has_function_calls:  # SAFETY and no function calls
-                    logger.warning(f"Gemini response blocked by safety filters (finish_reason=1) in generate_with_context, no function calls available")
+                    logger.warning(f"🔴 Gemini response blocked by safety filters (finish_reason=1) in generate_with_context, no function calls available")
+                    
+                    # Try alternative model if available and current model is flash
+                    if self.alternative_model and self.model_name == settings.gemini_model and "flash" in self.model_name.lower():
+                        logger.info(f"🔄 Trying alternative model: {self.alternative_model}")
+                        original_model = self.model_name
+                        self.model_name = self.alternative_model
+                        try:
+                            # Retry with alternative model
+                            response = await self._generate_async(chat, last_msg, generation_config=generation_config, safety_settings=safety_settings_to_pass)
+                            # Check if alternative model worked
+                            if hasattr(response, 'candidates') and response.candidates:
+                                candidate = response.candidates[0]
+                                alt_finish_reason = getattr(candidate, 'finish_reason', None)
+                                if alt_finish_reason != 1:  # Not blocked
+                                    logger.info(f"✅ Alternative model {self.alternative_model} succeeded!")
+                                    # Continue with alternative model response
+                                else:
+                                    logger.warning(f"⚠️  Alternative model {self.alternative_model} also blocked")
+                                    self.model_name = original_model  # Revert
+                            else:
+                                self.model_name = original_model  # Revert
+                        except Exception as e:
+                            logger.error(f"❌ Error with alternative model: {e}")
+                            self.model_name = original_model  # Revert
+                            # Continue with original error handling below
+                    
+                    # DEBUG: Inspect prompt_feedback (if block is on input)
+                    # CRITICAL: According to Gemini, if safety_ratings in response are empty,
+                    # the problem is in the INPUT, and details are in prompt_feedback.safety_ratings
+                    if hasattr(response, 'prompt_feedback'):
+                        prompt_feedback = response.prompt_feedback
+                        logger.error(f"🔍 PROMPT_FEEDBACK (input block) - THIS IS WHERE THE PROBLEM IS:")
+                        logger.error(f"   Type: {type(prompt_feedback)}")
+                        logger.error(f"   All attributes: {[x for x in dir(prompt_feedback) if not x.startswith('_')]}")
+                        
+                        if prompt_feedback:
+                            if hasattr(prompt_feedback, 'block_reason'):
+                                block_reason = prompt_feedback.block_reason
+                                logger.error(f"   Block reason: {block_reason} (type: {type(block_reason)})")
+                                try:
+                                    if hasattr(block_reason, 'name'):
+                                        logger.error(f"   Block reason name: {block_reason.name}")
+                                    if hasattr(block_reason, 'value'):
+                                        logger.error(f"   Block reason value: {block_reason.value}")
+                                except:
+                                    pass
+                            
+                            # CRITICAL: Check prompt_feedback.safety_ratings
+                            if hasattr(prompt_feedback, 'safety_ratings'):
+                                safety_ratings = prompt_feedback.safety_ratings
+                                logger.error(f"   🔑 PROMPT_FEEDBACK.safety_ratings (type: {type(safety_ratings)}, length: {len(safety_ratings) if safety_ratings else 0}):")
+                                if safety_ratings and len(safety_ratings) > 0:
+                                    logger.error(f"     ✅ FOUND {len(safety_ratings)} safety ratings in prompt_feedback!")
+                                    for i, rating in enumerate(safety_ratings):
+                                        logger.error(f"     Rating {i}: {type(rating)}")
+                                        logger.error(f"       Full repr: {repr(rating)}")
+                                        try:
+                                            category = None
+                                            if hasattr(rating, 'category'):
+                                                category = rating.category
+                                                if hasattr(category, 'name'):
+                                                    category = category.name
+                                                elif hasattr(category, 'value'):
+                                                    category = category.value
+                                            
+                                            probability = None
+                                            if hasattr(rating, 'probability'):
+                                                probability = rating.probability
+                                                if hasattr(probability, 'name'):
+                                                    probability = probability.name
+                                                elif hasattr(probability, 'value'):
+                                                    probability = probability.value
+                                            
+                                            blocked = getattr(rating, 'blocked', False)
+                                            logger.error(f"       ✅ Category: {category}, Probability: {probability}, Blocked: {blocked}")
+                                        except Exception as e:
+                                            logger.error(f"       ❌ Error: {e}")
+                                            logger.error(f"       Rating dir: {[x for x in dir(rating) if not x.startswith('_')]}")
+                                else:
+                                    logger.error(f"     ⚠️  No safety ratings in prompt_feedback (empty or None)")
+                                    logger.error(f"     This suggests the block is at infrastructure level, not content level")
+                            else:
+                                logger.error(f"   ⚠️  No safety_ratings attribute in prompt_feedback")
+                        else:
+                            logger.error(f"   ⚠️  prompt_feedback is None or empty")
+                    
+                    # DEBUG: Inspect safety_ratings on output (if block is on output)
+                    if hasattr(response, 'candidates') and response.candidates:
+                        candidate = response.candidates[0]
+                        if hasattr(candidate, 'safety_ratings'):
+                            safety_ratings = candidate.safety_ratings
+                            logger.error(f"🔍 SAFETY_RATINGS on OUTPUT (type: {type(safety_ratings)}, length: {len(safety_ratings) if safety_ratings else 0}):")
+                            if safety_ratings and len(safety_ratings) > 0:
+                                for i, rating in enumerate(safety_ratings):
+                                    logger.error(f"     Rating {i}: {type(rating)}")
+                                    logger.error(f"       Repr: {repr(rating)[:300]}")
+                                    try:
+                                        category = getattr(rating, 'category', None)
+                                        if category is None:
+                                            category = str(rating.category) if hasattr(rating, 'category') else 'UNKNOWN'
+                                        probability = getattr(rating, 'probability', None)
+                                        if probability is None:
+                                            probability = str(rating.probability) if hasattr(rating, 'probability') else 'UNKNOWN'
+                                        blocked = getattr(rating, 'blocked', False)
+                                        logger.error(f"       Category: {category}, Probability: {probability}, Blocked: {blocked}")
+                                    except Exception as e:
+                                        logger.error(f"       Error: {e}")
+                            else:
+                                logger.error(f"     (No safety ratings - empty or None)")
+                    
                     # IMPORTANT: If tools were available but Gemini was blocked before calling them,
                     # this might be a false positive. Log this case for debugging.
                     if gemini_tools and len(gemini_tools) > 0:
@@ -726,6 +960,7 @@ Your role is to synthesize information from tools and present it clearly to user
                         # Log the prompt that triggered the block (first 200 chars)
                         logger.warning(f"   Prompt preview: {last_msg[:200] if 'last_msg' in locals() else 'N/A'}")
                         logger.warning(f"   System instruction length: {len(system_content) if system_content else 0}")
+                    
                     # Return empty string instead of generic error message
                     # This allows the caller to extract results from tool execution
                     return {
@@ -785,21 +1020,99 @@ Your role is to synthesize information from tools and present it clearly to user
                 
                 # Handle safety blocks when tools=None (no function calls expected)
                 if finish_reason == 1 and not has_function_calls:
-                    logger.warning(f"Gemini response blocked by safety filters (finish_reason=1) in generate_with_context")
-                    # Return empty string to allow caller to extract results from tools if available
-                    if return_raw:
-                        return {
-                            "model": self.model_name,
-                            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-                            "message": {
-                                "role": "assistant",
-                                "content": ""  # Empty content to trigger fallback in caller
-                            },
-                            "tool_calls": [],
-                            "done": True
-                        }
-                    else:
-                        return ""  # Return empty string to trigger fallback
+                    logger.warning(f"🔴 Gemini response blocked by safety filters (finish_reason=1) in generate_with_context")
+                    
+                    # DEBUG: Inspect prompt_feedback (if block is on input)
+                    # CRITICAL: According to Gemini, if safety_ratings in response are empty,
+                    # the problem is in the INPUT, and details are in prompt_feedback.safety_ratings
+                    if hasattr(response, 'prompt_feedback'):
+                        prompt_feedback = response.prompt_feedback
+                        logger.error(f"🔍 PROMPT_FEEDBACK (input block) - THIS IS WHERE THE PROBLEM IS:")
+                        logger.error(f"   Type: {type(prompt_feedback)}")
+                        logger.error(f"   All attributes: {[x for x in dir(prompt_feedback) if not x.startswith('_')]}")
+                        
+                        if prompt_feedback:
+                            if hasattr(prompt_feedback, 'block_reason'):
+                                block_reason = prompt_feedback.block_reason
+                                logger.error(f"   Block reason: {block_reason} (type: {type(block_reason)})")
+                                try:
+                                    if hasattr(block_reason, 'name'):
+                                        logger.error(f"   Block reason name: {block_reason.name}")
+                                    if hasattr(block_reason, 'value'):
+                                        logger.error(f"   Block reason value: {block_reason.value}")
+                                except:
+                                    pass
+                            
+                            # CRITICAL: Check prompt_feedback.safety_ratings
+                            if hasattr(prompt_feedback, 'safety_ratings'):
+                                safety_ratings = prompt_feedback.safety_ratings
+                                logger.error(f"   🔑 PROMPT_FEEDBACK.safety_ratings (type: {type(safety_ratings)}, length: {len(safety_ratings) if safety_ratings else 0}):")
+                                if safety_ratings and len(safety_ratings) > 0:
+                                    logger.error(f"     ✅ FOUND {len(safety_ratings)} safety ratings in prompt_feedback!")
+                                    for i, rating in enumerate(safety_ratings):
+                                        logger.error(f"     Rating {i}: {type(rating)}")
+                                        logger.error(f"       Full repr: {repr(rating)}")
+                                        try:
+                                            category = None
+                                            if hasattr(rating, 'category'):
+                                                category = rating.category
+                                                if hasattr(category, 'name'):
+                                                    category = category.name
+                                                elif hasattr(category, 'value'):
+                                                    category = category.value
+                                            
+                                            probability = None
+                                            if hasattr(rating, 'probability'):
+                                                probability = rating.probability
+                                                if hasattr(probability, 'name'):
+                                                    probability = probability.name
+                                                elif hasattr(probability, 'value'):
+                                                    probability = probability.value
+                                            
+                                            blocked = getattr(rating, 'blocked', False)
+                                            logger.error(f"       ✅ Category: {category}, Probability: {probability}, Blocked: {blocked}")
+                                        except Exception as e:
+                                            logger.error(f"       ❌ Error: {e}")
+                                            logger.error(f"       Rating dir: {[x for x in dir(rating) if not x.startswith('_')]}")
+                                else:
+                                    logger.error(f"     ⚠️  No safety ratings in prompt_feedback (empty or None)")
+                                    logger.error(f"     This suggests the block is at infrastructure level, not content level")
+                            else:
+                                logger.error(f"   ⚠️  No safety_ratings attribute in prompt_feedback")
+                        else:
+                            logger.error(f"   ⚠️  prompt_feedback is None or empty")
+                    
+                    # DEBUG: Inspect safety_ratings on output (if block is on output)
+                    if hasattr(response, 'candidates') and response.candidates:
+                        candidate = response.candidates[0]
+                        if hasattr(candidate, 'safety_ratings'):
+                            safety_ratings = candidate.safety_ratings
+                            logger.error(f"🔍 SAFETY_RATINGS on OUTPUT (type: {type(safety_ratings)}, length: {len(safety_ratings) if safety_ratings else 0}):")
+                            if safety_ratings and len(safety_ratings) > 0:
+                                for i, rating in enumerate(safety_ratings):
+                                    logger.error(f"     Rating {i}: {type(rating)}")
+                                    logger.error(f"       Repr: {repr(rating)[:300]}")
+                                    try:
+                                        category = getattr(rating, 'category', None)
+                                        if category is None:
+                                            category = str(rating.category) if hasattr(rating, 'category') else 'UNKNOWN'
+                                        probability = getattr(rating, 'probability', None)
+                                        if probability is None:
+                                            probability = str(rating.probability) if hasattr(rating, 'probability') else 'UNKNOWN'
+                                        blocked = getattr(rating, 'blocked', False)
+                                        logger.error(f"       Category: {category}, Probability: {probability}, Blocked: {blocked}")
+                                    except Exception as e:
+                                        logger.error(f"       Error: {e}")
+                            else:
+                                logger.error(f"     (No safety ratings - empty or None)")
+                    
+                    # When Gemini blocks, raise an exception so the caller can handle it properly
+                    # This is better than returning empty content, which might be silently ignored
+                    raise ValueError(
+                        f"Gemini response blocked by safety filters (finish_reason=1). "
+                        f"Model: {self.model_name}. "
+                        f"Try rephrasing your request or using a different model."
+                    )
                 
                 # Only try to access response.text if there are no function calls
                 # (function calls cause response.text to fail)
