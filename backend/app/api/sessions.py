@@ -1232,9 +1232,38 @@ async def chat(
         existing_metadata = dict(session.session_metadata or {})
         pending_plan = existing_metadata.get("pending_plan")
 
+        time_context = f"""
+=== CONTESTO TEMPORALE E GEOGRAFICO ===
+Data e ora corrente: {date_italian}, {current_time_str} ({timezone_name})
+Località: {location}
+Giorno della settimana: {day_name}
+
+=== REGOLE DI CONVERSAZIONE ===
+- Se l'utente fa una DOMANDA, rispondi in modo completo e utile
+- Se l'utente fa un'AFFERMAZIONE o fornisce informazioni SENZA fare domande, rispondi brevemente:
+  * "Ok", "Perfetto", "Capito", "D'accordo" sono risposte appropriate
+  * Non è necessario cercare sempre una risposta elaborata
+  * Riconosci semplicemente l'informazione ricevuta
+- Sii naturale e conversazionale - non essere verboso quando non necessario
+
+⚠️ IMPORTANTE - WhatsApp Integration:
+L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool get_whatsapp_messages o send_whatsapp_message al momento. Se l'utente chiede qualcosa su WhatsApp, informa che l'integrazione WhatsApp non è disponibile e che verrà reintrodotta in futuro tramite le Business API. NON inventare risposte sui messaggi WhatsApp.
+
+# WhatsApp integration temporarily disabled - will be re-enabled with Business API
+# 🔴 REGOLE CRITICHE per richieste WhatsApp (QUANDO RIABILITATA):
+# 1. Se l'utente chiede QUALSIASI cosa su WhatsApp (messaggi, cosa ho ricevuto, messaggi di oggi, etc.), DEVI SEMPRE chiamare il tool get_whatsapp_messages PRIMA di rispondere
+# 2. NON assumere mai che WhatsApp non sia configurato senza aver chiamato il tool
+# 3. NON dire mai "non ho accesso" o "non posso" senza aver chiamato il tool
+# 4. Se l'utente chiede "messaggi di oggi", "cosa ho ricevuto oggi", "che messaggi ho ricevuto oggi", DEVI usare date_filter='today'
+# 5. Se l'utente chiede "ieri", usa date_filter='yesterday'
+# 6. Se il tool restituisce count=0, significa che non ci sono messaggi per quella data, NON che WhatsApp non è configurato
+# 7. Se il tool restituisce un errore esplicito, allora puoi dire che WhatsApp potrebbe non essere configurato
+"""
+
         try:
             logger.debug("🚀 Calling run_langgraph_chat...")
             print(f"[SESSIONS] Calling run_langgraph_chat", file=sys.stderr)
+            ollama._time_context = time_context
             langgraph_result = await run_langgraph_chat(
                 db=db,
                 session_id=session_id,
@@ -1416,33 +1445,6 @@ async def chat(
         
         date_italian = f"{day_name}, {current_time.day} {month_name} {current_time.year}"
         
-        time_context = f"""
-=== CONTESTO TEMPORALE E GEOGRAFICO ===
-Data e ora corrente: {date_italian}, {current_time_str} ({timezone_name})
-Località: {location}
-Giorno della settimana: {day_name}
-
-=== REGOLE DI CONVERSAZIONE ===
-- Se l'utente fa una DOMANDA, rispondi in modo completo e utile
-- Se l'utente fa un'AFFERMAZIONE o fornisce informazioni SENZA fare domande, rispondi brevemente:
-  * "Ok", "Perfetto", "Capito", "D'accordo" sono risposte appropriate
-  * Non è necessario cercare sempre una risposta elaborata
-  * Riconosci semplicemente l'informazione ricevuta
-- Sii naturale e conversazionale - non essere verboso quando non necessario
-
-⚠️ IMPORTANTE - WhatsApp Integration:
-L'integrazione WhatsApp basata su Selenium è stata rimossa. Non esistono tool get_whatsapp_messages o send_whatsapp_message al momento. Se l'utente chiede qualcosa su WhatsApp, informa che l'integrazione WhatsApp non è disponibile e che verrà reintrodotta in futuro tramite le Business API. NON inventare risposte sui messaggi WhatsApp.
-
-# WhatsApp integration temporarily disabled - will be re-enabled with Business API
-# 🔴 REGOLE CRITICHE per richieste WhatsApp (QUANDO RIABILITATA):
-# 1. Se l'utente chiede QUALSIASI cosa su WhatsApp (messaggi, cosa ho ricevuto, messaggi di oggi, etc.), DEVI SEMPRE chiamare il tool get_whatsapp_messages PRIMA di rispondere
-# 2. NON assumere mai che WhatsApp non sia configurato senza aver chiamato il tool
-# 3. NON dire mai "non ho accesso" o "non posso" senza aver chiamato il tool
-# 4. Se l'utente chiede "messaggi di oggi", "cosa ho ricevuto oggi", "che messaggi ho ricevuto oggi", DEVI usare date_filter='today'
-# 5. Se l'utente chiede "ieri", usa date_filter='yesterday'
-# 6. Se il tool restituisce count=0, significa che non ci sono messaggi per quella data, NON che WhatsApp non è configurato
-# 7. Se il tool restituisce un errore esplicito, allora puoi dire che WhatsApp potrebbe non essere configurato
-"""
     except Exception as e:
         logger.warning(f"Error getting time context: {e}")
         time_context = ""
