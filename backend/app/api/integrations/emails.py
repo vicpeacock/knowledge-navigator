@@ -636,6 +636,13 @@ async def list_service_email_integrations(
     result = await db.execute(query)
     integrations = result.scalars().all()
     
+    # Log for debugging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"📧 list_service_email_integrations: Found {len(integrations)} service email integrations for tenant {tenant_id}")
+    for integration in integrations:
+        logger.info(f"  - ID: {integration.id}, provider: {integration.provider}, enabled: {integration.enabled}, purpose: {integration.purpose}, user_id: {integration.user_id}")
+    
     return {
         "integrations": [
             {
