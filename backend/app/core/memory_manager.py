@@ -81,7 +81,8 @@ class MemoryManager:
             return self._collections_cache[collection_name]
         
         metadata = {
-            "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "00000000-0000-0000-0000-000000000000"
+            "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "00000000-0000-0000-0000-000000000000",
+            "_type": "collection"
         }
         logger = logging.getLogger(__name__)
         collection = None
