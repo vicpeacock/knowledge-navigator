@@ -394,24 +394,105 @@ class VertexAIClient:
                     config=config,
                 )
                 
-                response_text = response.text if hasattr(response, 'text') and response.text else None
+                # Parse response - check for function calls first (like GeminiClient)
+                content = ""
+                tool_calls = []
+                has_function_calls = False
+                finish_reason = None
                 
-                if response_text is None:
-                    # Try to extract text from response object
+                if hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'finish_reason'):
+                        finish_reason = candidate.finish_reason
+                        # Handle enum-like finish_reason
+                        if hasattr(finish_reason, 'name'):
+                            finish_reason_name = finish_reason.name
+                        elif hasattr(finish_reason, 'value'):
+                            finish_reason_name = str(finish_reason.value)
+                        else:
+                            finish_reason_name = str(finish_reason)
+                    else:
+                        finish_reason_name = None
+                    
+                    # Check for function calls in parts
+                    if hasattr(candidate, 'content') and candidate.content:
+                        if hasattr(candidate.content, 'parts'):
+                            parts = candidate.content.parts
+                            if parts:
+                                for part in parts:
+                                    # Check for function calls
+                                    if hasattr(part, 'function_call') and part.function_call:
+                                        has_function_calls = True
+                                        func_call = part.function_call
+                                        func_name = getattr(func_call, 'name', '')
+                                        func_args_str = getattr(func_call, 'args', '')
+                                        
+                                        # Parse function arguments
+                                        func_args = {}
+                                        if func_args_str:
+                                            if isinstance(func_args_str, str):
+                                                try:
+                                                    func_args = json.loads(func_args_str)
+                                                except json.JSONDecodeError:
+                                                    logger.warning(f"Could not parse function args as JSON: {func_args_str}")
+                                                    func_args = {}
+                                            elif isinstance(func_args_str, dict):
+                                                func_args = func_args_str
+                                        
+                                        if func_name:
+                                            tool_calls.append({
+                                                "name": func_name,
+                                                "parameters": func_args
+                                            })
+                                            logger.info(f"🔧 Found function call: {func_name} with args: {func_args}")
+                                    
+                                    # Extract text content
+                                    if hasattr(part, 'text') and part.text:
+                                        content += part.text
+                
+                # Handle MALFORMED_FUNCTION_CALL error
+                if finish_reason_name == 'MALFORMED_FUNCTION_CALL':
+                    logger.error(f"❌ Vertex AI returned MALFORMED_FUNCTION_CALL")
+                    logger.error(f"   Response: {response}")
+                    
+                    # Try to extract the malformed function call from finish_message
                     if hasattr(response, 'candidates') and response.candidates:
                         candidate = response.candidates[0]
                         if hasattr(candidate, 'content') and candidate.content:
                             if hasattr(candidate.content, 'parts'):
                                 parts = candidate.content.parts
                                 if parts:
-                                    response_text = parts[0].text if hasattr(parts[0], 'text') else str(parts[0])
+                                    for part in parts:
+                                        if hasattr(part, 'text') and part.text:
+                                            malformed_code = part.text
+                                            logger.error(f"   Malformed code: {malformed_code[:500]}")
                     
-                    if response_text is None:
-                        response_text = str(response) if response else ""
+                    # Raise error to be handled by caller
+                    raise ValueError(
+                        "Vertex AI generated malformed function call. "
+                        "This usually means the tool format is incorrect or Vertex AI couldn't parse the function call. "
+                        f"Finish reason: {finish_reason_name}"
+                    )
                 
-                logger.info(f"✅ Vertex AI response generated (length: {len(response_text) if response_text else 0} chars)")
-                return response_text or ""
-                return response_text or ""
+                # If we have function calls, return them in a format compatible with the system
+                if tool_calls:
+                    logger.info(f"✅ Vertex AI generated {len(tool_calls)} function calls")
+                    # Return as dict with tool calls (similar to GeminiClient format)
+                    return {
+                        "content": content,
+                        "_parsed_tool_calls": tool_calls,
+                        "raw_result": response
+                    }
+                
+                # If no function calls, return text content
+                if not content:
+                    # Fallback: try response.text
+                    content = response.text if hasattr(response, 'text') and response.text else ""
+                    if not content:
+                        content = str(response) if response else ""
+                
+                logger.info(f"✅ Vertex AI response generated (length: {len(content)} chars)")
+                return content
             
             except Exception as e:
                 logger.error(f"❌ Vertex AI generate_with_context error: {e}", exc_info=True)
