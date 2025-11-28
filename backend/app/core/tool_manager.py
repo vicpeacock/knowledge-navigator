@@ -1139,14 +1139,49 @@ class ToolManager:
             logger.info(f"   Parameters (normalized): {parameters}")
         
         # Find the MCP integration that provides this tool
-        result = await db.execute(
+        # CRITICAL: Prefer user's integration over global admin integration
+        # Get tenant_id and user_id from session or current_user
+        tenant_id = self.tenant_id
+        user_id = None
+        
+        if current_user:
+            user_id = current_user.id
+            if not tenant_id:
+                tenant_id = current_user.tenant_id if hasattr(current_user, 'tenant_id') else None
+        elif session_id:
+            try:
+                session_result = await db.execute(
+                    select(SessionModel).where(SessionModel.id == session_id)
+                )
+                session = session_result.scalar_one_or_none()
+                if session:
+                    tenant_id = session.tenant_id or tenant_id
+                    user_id = session.user_id
+            except Exception as e:
+                logger.warning(f"   Could not get tenant/user from session: {e}")
+        
+        # Build query: filter by tenant_id and prefer user's integration
+        query = (
             select(Integration)
             .where(Integration.service_type == "mcp_server")
             .where(Integration.enabled == True)
         )
+        
+        if tenant_id:
+            query = query.where(Integration.tenant_id == tenant_id)
+        
+        result = await db.execute(query)
         integrations = result.scalars().all()
         
-        logger.info(f"   Found {len(integrations)} enabled MCP integration(s)")
+        # Filter: if user_id is set, prefer user's integration, fallback to global
+        if user_id:
+            user_integrations = [i for i in integrations if i.user_id == user_id]
+            global_integrations = [i for i in integrations if i.user_id is None]
+            # Prefer user's integration, but include global as fallback
+            integrations = user_integrations + global_integrations
+            logger.info(f"   Found {len(user_integrations)} user MCP integration(s) and {len(global_integrations)} global MCP integration(s)")
+        else:
+            logger.info(f"   Found {len(integrations)} enabled MCP integration(s) (no user_id, using all)")
         
         for integration in integrations:
             session_metadata = integration.session_metadata or {}
