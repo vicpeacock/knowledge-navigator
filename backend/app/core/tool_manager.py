@@ -382,46 +382,96 @@ class ToolManager:
                         
                         # Pattern matching for known MCP servers (order matters - more specific first)
                         # Google Workspace MCP tools (check first before generic "google")
+                        
+                        # Authentication tools (check first as they're generic)
+                        if ("start_google_auth" in tool_lower or "google_auth" in tool_lower):
+                            return "Authentication"
+                        
                         # Calendar tools - check for various patterns
-                        if ("calendar" in tool_lower or 
-                            "event" in tool_lower and ("create" in tool_lower or "update" in tool_lower or "delete" in tool_lower or "list" in tool_lower) or
-                            tool_lower.startswith("list_calendar") or
-                            tool_lower.startswith("create_calendar") or
-                            tool_lower.startswith("update_calendar") or
-                            tool_lower.startswith("delete_calendar") or
-                            tool_lower.startswith("get_calendar") or
-                            tool_lower.startswith("search_calendar")):
+                        elif ("calendar" in tool_lower or 
+                              tool_lower.startswith("get_events") or
+                              tool_lower.startswith("modify_event") or
+                              tool_lower.startswith("create_event") or
+                              tool_lower.startswith("delete_event") or
+                              tool_lower.startswith("list_calendar") or
+                              tool_lower.startswith("create_calendar") or
+                              tool_lower.startswith("update_calendar") or
+                              tool_lower.startswith("delete_calendar") or
+                              tool_lower.startswith("get_calendar") or
+                              tool_lower.startswith("search_calendar") or
+                              ("event" in tool_lower and ("create" in tool_lower or "update" in tool_lower or "delete" in tool_lower or "list" in tool_lower or "get" in tool_lower or "modify" in tool_lower))):
                             return "Calendar"
+                        
                         # Gmail tools
                         elif ("gmail" in tool_lower or 
                               "email" in tool_lower and ("send" in tool_lower or "search" in tool_lower or "list" in tool_lower or "get" in tool_lower)):
                             return "Gmail"
-                        # Drive tools
+                        
+                        # Docs tools - check for specific doc operations first
+                        elif (tool_lower.startswith("get_doc") or
+                              tool_lower.startswith("create_doc") or
+                              tool_lower.startswith("modify_doc") or
+                              tool_lower.startswith("find_and_replace_doc") or
+                              tool_lower.startswith("insert_doc") or
+                              tool_lower.startswith("update_doc") or
+                              tool_lower.startswith("batch_update_doc") or
+                              tool_lower.startswith("inspect_doc") or
+                              tool_lower.startswith("create_table_with_data") or
+                              tool_lower.startswith("debug_table_structure") or
+                              tool_lower.startswith("export_doc") or
+                              tool_lower.startswith("read_document_comments") or
+                              tool_lower.startswith("create_document_comment") or
+                              tool_lower.startswith("reply_to_document_comment") or
+                              tool_lower.startswith("resolve_document_comment") or
+                              ("docs" in tool_lower and "sheets" not in tool_lower)):
+                            return "Docs"
+                        
+                        # Sheets tools - check for specific sheet operations
+                        elif (tool_lower.startswith("read_sheet") or
+                              tool_lower.startswith("modify_sheet") or
+                              tool_lower.startswith("create_sheet") or
+                              "sheets" in tool_lower or 
+                              "spreadsheet" in tool_lower):
+                            return "Sheets"
+                        
+                        # Chat tools - check for specific chat operations
+                        elif (tool_lower.startswith("get_messages") or
+                              tool_lower.startswith("send_message") or
+                              tool_lower.startswith("search_messages") or
+                              "chat" in tool_lower or 
+                              "space" in tool_lower):
+                            return "Chat"
+                        
+                        # Forms tools - check for specific form operations
+                        elif (tool_lower.startswith("set_publish_settings") or
+                              "forms" in tool_lower or 
+                              "form" in tool_lower):
+                            return "Forms"
+                        
+                        # Slides tools - check for specific slide operations
+                        elif (tool_lower.startswith("get_page") or
+                              tool_lower.startswith("get_page_thumbnail") or
+                              "slides" in tool_lower or 
+                              "presentation" in tool_lower):
+                            return "Slides"
+                        
+                        # Custom Search tools - check for specific search operations
+                        elif (tool_lower.startswith("search_custom") or
+                              tool_lower.startswith("get_search_engine_info") or
+                              tool_lower.startswith("search_custom_siterestrict") or
+                              "customsearch" in tool_lower or 
+                              "custom_search" in tool_lower):
+                            return "Custom Search"
+                        
+                        # Drive tools (check after more specific tools)
                         elif ("drive" in tool_lower or 
                               "file" in tool_lower and ("create" in tool_lower or "upload" in tool_lower or "download" in tool_lower or "list" in tool_lower or "get" in tool_lower or "delete" in tool_lower or "copy" in tool_lower or "move" in tool_lower or "share" in tool_lower or "update" in tool_lower) or
                               "folder" in tool_lower):
                             return "Drive"
-                        # Docs tools
-                        elif ("docs" in tool_lower and "sheets" not in tool_lower):
-                            return "Docs"
-                        # Sheets tools
-                        elif ("sheets" in tool_lower or "spreadsheet" in tool_lower):
-                            return "Sheets"
-                        # Forms tools
-                        elif ("forms" in tool_lower or "form" in tool_lower):
-                            return "Forms"
-                        # Slides tools
-                        elif ("slides" in tool_lower or "presentation" in tool_lower):
-                            return "Slides"
-                        # Chat tools
-                        elif ("chat" in tool_lower or "space" in tool_lower):
-                            return "Chat"
+                        
                         # Tasks tools
                         elif ("tasks" in tool_lower or "task" in tool_lower):
                             return "Tasks"
-                        # Custom Search tools
-                        elif ("customsearch" in tool_lower or "custom_search" in tool_lower):
-                            return "Custom Search"
                         # Other MCP servers
                         elif ("wikipedia" in tool_lower or "wiki" in tool_lower):
                             return "Wikipedia"
