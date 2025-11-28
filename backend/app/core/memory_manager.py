@@ -287,6 +287,11 @@ class MemoryManager:
             # Get tenant-specific collection
             collection = self._get_collection("session_memory", tenant_id or self.tenant_id)
             
+            # Handle case where collection creation failed (e.g., ChromaDB KeyError)
+            if collection is None:
+                logger.warning(f"⚠️  Could not get/create session_memory collection for tenant {tenant_id or self.tenant_id}, returning empty results")
+                return []
+            
             # Run ChromaDB query in thread pool (ChromaDB is synchronous)
             results = await loop.run_in_executor(
                 None,
@@ -549,6 +554,11 @@ class MemoryManager:
             # Get tenant-specific collection
             effective_tenant_id = tenant_id or self.tenant_id
             collection = self._get_collection("file_embeddings", effective_tenant_id)
+            
+            # Handle case where collection creation failed (e.g., ChromaDB KeyError)
+            if collection is None:
+                logger.warning(f"⚠️  Could not get/create file_embeddings collection for tenant {effective_tenant_id}, returning empty results")
+                return []
             
             # First, check if there are any files for this session
             session_id_str = str(session_id)
