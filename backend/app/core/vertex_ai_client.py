@@ -401,7 +401,6 @@ class VertexAIClient:
                         logger.warning(f"   Tool keys: {list(tool.keys())}")
                 
                 # Convert to Vertex AI Tool objects (according to official docs)
-                vertex_tools_list = None
                 if vertex_tools:
                     # Vertex AI requires Tool objects with FunctionDeclaration objects
                     function_declarations = []

@@ -136,11 +136,52 @@ api.interceptors.response.use(
       )
     }
 
-    // If 401, let AuthContext handle it - don't try to refresh here to avoid infinite loops
-    if (error.response?.status === 401) {
-      console.warn('[API] 401 Unauthorized - token may be expired, letting AuthContext handle refresh')
-      // Don't clear tokens here - let AuthContext handle it
-      // This prevents infinite loops while still allowing AuthContext to refresh if needed
+    // Handle 401 Unauthorized with automatic token refresh
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      // Skip refresh for auth endpoints (login, refresh, etc.) to avoid loops
+      if (originalRequest.url?.includes('/auth/login') || 
+          originalRequest.url?.includes('/auth/refresh') ||
+          originalRequest.url?.includes('/auth/register')) {
+        console.warn('[API] 401 on auth endpoint - not attempting refresh')
+        return Promise.reject(error)
+      }
+
+      // Mark request as retried to prevent infinite loops
+      originalRequest._retry = true
+
+      try {
+        // Try to refresh token
+        const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null
+        if (!refreshToken) {
+          console.warn('[API] No refresh token available - cannot refresh')
+          return Promise.reject(error)
+        }
+
+        console.log('[API] 🔄 Attempting automatic token refresh...')
+        const refreshResponse = await authApi.refresh({ refresh_token: refreshToken })
+        const { access_token } = refreshResponse.data
+
+        // Update token in localStorage and axios config
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('access_token', access_token)
+        }
+        originalRequest.headers['Authorization'] = `Bearer ${access_token}`
+
+        console.log('[API] ✅ Token refreshed successfully, retrying original request')
+        
+        // Retry original request with new token
+        return api(originalRequest)
+      } catch (refreshError) {
+        console.error('[API] ❌ Token refresh failed:', refreshError)
+        
+        // Clear tokens and let AuthContext handle logout
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+        }
+
+        return Promise.reject(refreshError)
+      }
     }
 
     return Promise.reject(error)
