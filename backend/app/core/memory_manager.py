@@ -64,14 +64,6 @@ class MemoryManager:
         # In-memory short-term storage
         self.short_term_memory: Dict[UUID, Dict[str, Any]] = {}
     
-    def _get_collection_name(self, base_name: str, tenant_id: Optional[UUID] = None) -> str:
-        """Get tenant-specific collection name"""
-        effective_tenant_id = tenant_id or self.tenant_id
-        if effective_tenant_id:
-            return f"{base_name}_tenant_{str(effective_tenant_id).replace('-', '_')}"
-        # Backward compatibility: use default collection name
-        return base_name
-    
     def _get_collection(self, base_name: str, tenant_id: Optional[UUID] = None):
         """Get or create tenant-specific collection"""
         collection_name = self._get_collection_name(base_name, tenant_id)
@@ -80,18 +72,54 @@ class MemoryManager:
         if collection_name in self._collections_cache:
             return self._collections_cache[collection_name]
         
-        # Create or get collection
-        # Note: ChromaDB 0.5.0+ changed how HNSW parameters work
-        # We no longer pass them in metadata - ChromaDB uses optimized defaults
         metadata = {
             "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "default"
         }
+        logger = logging.getLogger(__name__)
+        collection = None
         
-        # ChromaDB 0.6.0+ doesn't support HNSW parameters in metadata the same way        # Let ChromaDB use its optimized defaults        logger = logging.getLogger(__name__)        collection = None                # Try multiple strategies to create/get collection        strategies = [            # Strategy 1: Try get_or_create with metadata (normal case)            lambda: self.chroma_client.get_or_create_collection(                name=collection_name,                metadata=metadata,            ),            # Strategy 2: Try to get existing collection first            lambda: self.chroma_client.get_collection(name=collection_name),            # Strategy 3: Try create with empty metadata            lambda: self.chroma_client.create_collection(                name=collection_name,                metadata={},            ),            # Strategy 4: Try create without metadata parameter            lambda: self.chroma_client.create_collection(name=collection_name),        ]                strategy_names = [            "get_or_create with metadata",            "get existing collection",            "create with empty metadata",            "create without metadata",        ]                last_error = None        for strategy, strategy_name in zip(strategies, strategy_names):            try:                collection = strategy()                if collection:                    logger.info(f"✅ Successfully got/created collection '{collection_name}' using: {strategy_name}")                    break            except Exception as e:                # Check if it's the KeyError('_type') issue                error_str = str(e)                if "'_type'" in error_str or "KeyError" in error_str:                    logger.warning(f"⚠️  ChromaDB KeyError('_type') detected, trying next strategy...")                last_error = e                continue                if collection is None:            # All strategies failed            error_msg = f"Failed to create collection '{collection_name}' after all retries"            if last_error:                error_msg += f": {last_error}"            logger.error(f"❌ {error_msg}")            # Don't raise - return None and let caller handle it gracefully            # This prevents the entire request from failing due to ChromaDB issues            return None        
-        # Cache it
+        strategies = [
+            lambda: self.chroma_client.get_or_create_collection(name=collection_name, metadata=metadata),
+            lambda: self.chroma_client.get_collection(name=collection_name),
+            lambda: self.chroma_client.create_collection(name=collection_name, metadata={}),
+            lambda: self.chroma_client.create_collection(name=collection_name),
+        ]
+        strategy_names = [
+            "get_or_create with metadata",
+            "get existing collection",
+            "create with empty metadata",
+            "create without metadata",
+        ]
+        
+        last_error = None
+        for strategy, strategy_name in zip(strategies, strategy_names):
+            try:
+                collection = strategy()
+                if collection:
+                    logger.info(
+                        "✅ Successfully got/created collection '%s' using: %s",
+                        collection_name,
+                        strategy_name,
+                    )
+                    break
+            except Exception as e:
+                error_str = str(e)
+                if "'_type'" in error_str or "KeyError" in error_str:
+                    logger.warning("⚠️  ChromaDB KeyError('_type') detected, trying next strategy...")
+                last_error = e
+                continue
+        
+        if collection is None:
+            error_msg = f"Failed to create collection '{collection_name}' after all retries"
+            if last_error:
+                error_msg += f": {last_error}"
+            logger.error(f"❌ {error_msg}")
+            return None
+        
         self._collections_cache[collection_name] = collection
         return collection
-    
+
+
     @property
     def file_embeddings_collection(self):
         """Get file embeddings collection for current tenant"""
