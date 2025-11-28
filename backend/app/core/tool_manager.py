@@ -498,12 +498,22 @@ class ToolManager:
                             # If include_all is True, include all tools
                             # If current_user is None, include all tools (no preferences to respect)
                             # If selected_tools is empty but current_user is None, include all tools
-                            # Otherwise, filter by selected_tools
+                            # Determine if tool should be included:
+                            # 1. If include_all is True, include all tools
+                            # 2. If current_user is None, include all tools (no preferences to respect)
+                            # 3. If user has preferences for this integration:
+                            #    - If selected_tools is empty list, user explicitly deselected all → exclude
+                            #    - If selected_tools has items, only include if tool_name is in selected_tools
+                            # 4. If user has NO preferences for this integration, include all (default behavior)
+                            user_metadata = current_user.user_metadata or {} if current_user else {}
+                            mcp_preferences = user_metadata.get("mcp_tools_preferences", {})
+                            has_preferences_for_integration = str(integration.id) in mcp_preferences
+                            
                             should_include = (
                                 include_all or 
                                 current_user is None or 
-                                (not selected_tools and str(integration.id) not in (current_user.user_metadata or {}).get("mcp_tools_preferences", {})) or
-                                tool_name in selected_tools
+                                (not has_preferences_for_integration) or  # No preferences → include all (default)
+                                (has_preferences_for_integration and tool_name in selected_tools)  # Has preferences → only include selected
                             )
                             if should_include:
                                 # Detect server name from tool name
