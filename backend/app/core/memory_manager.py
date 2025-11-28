@@ -63,6 +63,14 @@ class MemoryManager:
         
         # In-memory short-term storage
         self.short_term_memory: Dict[UUID, Dict[str, Any]] = {}
+    def _get_collection_name(self, base_name: str, tenant_id: Optional[UUID] = None) -> str:
+        """Generate tenant-specific collection name"""
+        effective_tenant_id = tenant_id or self.tenant_id
+        if effective_tenant_id:
+            return f"{base_name}_{str(effective_tenant_id).replace('-', '_')}"
+        else:
+            return f"{base_name}_default"
+
     
     def _get_collection(self, base_name: str, tenant_id: Optional[UUID] = None):
         """Get or create tenant-specific collection"""
