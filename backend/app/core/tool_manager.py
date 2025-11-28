@@ -1196,27 +1196,30 @@ class ToolManager:
             logger.info(f"   ✅ Found {len(integrations)} user-specific MCP integration(s) for user {user_id}")
         else:
             logger.info(f"   ✅ Found {len(integrations)} enabled MCP integration(s) (no user_id, using all)")
+
+        # CRITICAL: Loop must be outside if/else block so it executes for both cases
+        for integration in integrations:
             session_metadata = integration.session_metadata or {}
             server_url = session_metadata.get("server_url", "")
-            
+
             logger.info(f"   Integration {integration.id}:")
             logger.info(f"     Server URL: {server_url}")
             logger.info(f"     Looking for tool: '{actual_tool_name}'")
-            
+
             # Get MCP client and list all available tools from this integration
             # For OAuth 2.1 servers, we need to pass OAuth tokens per user
             from app.api.integrations.mcp import _get_mcp_client_for_integration
             from app.models.database import User as UserModel
             # select is already imported globally at the top of the file
-            
+
             # Get current_user for OAuth - prioritize passed current_user, fallback to session
             current_user_for_oauth = None
-            
+
             # Priority 1: Use current_user passed to execute_tool (from LangGraph state)
             if current_user:
                 current_user_for_oauth = current_user
                 logger.info(f"   ✅ Using current_user passed to execute_tool: {current_user_for_oauth.id if current_user_for_oauth else 'None'}")
-            
+
             # Priority 2: Get from session if current_user not provided
             elif session_id:
                 try:
@@ -1233,15 +1236,15 @@ class ToolManager:
                             logger.info(f"   ✅ Retrieved current_user from session: {current_user_for_oauth.id}")
                 except Exception as e:
                     logger.warning(f"   Could not get user from session: {e}")
-            
+
             if not current_user_for_oauth:
                 logger.warning(f"   ⚠️  No current_user available for OAuth - token will not be passed to MCP server")
-            
+
             # Get MCP client with user context for OAuth
             # IMPORTANT: Retrieve OAuth token with automatic refresh BEFORE creating client
             logger.info(f"   Getting MCP client for integration {integration.id} with user context")
             logger.info(f"   Current user for OAuth: {current_user_for_oauth.id if current_user_for_oauth else 'None'}")
-            
+
             # For OAuth servers, retrieve token with automatic refresh using OAuthTokenManager
             oauth_token: Optional[str] = None
             session_metadata = integration.session_metadata or {}
@@ -1249,7 +1252,7 @@ class ToolManager:
             oauth_required = session_metadata.get("oauth_required", False)
             from app.core.oauth_utils import is_oauth_server
             is_oauth = is_oauth_server(server_url, oauth_required)
-            
+
             if is_oauth and current_user_for_oauth:
                 from app.services.oauth_token_manager import OAuthTokenManager
                 from app.core.exceptions import OAuthAuthenticationRequiredError
