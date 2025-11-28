@@ -1475,7 +1475,16 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             logger.error("❌ CRITICAL: ollama is None in tool_loop_node!")
             logger.error(f"   State keys: {list(state.keys())}")
             logger.error(f"   State['ollama'] type: {type(state.get('ollama'))}")
-            raise ValueError("ollama client is None - cannot generate response")
+            # Try to get client from dependencies as fallback
+            try:
+                from app.core.dependencies import get_ollama_client
+                ollama = get_ollama_client()
+                if ollama is None:
+                    raise ValueError("ollama client is None - cannot generate response")
+                logger.info("✅ Retrieved ollama client from dependencies as fallback")
+            except Exception as e:
+                logger.error(f"❌ Failed to get ollama client from dependencies: {e}")
+                raise ValueError("ollama client is None - cannot generate response")
         
         session_context = state.get("session_context", [])
         retrieved_memory = list(state.get("retrieved_memory", []))
