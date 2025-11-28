@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     gemini_background_model: Optional[str] = None  # Background model (if None, uses gemini_model)
     gemini_planner_model: Optional[str] = None  # Planner model (if None, uses gemini_model)
 
+    # Vertex AI Configuration (alternative to API REST)
+    gemini_use_vertex_ai: bool = False  # Se True, usa Vertex AI invece di API REST
+    google_cloud_project_id: Optional[str] = None  # Google Cloud Project ID (richiesto per Vertex AI)
+    google_cloud_location: str = "us-central1"  # Google Cloud location (default: us-central1)
+    google_service_account_email: Optional[str] = None  # Service Account email per Vertex AI
+    google_service_account_key: Optional[str] = None  # Service Account access token per Vertex AI
+
     # Ollama Main (per chat)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "gpt-oss:20b"

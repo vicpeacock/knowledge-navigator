@@ -1,4 +1,11 @@
 #!/bin/bash
+
+# Set GOOGLE_APPLICATION_CREDENTIALS for Vertex AI if not already set
+if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ] && [ -f "$(dirname "$0")/credentials/knowledge-navigator-477022-95a2ce0ebf9a.json" ]; then
+    export GOOGLE_APPLICATION_CREDENTIALS="$(cd "$(dirname "$0")" && pwd)/credentials/knowledge-navigator-477022-95a2ce0ebf9a.json"
+    echo "✅ GOOGLE_APPLICATION_CREDENTIALS impostato automaticamente"
+fi
+
 # Script per avviare il backend, terminando eventuali processi esistenti
 
 cd "$(dirname "$0")"

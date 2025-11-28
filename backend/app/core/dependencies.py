@@ -52,9 +52,15 @@ def init_clients():
     if _ollama_client is None:
         try:
             if settings.llm_provider == "gemini":
-                from app.core.gemini_client import GeminiClient
-                logger.info(f"Initializing Gemini client (main): model={settings.gemini_model}")
-                _ollama_client = GeminiClient(model=settings.gemini_model)
+                # Check if Vertex AI is enabled
+                if settings.gemini_use_vertex_ai:
+                    from app.core.vertex_ai_client import VertexAIClient
+                    logger.info(f"Initializing Vertex AI client (main): model={settings.gemini_model}, project={settings.google_cloud_project_id}")
+                    _ollama_client = VertexAIClient(model=settings.gemini_model)
+                else:
+                    from app.core.gemini_client import GeminiClient
+                    logger.info(f"Initializing Gemini client (main): model={settings.gemini_model}")
+                    _ollama_client = GeminiClient(model=settings.gemini_model)
             else:
                 logger.info(f"Initializing Ollama client (main): URL={settings.ollama_base_url}, model={settings.ollama_model}")
                 _ollama_client = OllamaClient()
@@ -217,6 +223,16 @@ def get_ollama_client():
             init_clients()
         except Exception as e:
             logger.warning(f"Failed to lazily initialize LLM client: {e}")
+    
+    if _ollama_client is None:
+        logger.error("❌ CRITICAL: _ollama_client is still None after initialization attempt!")
+        logger.error("   This should not happen - check LLM provider configuration")
+        # Try one more time
+        try:
+            init_clients()
+        except Exception as e:
+            logger.error(f"❌ Second initialization attempt also failed: {e}")
+    
     return _ollama_client
 
 
