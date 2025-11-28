@@ -1011,6 +1011,7 @@ async def chat(
     tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
 ):
+    time_context = ""  # Initialize to avoid UnboundLocalError
     """Send a message and get AI response (for current user)"""
     # Log immediately at the start of the function - BEFORE any processing
     import sys
