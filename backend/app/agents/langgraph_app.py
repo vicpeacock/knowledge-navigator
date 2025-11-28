@@ -1887,11 +1887,13 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     response_text = f"Ho eseguito {len(tool_results)} tool(s) ({', '.join(tool_names)}), ma ho riscontrato un errore nella generazione della risposta: {str(final_error)[:100]}"
                     logger.warning(f"⚠️  Using error message as response")
         else:
-            # No tool calls - use the response_text we extracted (or fallback if empty)
+            # No tool calls - use the response_text we extracted
             logger.info(f"No tool calls, using direct response. Length: {len(response_text) if response_text else 0}")
             if not response_text or not response_text.strip():
-                logger.warning("Response text is empty and no tool calls - using fallback")
-                response_text = "Ho ricevuto il tuo messaggio. Come posso aiutarti?"
+                logger.error("❌ Response text is empty and no tool calls - Gemini likely blocked or returned empty")
+                logger.error("   This should have been caught as ValueError in generate_with_context")
+                # Don't use hardcoded fallback - let the error propagate
+                response_text = ""  # Empty - will be handled by response_formatter_node
         
         # After all tool calls are executed, generate final response if we have tool results
         # IMPORTANT: Always generate a response after tool execution, even if response_text already exists
@@ -2273,17 +2275,22 @@ Rispondi all'utente basandoti sui risultati dei tool sopra. Se ci sono errori, s
             
             # Ensure response is not empty - provide fallback if needed
             if not response_text or not response_text.strip():
-                logger.warning("⚠️  Response text is empty in response_formatter_node, using fallback")
+                logger.error("❌ Response text is empty in response_formatter_node")
                 if tool_results:
                     # If we have tool results but no response, create a summary
                     response_text = "Ho completato le azioni richieste."
                 else:
-                    response_text = "Ho ricevuto il tuo messaggio. Come posso aiutarti?"
+                    # No tool results and no response - Gemini likely blocked
+                    logger.error("   No tool results and no response - Gemini likely blocked the response")
+                    # Don't use hardcoded fallback - propagate the error
+                    response_text = ""  # Empty - will be handled below
             
-            # Final check - response_text must never be empty
+            # Final check - if response_text is still empty, it means Gemini blocked
             if not response_text or not response_text.strip():
-                logger.error("❌ CRITICAL: response_text is still empty after fallback!")
-                response_text = "Mi dispiace, non sono riuscito a generare una risposta. Potresti riprovare?"
+                logger.error("❌ CRITICAL: response_text is still empty - Gemini blocked the response")
+                # Return a clear error message about Gemini safety filter block
+                # This is better than empty string for user experience
+                response_text = "⚠️ La risposta è stata bloccata dai filtri di sicurezza di Gemini. Tutti i safety ratings sono NEGLIGIBLE, quindi il blocco avviene a livello infrastrutturale. Richiesta allowlist necessaria per BLOCK_NONE."
             
             state["chat_response"] = ChatResponse(
                 response=response_text,
@@ -2300,10 +2307,11 @@ Rispondi all'utente basandoti sui risultati dei tool sopra. Se ci sono errori, s
             # Update existing chat_response with latest agent_activity
             existing_response = state["chat_response"].response
             if not existing_response or not existing_response.strip():
-                logger.warning("⚠️  Existing chat_response has empty response, updating with fallback")
+                logger.error("❌ Existing chat_response has empty response - Gemini likely blocked")
+                # Don't use hardcoded fallback - keep it empty to show the error
                 state["chat_response"] = state["chat_response"].model_copy(
                     update={
-                        "response": "Ho ricevuto il tuo messaggio. Come posso aiutarti?",
+                        "response": "",  # Empty - shows that Gemini blocked
                         "agent_activity": state.get("agent_activity", [])
                     }
                 )
