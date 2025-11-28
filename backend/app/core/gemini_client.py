@@ -857,10 +857,8 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                 logger.error("🔍🔍🔍 END OF EXACT INPUT TO GEMINI 🔍🔍🔍")
                 logger.error("=" * 80)
                 
-                # Send last message
-                last_msg = messages[-1]["parts"][0] if isinstance(messages[-1]["parts"], list) else str(messages[-1]["parts"])
-                
                 # CRITICAL: If we have system_content, prepend it to the first user message (like generate() does)
+                # NOTE: last_msg was already defined above (line 784), don't redefine it here
                 # This is the key difference - generate() works because it doesn't use system_instruction in model_config
                 if system_content:
                     logger.info(f"✅ Adding system_instruction to first message (length: {len(system_content)} chars) - like generate() method")
