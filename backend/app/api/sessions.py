@@ -1466,13 +1466,6 @@ Giorno della settimana: {day_name}
                 # Add time context to ollama client
                 ollama._time_context = time_context
                 
-                # WhatsApp integration temporarily disabled - will be re-enabled with Business API
-                # # Enhance prompt with explicit WhatsApp instructions if message mentions WhatsApp
-                # enhanced_prompt = current_prompt
-                # if "whatsapp" in current_prompt.lower() or "messaggi" in current_prompt.lower() or "oggi" in current_prompt.lower():
-                #     enhanced_prompt = f"""{current_prompt}
-                #
-                # 🔴 IMPORTANTE: Se questa richiesta riguarda WhatsApp o messaggi, DEVI chiamare il tool get_whatsapp_messages. Non rispondere senza aver chiamato il tool."""
                 enhanced_prompt = current_prompt
                 
                 response_data = await ollama.generate_with_context(
