@@ -559,7 +559,6 @@ class ToolManager:
                                 }
                                 mcp_tools.append(mcp_tool)
                 except Exception as e:
-                    # Log error but continue with other integrations
                     logger.error(f"❌ Error fetching tools from MCP integration {integration.id}: {e}", exc_info=True)
             
             logger.info(f"✅ Returning {len(mcp_tools)} MCP tools total")
@@ -1160,7 +1159,7 @@ class ToolManager:
             except Exception as e:
                 logger.warning(f"   Could not get tenant/user from session: {e}")
         
-        # Build query: filter by tenant_id and prefer user's integration
+        # Build query: filter by tenant_id and user_id (CRITICAL: NO global fallback)
         query = (
             select(Integration)
             .where(Integration.service_type == "mcp_server")
@@ -1170,16 +1169,18 @@ class ToolManager:
         if tenant_id:
             query = query.where(Integration.tenant_id == tenant_id)
         
+        # CRITICAL: If user_id is set, ONLY query for user's integrations (NO global fallback)
+        if user_id:
+            query = query.where(Integration.user_id == user_id)
+            logger.info(f"   🔍 Querying ONLY user-specific MCP integrations for user {user_id} (NO global fallback)")
+        else:
+            logger.info(f"   🔍 Querying all MCP integrations (no user_id provided)")
+        
         result = await db.execute(query)
         integrations = result.scalars().all()
         
-        # Filter: if user_id is set, ONLY use user's integration (NO global fallback)
+        # Verify we only have user integrations (if user_id was provided)
         if user_id:
-            user_integrations = [i for i in integrations if i.user_id == user_id]
-            global_integrations = [i for i in integrations if i.user_id is None]
-            # CRITICAL: Only use user's integration, NO global fallback
-            integrations = user_integrations
-            logger.info(f"   Found {len(user_integrations)} user MCP integration(s) and {len(global_integrations)} global MCP integration(s) (ignoring global)")
             if not integrations:
                 # User has no personal integration - return error instead of using global
                 logger.error(f"   ❌ No personal MCP integration found for user {user_id}")
@@ -1188,10 +1189,13 @@ class ToolManager:
                     "integration_required": True,
                     "user_id": str(user_id)
                 }
+            # Double-check: ensure all integrations belong to this user
+            for integration in integrations:
+                if integration.user_id != user_id:
+                    logger.error(f"   ❌ Found integration {integration.id} with wrong user_id: {integration.user_id} (expected {user_id})")
+            logger.info(f"   ✅ Found {len(integrations)} user-specific MCP integration(s) for user {user_id}")
         else:
-            logger.info(f"   Found {len(integrations)} enabled MCP integration(s) (no user_id, using all)")
-        
-        for integration in integrations:
+            logger.info(f"   ✅ Found {len(integrations)} enabled MCP integration(s) (no user_id, using all)")
             session_metadata = integration.session_metadata or {}
             server_url = session_metadata.get("server_url", "")
             
@@ -1306,8 +1310,6 @@ class ToolManager:
                     raise
             except Exception as list_error:
                 logger.error(f"   ❌ Error listing tools from integration {integration.id}: {list_error}", exc_info=True)
-                # Continue to next integration
-                continue
             
             if tool_found:
                 logger.info(f"   ✅ Tool '{actual_tool_name}' found in integration {integration.id}")
