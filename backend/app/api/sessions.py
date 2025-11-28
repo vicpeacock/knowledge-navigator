@@ -1221,6 +1221,79 @@ async def chat(
     db.add(user_message)
     await db.commit()
     
+    # Get current date/time and location for context
+    from datetime import datetime
+    import os  # Import os here to use os.environ
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        # Fallback for Python < 3.9
+        try:
+            from backports.zoneinfo import ZoneInfo
+        except ImportError:
+            ZoneInfo = None
+    
+    try:
+        # Try to get timezone from environment or use Rome timezone
+        tz_str = os.environ.get('TZ', 'Europe/Rome')  # Default to Italy
+        
+        if ZoneInfo:
+            try:
+                tz = ZoneInfo(tz_str)
+            except:
+                tz = ZoneInfo('Europe/Rome')  # Fallback to Italy
+        else:
+            # Fallback: use local time if zoneinfo not available
+            tz = None
+        
+        current_time = datetime.now(tz) if tz else datetime.now()
+        current_date = current_time.strftime('%A, %d %B %Y')  # e.g., "lunedì, 4 novembre 2024"
+        current_time_str = current_time.strftime('%H:%M:%S')  # e.g., "16:30:45"
+        timezone_name = tz_str.replace('_', ' ') if tz_str else 'local'
+        
+        # Get location info (can be configured via env)
+        location = os.environ.get('USER_LOCATION', 'Italia')  # Default to Italy
+        
+        # Italian day names
+        day_names = {
+            'Monday': 'lunedì', 'Tuesday': 'martedì', 'Wednesday': 'mercoledì',
+            'Thursday': 'giovedì', 'Friday': 'venerdì', 'Saturday': 'sabato', 'Sunday': 'domenica'
+        }
+        day_name = day_names.get(current_time.strftime('%A'), current_time.strftime('%A'))
+        
+        # Italian month names
+        month_names = {
+            'January': 'gennaio', 'February': 'febbraio', 'March': 'marzo',
+            'April': 'aprile', 'May': 'maggio', 'June': 'giugno',
+            'July': 'luglio', 'August': 'agosto', 'September': 'settembre',
+            'October': 'ottobre', 'November': 'novembre', 'December': 'dicembre'
+        }
+        month_name = month_names.get(current_time.strftime('%B'), current_time.strftime('%B'))
+        
+        date_italian = f"{day_name}, {current_time.day} {month_name} {current_time.year}"
+        
+        time_context = f"""
+=== CONTESTO TEMPORALE E GEOGRAFICO ===
+Data e ora corrente: {date_italian}, {current_time_str} ({timezone_name})
+Località: {location}
+Giorno della settimana: {day_name}
+
+=== REGOLE DI CONVERSAZIONE ===
+- Se l'utente fa una DOMANDA, rispondi in modo completo e utile
+- Se l'utente fa un'AFFERMAZIONE o fornisce informazioni SENZA fare domande, rispondi brevemente:
+  * "Ok", "Perfetto", "Capito", "D'accordo" sono risposte appropriate
+  * Non è necessario cercare sempre una risposta elaborata
+  * Riconosci semplicemente l'informazione ricevuta
+- Sii naturale e conversazionale - non essere verboso quando non necessario
+
+"""
+
+        
+    except Exception as e:
+        logger.warning(f"Error getting time context: {e}")
+        time_context = ""
+    
+
     # LangGraph branch
     logger.debug(f"🔍 Checking LangGraph flag: use_langgraph_prototype={settings.use_langgraph_prototype}")
     import sys
@@ -1365,78 +1438,6 @@ async def chat(
     tools_used = []
     max_tool_iterations = 3  # Limit tool call iterations
     tool_iteration = 0
-    
-    # Get current date/time and location for context
-    from datetime import datetime
-    import os  # Import os here to use os.environ
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        # Fallback for Python < 3.9
-        try:
-            from backports.zoneinfo import ZoneInfo
-        except ImportError:
-            ZoneInfo = None
-    
-    try:
-        # Try to get timezone from environment or use Rome timezone
-        tz_str = os.environ.get('TZ', 'Europe/Rome')  # Default to Italy
-        
-        if ZoneInfo:
-            try:
-                tz = ZoneInfo(tz_str)
-            except:
-                tz = ZoneInfo('Europe/Rome')  # Fallback to Italy
-        else:
-            # Fallback: use local time if zoneinfo not available
-            tz = None
-        
-        current_time = datetime.now(tz) if tz else datetime.now()
-        current_date = current_time.strftime('%A, %d %B %Y')  # e.g., "lunedì, 4 novembre 2024"
-        current_time_str = current_time.strftime('%H:%M:%S')  # e.g., "16:30:45"
-        timezone_name = tz_str.replace('_', ' ') if tz_str else 'local'
-        
-        # Get location info (can be configured via env)
-        location = os.environ.get('USER_LOCATION', 'Italia')  # Default to Italy
-        
-        # Italian day names
-        day_names = {
-            'Monday': 'lunedì', 'Tuesday': 'martedì', 'Wednesday': 'mercoledì',
-            'Thursday': 'giovedì', 'Friday': 'venerdì', 'Saturday': 'sabato', 'Sunday': 'domenica'
-        }
-        day_name = day_names.get(current_time.strftime('%A'), current_time.strftime('%A'))
-        
-        # Italian month names
-        month_names = {
-            'January': 'gennaio', 'February': 'febbraio', 'March': 'marzo',
-            'April': 'aprile', 'May': 'maggio', 'June': 'giugno',
-            'July': 'luglio', 'August': 'agosto', 'September': 'settembre',
-            'October': 'ottobre', 'November': 'novembre', 'December': 'dicembre'
-        }
-        month_name = month_names.get(current_time.strftime('%B'), current_time.strftime('%B'))
-        
-        date_italian = f"{day_name}, {current_time.day} {month_name} {current_time.year}"
-        
-        time_context = f"""
-=== CONTESTO TEMPORALE E GEOGRAFICO ===
-Data e ora corrente: {date_italian}, {current_time_str} ({timezone_name})
-Località: {location}
-Giorno della settimana: {day_name}
-
-=== REGOLE DI CONVERSAZIONE ===
-- Se l'utente fa una DOMANDA, rispondi in modo completo e utile
-- Se l'utente fa un'AFFERMAZIONE o fornisce informazioni SENZA fare domande, rispondi brevemente:
-  * "Ok", "Perfetto", "Capito", "D'accordo" sono risposte appropriate
-  * Non è necessario cercare sempre una risposta elaborata
-  * Riconosci semplicemente l'informazione ricevuta
-- Sii naturale e conversazionale - non essere verboso quando non necessario
-
-"""
-
-        
-    except Exception as e:
-        logger.warning(f"Error getting time context: {e}")
-        time_context = ""
     
     # Tool calling loop: LLM can request tools, we execute them, then reinvoke LLM with results
     current_prompt = request.message
