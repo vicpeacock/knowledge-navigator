@@ -274,11 +274,17 @@ class VertexAIClient:
                 set_trace_attribute("vertex_ai.project", self.project_id)
                 
                 # Generate content
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=contents,
-                    config=config,
-                )
+                # Pass tools directly as parameter (not in config) according to Vertex AI docs
+                generate_kwargs = {
+                    "model": self.model_name,
+                    "contents": contents,
+                    "config": config,
+                }
+                if vertex_tools_list:
+                    generate_kwargs["tools"] = vertex_tools_list
+                    logger.info(f"🔧 Passing {len(vertex_tools_list)} Tool objects directly to generate_content")
+                
+                response = self.client.models.generate_content(**generate_kwargs)
                 
                 response_text = response.text if hasattr(response, 'text') and response.text else None
                 
@@ -381,8 +387,9 @@ class VertexAIClient:
                         logger.warning(f"   Tool {tool_name}: Unknown format, skipping")
                         logger.warning(f"   Tool keys: {list(tool.keys())}")
                 
+                # Convert to Vertex AI Tool objects (according to official docs)
+                vertex_tools_list = None
                 if vertex_tools:
-                    # Convert to Vertex AI Tool objects (according to official docs)
                     # Vertex AI requires Tool objects with FunctionDeclaration objects
                     function_declarations = []
                     for tool_dict in vertex_tools:
@@ -404,18 +411,24 @@ class VertexAIClient:
                     
                     if function_declarations:
                         # Create Tool object with function_declarations (official format)
-                        tools_list = [Tool(function_declarations=function_declarations)]
-                        config["tools"] = tools_list
+                        # According to docs, tools should be passed as parameter, not in config
+                        vertex_tools_list = [Tool(function_declarations=function_declarations)]
                         logger.info(f"✅ Configured {len(function_declarations)} tools for Vertex AI: {[fd.name if hasattr(fd, 'name') else fd.get('name', 'unknown') for fd in function_declarations]}")
                 else:
                     logger.warning("⚠️  No valid tools found after conversion")
             
             try:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=contents,
-                    config=config,
-                )
+                # Pass tools directly as parameter (not in config) according to Vertex AI docs
+                generate_kwargs = {
+                    "model": self.model_name,
+                    "contents": contents,
+                    "config": config,
+                }
+                if vertex_tools_list:
+                    generate_kwargs["tools"] = vertex_tools_list
+                    logger.info(f"🔧 Passing {len(vertex_tools_list)} Tool objects directly to generate_content")
+                
+                response = self.client.models.generate_content(**generate_kwargs)
                 
                 # Parse response - check for function calls first (like GeminiClient)
                 content = ""
