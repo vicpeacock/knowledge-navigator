@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from uuid import UUID
 import json
+import logging
 
 from app.core.config import settings
 from app.models.database import MemoryShort, MemoryMedium, MemoryLong
@@ -88,10 +89,39 @@ class MemoryManager:
         
         # ChromaDB 0.6.0+ doesn't support HNSW parameters in metadata the same way
         # Let ChromaDB use its optimized defaults
-        collection = self.chroma_client.get_or_create_collection(
-            name=collection_name,
-            metadata=metadata,
-        )
+        try:
+            collection = self.chroma_client.get_or_create_collection(
+                name=collection_name,
+                metadata=metadata,
+            )
+        except Exception as e:
+            # Handle ChromaDB internal errors (e.g., KeyError('_type'))
+            # This is a known issue with some ChromaDB versions
+            logger = logging.getLogger(__name__)
+            logger.warning(f"⚠️  Error creating/getting collection '{collection_name}': {e}")
+            logger.warning(f"   Attempting to get existing collection or create with minimal metadata...")
+            
+            # Try to get existing collection first
+            try:
+                collection = self.chroma_client.get_collection(name=collection_name)
+                logger.info(f"✅ Successfully retrieved existing collection '{collection_name}'")
+            except Exception:
+                # If collection doesn't exist, try creating with minimal/no metadata
+                try:
+                    collection = self.chroma_client.create_collection(
+                        name=collection_name,
+                        metadata={},  # Try with empty metadata to avoid _type issues
+                    )
+                    logger.info(f"✅ Successfully created collection '{collection_name}' with empty metadata")
+                except Exception as create_error:
+                    # Last resort: try without metadata parameter
+                    try:
+                        collection = self.chroma_client.create_collection(name=collection_name)
+                        logger.info(f"✅ Successfully created collection '{collection_name}' without metadata")
+                    except Exception as final_error:
+                        logger.error(f"❌ Failed to create collection '{collection_name}' after all retries: {final_error}")
+                        # Re-raise the original error
+                        raise e
         
         # Cache it
         self._collections_cache[collection_name] = collection

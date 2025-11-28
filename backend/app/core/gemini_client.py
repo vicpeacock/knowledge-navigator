@@ -319,12 +319,10 @@ class GeminiClient:
         start_time = time.time()
         
         # Build system prompt with memory if available
-        # System prompt for Gemini - optimized to reduce safety filter triggers
+        # System prompt for Gemini - simplified to reduce safety filter triggers
         # Use neutral, factual language to avoid triggering safety filters
         # Keep it simple and direct to minimize safety filter triggers
-        base_system_prompt = """You are a helpful assistant with access to tools for calendar, email, and web search.
-
-Use the appropriate tool based on user requests. Provide factual responses based on tool results."""
+        base_system_prompt = """You are Knowledge Navigator, a personal AI assistant. Use the available tools (get_emails, get_calendar_events, customsearch_search) to provide accurate information. Use factual language."""
         
         enhanced_system = system_prompt or base_system_prompt
         
@@ -334,10 +332,9 @@ Use the appropriate tool based on user requests. Provide factual responses based
             enhanced_system = time_context + "\n\n" + enhanced_system
         
         if retrieved_memory:
-            # Format memory context
-            memory_context = "\n\n=== IMPORTANT: Context Information from Files and Memory ===\n"
-            memory_context += "The following information has been retrieved from uploaded files and previous conversations.\n"
-            memory_context += "You MUST use this information to answer questions accurately.\n\n"
+            # Format memory context - simplified, less imperative language
+            memory_context = "\n\n=== Context Information from Files and Memory ===\n"
+            memory_context += "The following information has been retrieved from uploaded files and previous conversations.\n\n"
             
             for i, mem in enumerate(retrieved_memory, 1):
                 max_chars = 5000
@@ -347,8 +344,7 @@ Use the appropriate tool based on user requests. Provide factual responses based
                     memory_context += f"{i}. {mem}\n\n"
             
             memory_context += "\n=== End of Context Information ===\n"
-            memory_context += "IMPORTANT: When the user asks about files or documents, use the information provided above.\n"
-            memory_context += "You can see and read the file contents shown above. Reference specific details from the files when answering.\n"
+            # Removed imperative instructions about using memory - let the model use it naturally
             enhanced_system += memory_context
         
         # Add tools description if provided
@@ -367,12 +363,19 @@ Use the appropriate tool based on user requests. Provide factual responses based
             logger.debug(f"   System instruction preview: {system_content[:200]}...")
         
         # Add session context (without system prompt - it will be passed as system_instruction)
+        # Preserve function_response format if already present in session_context
         for msg in session_context:
             role = msg.get("role", "user")
-            content = msg.get("content", "")
             # Skip system messages from context - they're handled by system_instruction
             if role != "system":
-                messages.append({"role": role, "parts": [content]})
+                # Check if message already has "parts" with function_response format
+                if "parts" in msg and isinstance(msg["parts"], list):
+                    # Preserve the parts as-is (may contain function_response)
+                    messages.append({"role": role, "parts": msg["parts"]})
+                else:
+                    # Legacy format: convert content to parts
+                    content = msg.get("content", "")
+                    messages.append({"role": role, "parts": [content]})
         
         # Add current prompt
         messages.append({"role": "user", "parts": [prompt]})
@@ -598,23 +601,104 @@ Use the appropriate tool based on user requests. Provide factual responses based
         }):
             try:
                 # Build chat history from messages
-                # CRITICAL: Gemini requires perfect alternation: user -> model -> user -> model
-                # The last message in history MUST be "model" before sending new user message
+                # CRITICAL: Gemini requires perfect alternation: user -> model -> function -> user -> model
+                # Support for function_response: function role can appear after model with function_call
+                # The last message in history MUST be "model" or "function" before sending new user message
                 history = []
-                for i in range(0, len(messages) - 1, 2):
-                    if i + 1 < len(messages):
-                        user_msg = messages[i]
-                        assistant_msg = messages[i + 1] if messages[i + 1].get("role") == "assistant" else None
-                        if user_msg.get("role") == "user":
-                            user_content = user_msg["parts"][0] if isinstance(user_msg["parts"], list) else str(user_msg["parts"])
-                            if assistant_msg:
-                                assistant_content = assistant_msg["parts"][0] if isinstance(assistant_msg["parts"], list) else str(assistant_msg["parts"])
-                                history.append({"role": "user", "parts": [user_content]})
-                                history.append({"role": "model", "parts": [assistant_content]})
+                i = 0
+                while i < len(messages) - 1:
+                    msg = messages[i]
+                    role = msg.get("role", "user")
+                    parts = msg.get("parts", [])
+                    
+                    if role == "user":
+                        # Extract user content
+                        if isinstance(parts, list) and len(parts) > 0:
+                            user_content = parts[0] if isinstance(parts[0], str) else str(parts[0])
+                        else:
+                            user_content = str(parts) if parts else ""
+                        
+                        history.append({"role": "user", "parts": [user_content]})
+                        i += 1
+                        
+                        # Look for model response (may contain function_call)
+                        if i < len(messages):
+                            model_msg = messages[i]
+                            if model_msg.get("role") in ["model", "assistant"]:
+                                model_parts = model_msg.get("parts", [])
+                                # Check if parts contain function_call
+                                processed_parts = []
+                                for part in model_parts:
+                                    if isinstance(part, dict) and "function_call" in part:
+                                        # Keep function_call as-is
+                                        processed_parts.append(part)
+                                    elif isinstance(part, str):
+                                        processed_parts.append(part)
+                                    else:
+                                        processed_parts.append(str(part))
+                                
+                                if not processed_parts:
+                                    processed_parts = [""]
+                                
+                                history.append({"role": "model", "parts": processed_parts})
+                                i += 1
+                                
+                                # Look for function_response after model
+                                while i < len(messages):
+                                    func_msg = messages[i]
+                                    if func_msg.get("role") == "function":
+                                        func_parts = func_msg.get("parts", [])
+                                        # Process function_response
+                                        processed_func_parts = []
+                                        for part in func_parts:
+                                            if isinstance(part, dict) and "function_response" in part:
+                                                # Keep function_response as-is
+                                                processed_func_parts.append(part)
+                                            elif isinstance(part, dict):
+                                                # Try to convert to function_response format
+                                                if "name" in part and "response" in part:
+                                                    processed_func_parts.append({
+                                                        "function_response": {
+                                                            "name": part["name"],
+                                                            "response": part["response"]
+                                                        }
+                                                    })
+                                                else:
+                                                    processed_func_parts.append(part)
+                                            else:
+                                                processed_func_parts.append(str(part))
+                                        
+                                        if processed_func_parts:
+                                            history.append({"role": "function", "parts": processed_func_parts})
+                                        i += 1
+                                    else:
+                                        break
                             else:
-                                # If no assistant response, add empty one to maintain alternation
-                                history.append({"role": "user", "parts": [user_content]})
+                                # No model response, add empty one to maintain alternation
                                 history.append({"role": "model", "parts": [""]})
+                    elif role == "function":
+                        # Handle standalone function messages
+                        func_parts = parts
+                        processed_func_parts = []
+                        for part in func_parts:
+                            if isinstance(part, dict) and "function_response" in part:
+                                processed_func_parts.append(part)
+                            elif isinstance(part, dict) and "name" in part and "response" in part:
+                                processed_func_parts.append({
+                                    "function_response": {
+                                        "name": part["name"],
+                                        "response": part["response"]
+                                    }
+                                })
+                            else:
+                                processed_func_parts.append(str(part))
+                        
+                        if processed_func_parts:
+                            history.append({"role": "function", "parts": processed_func_parts})
+                        i += 1
+                    else:
+                        # Skip unknown roles or handle them
+                        i += 1
                 
                 # CRITICAL: Verify history ends with "model" role
                 if history and history[-1]["role"] != "model":
@@ -778,6 +862,60 @@ Use the appropriate tool based on user requests. Provide factual responses based
                 
                 response = await self._generate_async(chat, last_msg, generation_config=generation_config, safety_settings=safety_settings_to_pass)
                 
+                # ==========================================================
+                # 🚨 CRITICAL DEBUG BLOCK FOR SAFETY FILTERS (INPUT)
+                # ==========================================================
+                # According to Gemini 3, if safety_ratings in response are empty,
+                # the problem is in the INPUT, and details are in prompt_feedback.safety_ratings
+                if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                    pf = response.prompt_feedback
+                    pf_safety_ratings = getattr(pf, 'safety_ratings', [])
+                    
+                    # 1. Log the main block reason
+                    block_reason_name = 'BLOCK_REASON_UNSPECIFIED'
+                    if hasattr(pf, 'block_reason'):
+                        block_reason = pf.block_reason
+                        if hasattr(block_reason, 'name'):
+                            block_reason_name = block_reason.name
+                        else:
+                            block_reason_name = str(block_reason)
+                    
+                    if block_reason_name != 'BLOCK_REASON_UNSPECIFIED':
+                        logger.error(f"🚨 INPUT BLOCKED! Block Reason: {block_reason_name}")
+                    
+                    # 2. Log safety ratings on INPUT (if present)
+                    if pf_safety_ratings:
+                        logger.error(f"🚨 Dettagli Safety Ratings su INPUT (causa del blocco): {len(pf_safety_ratings)} rating trovati.")
+                        for i, rating in enumerate(pf_safety_ratings):
+                            category_name = 'UNKNOWN'
+                            probability_name = 'UNKNOWN'
+                            
+                            if hasattr(rating, 'category'):
+                                category = rating.category
+                                if hasattr(category, 'name'):
+                                    category_name = category.name
+                                else:
+                                    category_name = str(category)
+                            
+                            if hasattr(rating, 'probability'):
+                                probability = rating.probability
+                                if hasattr(probability, 'name'):
+                                    probability_name = probability.name
+                                else:
+                                    probability_name = str(probability)
+                            
+                            # Log only ratings that caused the block (excluding NEGLIGIBLE)
+                            if probability_name not in ['NEGLIGIBLE', 'LOW']:
+                                logger.error(f"   [{i}] Categoria: {category_name}, Probabilità: {probability_name} (⚠️ Soglia superata - CAUSA DEL BLOCCO)")
+                            else:
+                                logger.debug(f"   [{i}] Categoria: {category_name}, Probabilità: {probability_name} (Non bloccante)")
+                    else:
+                        # This is the case you're experiencing: prompt_feedback exists, but ratings are empty
+                        if block_reason_name != 'BLOCK_REASON_UNSPECIFIED':
+                            logger.error("⚠️ Blocco su INPUT confermato, ma safety_ratings vuoti. Problema a livello di policy/infrastruttura.")
+                            logger.error("   Questo indica che il blocco avviene a livello infrastrutturale, non a livello di contenuto.")
+                            logger.error("   Richiesta allowlist necessaria per BLOCK_NONE.")
+                
                 logger.info(f"🔍 DEBUG: Response received from Gemini:")
                 logger.info(f"   Response type: {type(response)}")
                 if hasattr(response, 'candidates') and response.candidates:
@@ -836,10 +974,52 @@ Use the appropriate tool based on user requests. Provide factual responses based
                                 if hasattr(part, 'function_call') and part.function_call:
                                     has_function_calls = True
                 
+                # ==========================================================
+                # 🚨 DEBUG FOR OUTPUT (if output is blocked and input is OK)
+                # ==========================================================
+                output_safety_ratings = []
+                if hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'safety_ratings'):
+                        output_safety_ratings = candidate.safety_ratings
+                
                 # Handle safety blocks ONLY if there are no function calls
                 # If there are function calls, process them normally (safety block might be only on text response)
                 if finish_reason == 1 and not has_function_calls:  # SAFETY and no function calls
                     logger.warning(f"🔴 Gemini response blocked by safety filters (finish_reason=1) in generate_with_context, no function calls available")
+                    
+                    # Log output safety ratings if present
+                    if output_safety_ratings:
+                        logger.error(f"🚨 OUTPUT BLOCKED! {len(output_safety_ratings)} safety ratings trovati sull'output.")
+                        for i, rating in enumerate(output_safety_ratings):
+                            category_name = 'UNKNOWN'
+                            probability_name = 'UNKNOWN'
+                            
+                            if hasattr(rating, 'category'):
+                                category = rating.category
+                                if hasattr(category, 'name'):
+                                    category_name = category.name
+                                else:
+                                    category_name = str(category)
+                            
+                            if hasattr(rating, 'probability'):
+                                probability = rating.probability
+                                if hasattr(probability, 'name'):
+                                    probability_name = probability.name
+                                else:
+                                    probability_name = str(probability)
+                            
+                            logger.error(f"   [{i}] Categoria: {category_name}, Probabilità: {probability_name} (Causa del finish_reason=1)")
+                    elif not output_safety_ratings:
+                        # Check if we have prompt_feedback ratings
+                        pf_ratings = []
+                        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                            pf_ratings = getattr(response.prompt_feedback, 'safety_ratings', [])
+                        
+                        if not pf_ratings:
+                            # If both input and output ratings are empty, it's a deep problem
+                            logger.error("❌ Blocco SAFETY (finish_reason=1) senza dettagli di rating. Richiesta allowlist necessaria.")
+                            logger.error("   Questo indica un blocco a livello infrastrutturale/policy, non a livello di contenuto.")
                     
                     # Try alternative model if available and current model is flash
                     if self.alternative_model and self.model_name == settings.gemini_model and "flash" in self.model_name.lower():
