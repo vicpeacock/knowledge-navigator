@@ -69,7 +69,7 @@ class MemoryManager:
         if effective_tenant_id:
             return f"{base_name}_{str(effective_tenant_id).replace('-', '_')}"
         else:
-            return f"{base_name}_default"
+            return f"{base_name}_00000000_0000_0000_0000_000000000000"
 
     
     def _get_collection(self, base_name: str, tenant_id: Optional[UUID] = None):
@@ -81,7 +81,7 @@ class MemoryManager:
             return self._collections_cache[collection_name]
         
         metadata = {
-            "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "default"
+            "tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "00000000-0000-0000-0000-000000000000"
         }
         logger = logging.getLogger(__name__)
         collection = None
@@ -89,12 +89,14 @@ class MemoryManager:
         strategies = [
             lambda: self.chroma_client.get_or_create_collection(name=collection_name, metadata=metadata),
             lambda: self.chroma_client.get_collection(name=collection_name),
+            lambda: self.chroma_client.create_collection(name=collection_name, metadata={"tenant_id": tenant_id_str if (tenant_id or self.tenant_id) else "00000000-0000-0000-0000-000000000000", "_type": "collection"}),
             lambda: self.chroma_client.create_collection(name=collection_name, metadata={}),
             lambda: self.chroma_client.create_collection(name=collection_name),
         ]
         strategy_names = [
             "get_or_create with metadata",
             "get existing collection",
+            "create with metadata + _type",
             "create with empty metadata",
             "create without metadata",
         ]
