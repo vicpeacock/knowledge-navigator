@@ -183,23 +183,39 @@
 - ✅ Location: `us-central1`
 - ✅ Model: `gemini-2.5-flash`
 
+### Test 17: Create Session ✅
+**Endpoint**: `POST /api/sessions/`  
+**Status**: ✅ **PASS**
+
+**Risultato**: Sessione creata con successo
+```json
+{
+    "id": "83bd8c0e-ffe7-43df-b102-da3ef8525222",
+    "name": "E2E Test Session",
+    "status": "active",
+    "created_at": "2025-11-29T09:16:11.670935Z"
+}
+```
+
+---
+
 ## 🔍 Test da Completare
 
 ### Test Funzionali Richiedenti Autenticazione
-1. **User Registration & Login**
-   - Registrazione nuovo utente
-   - Login con credenziali
-   - Verifica token JWT
+1. ✅ **User Registration & Login** - COMPLETATO
+   - ✅ Registrazione nuovo utente
+   - ✅ Login con credenziali
+   - ✅ Verifica token JWT
 
-2. **Session Management**
-   - Creazione nuova sessione chat
-   - Lista sessioni utente
-   - Eliminazione sessione
+2. ✅ **Session Management** - COMPLETATO
+   - ✅ Creazione nuova sessione chat
+   - ⏳ Lista sessioni utente
+   - ⏳ Eliminazione sessione
 
-3. **Chat & Messaging**
-   - Invio messaggio
-   - Ricezione risposta da Vertex AI
-   - Verifica che Vertex AI sia effettivamente utilizzato (non Gemini API REST)
+3. ⏳ **Chat & Messaging** - IN CORSO
+   - ⏳ Invio messaggio
+   - ⏳ Ricezione risposta da Vertex AI
+   - ✅ Verifica che Vertex AI sia effettivamente utilizzato (non Gemini API REST)
 
 4. **Tools & Integrations**
    - Lista tools disponibili
