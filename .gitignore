@@ -98,6 +98,10 @@ others/uploads/
 *.db
 *.sqlite
 
+# Backups (may contain sensitive data)
+backups/
+**/backups/
+
 # Logs
 logs/
 others/logs/

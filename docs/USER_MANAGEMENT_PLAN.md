@@ -144,8 +144,8 @@ Body: {
     "password": "secure_password"
 }
 Response: {
-    "access_token": "eyJhbGciOiJIUzI1NiIs...",
-    "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+    "access_token": "eyJhbGciOiJIUzI1NiIs...",  # Example token - replace with actual token
+    "refresh_token": "eyJhbGciOiJIUzI1NiIs...",  # Example token - replace with actual token
     "token_type": "bearer",
     "expires_in": 3600,
     "user": {
@@ -165,7 +165,7 @@ Body: {
     "refresh_token": "eyJhbGciOiJIUzI1NiIs..."
 }
 Response: {
-    "access_token": "eyJhbGciOiJIUzI1NiIs...",
+    "access_token": "eyJhbGciOiJIUzI1NiIs...",  # Example token - replace with actual token
     "expires_in": 3600
 }
 ```
