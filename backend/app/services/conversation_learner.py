@@ -55,7 +55,13 @@ Estrai:
 5. Progetti o attività menzionate
 
 Per le preferenze:
-- Estrai sia preferenze positive ("mi piace", "amo", "preferisco") che negative ("non mi piace", "detesto", "odio")
+- Estrai SOLO preferenze esplicitamente dichiarate con verbi di preferenza ("mi piace", "amo", "preferisco", "non mi piace", "detesto", "odio")
+- NON estrarre come preferenza se è solo una menzione casuale (es. "ho mangiato pasta ieri" NON è una preferenza)
+- Distingui tra:
+  * Preferenze esplicite: "Mi piace la pasta" → PREFERENCE
+  * Menzioni casuali: "Ho mangiato pasta ieri" → NON è una preferenza, non estrarre
+  * Fatti temporanei: "Oggi ho fatto X" → FACT (temporaneo)
+  * Fatti permanenti: "Sono nato il X" → FACT (permanente)
 - Per ogni preferenza, includi il contesto completo (es. "L'utente ama la pastasciutta" o "L'utente detesta gli spaghetti")
 - Usa descrizioni chiare che permettano di identificare l'oggetto della preferenza
 

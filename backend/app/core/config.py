@@ -145,7 +145,7 @@ class Settings(BaseSettings):
     context_keep_recent_messages: int = 10  # Keep last N messages when summarizing
     
     # Semantic Integrity Check
-    integrity_confidence_threshold: float = 0.85  # Soglia confidenza contraddizioni (aumentata per ridurre falsi positivi)
+    integrity_confidence_threshold: float = 0.90  # Soglia confidenza contraddizioni (aumentata a 0.90 per ridurre falsi positivi - più conservativo)
     integrity_max_similar_memories: int = 5  # Numero memorie simili da controllare (ridotto per efficienza e precisione)
     integrity_check_exhaustive: bool = False  # Se True, controlla tutte (più lento)
     integrity_min_importance: float = 0.7  # Importanza minima delle memorie da controllare (filtra memorie poco importanti)

@@ -87,19 +87,39 @@ class SemanticIntegrityChecker:
             
             logger.info(f"Found {len(similar_memories)} similar memories to check for contradictions")
             
-            # 2. Analyze all similar memories with LLM (fully LLM-based, no hard-coded heuristics)
-            # Since llama.cpp is fast, we can afford to use LLM for all cases
+            # 2. Pre-filter: Extract type from new knowledge and existing memories
+            new_knowledge_type = new_knowledge.get("type", "").lower() if isinstance(new_knowledge, dict) else ""
+            
+            # 3. Analyze similar memories with LLM (with pre-filtering by type)
+            # Since llama.cpp is fast, we can afford to use LLM for all cases, but we filter by type first
             contradictions = []
             
             for memory_content in similar_memories:
                 # Clean memory content (remove type prefix)
                 clean_memory = re.sub(r'^\[.*?\]\s*', '', memory_content).strip()
                 
-                logger.info(f"Analyzing potential contradiction with LLM (fully LLM-based)...")
+                # Extract type from existing memory (if present in prefix)
+                existing_type_match = re.search(r'^\[(FACT|PREFERENCE|PERSONAL_INFO|CONTACT|PROJECT)\]\s*', memory_content, re.IGNORECASE)
+                existing_memory_type = existing_type_match.group(1).lower() if existing_type_match else ""
+                
+                # Pre-filter: Don't compare different types (fact vs preference, etc.)
+                # This reduces false positives from comparing incompatible memory types
+                if new_knowledge_type and existing_memory_type:
+                    if new_knowledge_type != existing_memory_type:
+                        logger.debug(f"⏭️  Skipping comparison: different types (new={new_knowledge_type}, existing={existing_memory_type})")
+                        continue
+                
+                # Also skip if one is preference and other is fact (even if types not explicitly set)
+                if (new_knowledge_type == "preference" and existing_memory_type == "fact") or \
+                   (new_knowledge_type == "fact" and existing_memory_type == "preference"):
+                    logger.debug(f"⏭️  Skipping comparison: incompatible types (preference vs fact)")
+                    continue
+                
+                logger.info(f"Analyzing potential contradiction with LLM (types: new={new_knowledge_type or 'unknown'}, existing={existing_memory_type or 'unknown'})...")
                 logger.info(f"  New: '{clean_content[:100]}...'")
                 logger.info(f"  Existing: '{clean_memory[:100]}...'")
                 
-                # Use LLM for complete semantic analysis (no pre-filtering)
+                # Use LLM for complete semantic analysis
                 contradiction = await self._analyze_with_llm(
                     clean_content,
                     clean_memory,
@@ -233,6 +253,12 @@ Determine if there is a LOGICAL CONTRADICTION between these statements. You must
 6. **Relationship Contradictions**: Incompatible relationships
 7. **Factual Contradictions**: Incompatible facts about the same entity
 
+**CRITICAL: CONSERVATIVE APPROACH**
+- If you are NOT 95% certain this is a logical contradiction → respond with "is_contradiction": false
+- Better to miss a contradiction than to flag a false positive
+- Always consider temporal and situational context
+- Distinguish between explicit contradictions and complementary information
+
 **CRITICAL: TAXONOMIC RELATIONSHIPS**
 Contradictions can occur at different levels of a taxonomy (hierarchy):
 - If one statement is about a CATEGORY and the other about an INSTANCE or SUBCATEGORY of that category, and they express opposite preferences/claims → CONTRADICTION
@@ -247,6 +273,13 @@ Contradictions can occur at different levels of a taxonomy (hierarchy):
 - "Likes animals" vs "Hates dogs" → CONTRADICTION (dogs are animals)
 
 **IMPORTANT:** When analyzing preferences, you MUST check if the entities are taxonomically related. If one is a category and the other is an instance/subcategory of that category, and the preferences are opposite, it IS a contradiction.
+
+**EXAMPLES OF NON-CONTRADICTIONS (be conservative):**
+- "Likes pasta" vs "Ate pizza yesterday" → NO CONTRADICTION (different temporal contexts, different foods)
+- "Likes Italian food" vs "Likes pizza" → NO CONTRADICTION (complementary, not contradictory)
+- "Born in 1990" vs "Age 35" → NO CONTRADICTION (compatible if calculated correctly)
+- "Likes pasta at lunch" vs "Hates pasta at dinner" → NO CONTRADICTION (different contexts)
+- "Mentioned eating pasta" vs "Likes pasta" → NO CONTRADICTION (casual mention vs explicit preference)
 
 **Reasoning Process:**
 1. Identify what each statement is about (entity, category, instance, property)
