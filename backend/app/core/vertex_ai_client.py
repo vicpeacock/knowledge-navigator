@@ -458,6 +458,9 @@ NON rispondere con informazioni generiche o ipotetiche. Usa SEMPRE i tool approp
             
             # Add retrieved memory (files, previous conversations) to system instruction
             if retrieved_memory:
+                # Check if any memory contains file content
+                has_file_content = any("[Content from uploaded file" in mem or "uploaded file" in mem.lower() for mem in retrieved_memory)
+                
                 # Format memory context clearly, similar to OllamaClient
                 memory_context = "\n\n=== IMPORTANT: Context Information from Files and Memory ===\n"
                 memory_context += "The following information has been retrieved from uploaded files and previous conversations.\n"
@@ -473,17 +476,31 @@ NON rispondere con informazioni generiche o ipotetiche. Usa SEMPRE i tool approp
                         memory_context += f"{i}. {mem}\n\n"
                 
                 memory_context += "\n=== End of Context Information ===\n"
-                memory_context += "\n🚨 CRITICAL INSTRUCTIONS - FILE CONTENT:\n"
-                memory_context += "The file contents shown above are ALREADY AVAILABLE and FULLY ACCESSIBLE to you.\n"
-                memory_context += "You can read, analyze, and summarize them DIRECTLY without using any tools.\n\n"
-                memory_context += "IMPORTANT RULES:\n"
-                memory_context += "1. When the user asks to summarize, analyze, or explain a file, use the file content shown above.\n"
-                memory_context += "2. DO NOT use tools like 'mcp_get_drive_file_content' or 'drive_get_file' - the content is already here.\n"
-                memory_context += "3. If you see '[Content from uploaded file]' above, that IS the file content - use it directly.\n"
-                memory_context += "4. The file was uploaded to this session and is already in your context - no tools needed.\n"
-                memory_context += "5. Only use file-related tools if the user explicitly asks for files from Google Drive that are NOT shown above.\n\n"
-                memory_context += "EXAMPLE: If user asks 'Riassumi il file', look for '[Content from uploaded file]' above and summarize that content.\n"
-                memory_context += "DO NOT try to access the file via tools - it's already available in the context above.\n"
+                
+                # Add explicit instructions if file content is present
+                if has_file_content:
+                    memory_context += "\n🚨🚨🚨 CRITICAL: FILE CONTENT IS AVAILABLE ABOVE 🚨🚨🚨\n"
+                    memory_context += "The file content is shown above with the label '[Content from uploaded file]'.\n"
+                    memory_context += "You can read it DIRECTLY - it's already in your context.\n\n"
+                    memory_context += "WHEN USER ASKS TO SUMMARIZE/ANALYZE/EXPLAIN A FILE:\n"
+                    memory_context += "1. Look for '[Content from uploaded file]' in the context above\n"
+                    memory_context += "2. Use that content directly to answer the user's question\n"
+                    memory_context += "3. DO NOT use any tools - the content is already available\n"
+                    memory_context += "4. DO NOT try to access Google Drive - the file was uploaded to this session\n\n"
+                    memory_context += "EXAMPLE:\n"
+                    memory_context += "User: 'Riassumi il contenuto del file'\n"
+                    memory_context += "You: Read the '[Content from uploaded file]' above and summarize it directly.\n"
+                    memory_context += "DO NOT call mcp_get_drive_file_content or any other tool.\n\n"
+                else:
+                    memory_context += "\n🚨 CRITICAL INSTRUCTIONS - FILE CONTENT:\n"
+                    memory_context += "If file content is shown above, it is ALREADY AVAILABLE and FULLY ACCESSIBLE to you.\n"
+                    memory_context += "You can read, analyze, and summarize it DIRECTLY without using any tools.\n\n"
+                    memory_context += "IMPORTANT RULES:\n"
+                    memory_context += "1. When the user asks to summarize, analyze, or explain a file, use the file content shown above.\n"
+                    memory_context += "2. DO NOT use tools like 'mcp_get_drive_file_content' or 'drive_get_file' - the content is already here.\n"
+                    memory_context += "3. If you see '[Content from uploaded file]' above, that IS the file content - use it directly.\n"
+                    memory_context += "4. The file was uploaded to this session and is already in your context - no tools needed.\n"
+                    memory_context += "5. Only use file-related tools if the user explicitly asks for files from Google Drive that are NOT shown above.\n\n"
                 
                 # Combine memory_context with existing system_instruction
                 current_system = config.get("system_instruction", "")
