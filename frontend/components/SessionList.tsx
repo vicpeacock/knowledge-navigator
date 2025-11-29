@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { sessionsApi } from '@/lib/api'
 import { Session } from '@/types'
 import { Plus, Archive, RotateCcw, X } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface SessionListProps {
   currentSessionId?: string
@@ -17,10 +18,14 @@ export default function SessionList({ currentSessionId }: SessionListProps) {
   const [showArchived, setShowArchived] = useState(false)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
+  const { isAuthenticated, isLoading: authLoading } = useAuth()
 
   useEffect(() => {
-    loadSessions()
-  }, [])
+    // Wait for auth to complete before loading sessions
+    if (!authLoading && isAuthenticated) {
+      loadSessions()
+    }
+  }, [authLoading, isAuthenticated])
 
   const loadSessions = async () => {
     try {

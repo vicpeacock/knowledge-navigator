@@ -13,13 +13,20 @@ function DashboardContent() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
-  const { user, logout } = useAuth()
+  const { user, logout, isAuthenticated, isLoading: authLoading } = useAuth()
   const router = useRouter()
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    loadSessions()
-  }, [])
+    // Wait for auth to complete before loading sessions
+    if (!authLoading && isAuthenticated) {
+      loadSessions()
+    } else if (!authLoading && !isAuthenticated) {
+      // Auth failed, redirect to login
+      console.log('[Dashboard] Not authenticated, redirecting to login...')
+      router.push('/auth/login')
+    }
+  }, [authLoading, isAuthenticated, router])
 
   // Chiudi menu quando si clicca fuori
   useEffect(() => {
