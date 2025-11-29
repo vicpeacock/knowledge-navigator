@@ -95,7 +95,13 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
         return payload
     except JWTError as e:
-        logger.warning(f"JWT decode error: {e}")
+        # Log expired tokens at DEBUG level to reduce log noise (expired tokens are expected)
+        error_str = str(e)
+        if "expired" in error_str.lower() or "Signature has expired" in error_str:
+            logger.debug(f"JWT token expired: {e}")
+        else:
+            # Log other JWT errors (invalid signature, malformed token, etc.) as warnings
+            logger.warning(f"JWT decode error: {e}")
         return None
 
 

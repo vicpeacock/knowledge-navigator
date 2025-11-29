@@ -81,8 +81,9 @@ async def lifespan(app: FastAPI):
         alembic_dir = backend_dir / "alembic"
         
         if not alembic_ini.exists():
-            logging.warning(f"⚠️  alembic.ini not found at: {alembic_ini}")
-            logging.warning("⚠️  Skipping migrations. Database might not be properly initialized.")
+            # In local development, alembic.ini might be in a different location
+            # This is normal and migrations can be run manually
+            logging.debug(f"alembic.ini not found at: {alembic_ini} (this is normal in local development)")
         elif not alembic_dir.exists():
             logging.warning(f"⚠️  alembic directory not found at: {alembic_dir}")
             logging.warning("⚠️  Skipping migrations. Database might not be properly initialized.")
