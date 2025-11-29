@@ -456,6 +456,34 @@ NON rispondere con informazioni generiche o ipotetiche. Usa SEMPRE i tool approp
                             config["system_instruction"] = tools_description
 
             
+            # Add retrieved memory (files, previous conversations) to system instruction
+            if retrieved_memory:
+                # Format memory context clearly, similar to OllamaClient
+                memory_context = "\n\n=== IMPORTANT: Context Information from Files and Memory ===\n"
+                memory_context += "The following information has been retrieved from uploaded files and previous conversations.\n"
+                memory_context += "You MUST use this information to answer questions accurately.\n\n"
+                
+                for i, mem in enumerate(retrieved_memory, 1):
+                    # Truncate very long content to avoid token limits
+                    # For file content, show enough to understand but not overwhelm the model
+                    max_chars = 5000  # Same as OllamaClient
+                    if len(mem) > max_chars:
+                        memory_context += f"{i}. {mem[:max_chars]}... [content truncated - file is {len(mem)} chars total]\n\n"
+                    else:
+                        memory_context += f"{i}. {mem}\n\n"
+                
+                memory_context += "\n=== End of Context Information ===\n"
+                memory_context += "IMPORTANT: When the user asks about files or documents, use the information provided above.\n"
+                memory_context += "You can see and read the file contents shown above. Reference specific details from the files when answering.\n"
+                memory_context += "If the user asks to summarize, analyze, or explain a file, use the file content shown above.\n"
+                
+                # Combine memory_context with existing system_instruction
+                current_system = config.get("system_instruction", "")
+                if current_system:
+                    config["system_instruction"] = current_system + memory_context
+                else:
+                    config["system_instruction"] = memory_context
+            
             # Add time/location context if provided (like GeminiClient)
             time_context = getattr(self, '_time_context', None)
             if time_context:

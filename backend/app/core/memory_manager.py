@@ -620,6 +620,20 @@ class MemoryManager:
         import logging
         logger = logging.getLogger(__name__)
         
+        # Check if query is a generic file request (summary, analyze, etc.)
+        # These queries should retrieve ALL files, not use semantic search
+        query_lower = query.lower()
+        generic_file_keywords = [
+            "riassunto", "summary", "summarize", "analizza", "analyze", 
+            "ultimo file", "last file", "most recent file", "latest file",
+            "il file", "the file", "questo file", "this file",
+            "contenuto del file", "file content", "contenuto file"
+        ]
+        is_generic_file_request = any(keyword in query_lower for keyword in generic_file_keywords)
+        
+        if is_generic_file_request:
+            logger.info(f"Detected generic file request: '{query}'. Will retrieve all files for session instead of semantic search.")
+        
         try:
             # Get tenant-specific collection
             effective_tenant_id = tenant_id or self.tenant_id
@@ -715,7 +729,8 @@ class MemoryManager:
             
             # Strategy: Get ALL files for the session, sort by upload time (most recent first)
             # This ensures the most recent file is ALWAYS returned first, regardless of semantic relevance
-            if valid_file_ids and file_upload_times:
+            # Also use this strategy for generic file requests (summary, analyze, etc.)
+            if (valid_file_ids and file_upload_times) or is_generic_file_request:
                 # Get ALL files for this session from ChromaDB (not using semantic search)
                 # This ensures we have the most recent file even if it's not semantically relevant
                 all_session_files = collection.get(
@@ -744,13 +759,18 @@ class MemoryManager:
                             except:
                                 pass
                         
-                        # Only include valid files
-                        if file_id and str(file_id) in valid_file_ids:
-                            upload_time = file_upload_times.get(str(file_id), datetime.min.replace(tzinfo=timezone.utc))
-                            file_items.append((doc, str(file_id), upload_time))
+                        # For generic file requests, include all files even if we don't have valid_file_ids
+                        # Otherwise, only include valid files
+                        if is_generic_file_request or (file_id and str(file_id) in valid_file_ids):
+                            if file_upload_times and file_id:
+                                upload_time = file_upload_times.get(str(file_id), datetime.min.replace(tzinfo=timezone.utc))
+                            else:
+                                upload_time = datetime.min.replace(tzinfo=timezone.utc)
+                            file_items.append((doc, str(file_id) if file_id else f"unknown_{i}", upload_time))
                 
-                # Sort by upload time ONLY - most recent first
-                file_items.sort(key=lambda x: x[2], reverse=True)
+                # Sort by upload time ONLY - most recent first (if we have upload times)
+                if file_upload_times:
+                    file_items.sort(key=lambda x: x[2], reverse=True)
                 
                 logger.info(f"Retrieved {len(file_items)} files, sorted by upload time. First file: {file_items[0][1] if file_items else 'none'}")
                 
@@ -768,6 +788,20 @@ class MemoryManager:
                 
                 logger.info(f"Returning {len(filtered_docs)} documents, ordered by upload time (most recent first)")
                 
+                return filtered_docs
+            
+            # Fallback: if we don't have file_upload_times AND it's not a generic file request, use semantic search
+            # For generic file requests, we should still try to get all files even without upload times
+            if is_generic_file_request and all_files.get("documents"):
+                # For generic requests, return all files even without upload time sorting
+                logger.info(f"Generic file request: returning all {len(all_files.get('documents', []))} files without semantic search")
+                filtered_docs = []
+                for i, doc in enumerate(all_files.get("documents", [])[:n_results]):
+                    if len(doc) > 15000:
+                        truncated_doc = doc[:15000] + f"\n\n[Content truncated - original was {len(doc)} characters. This is a large file, focusing on the beginning.]"
+                        filtered_docs.append(truncated_doc)
+                    else:
+                        filtered_docs.append(doc)
                 return filtered_docs
             
             # Fallback: if we don't have file_upload_times, use semantic search
