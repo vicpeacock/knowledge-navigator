@@ -692,11 +692,46 @@ class MemoryManager:
                         logger.info(f"File {requested_file_id} found in database, retrieving from ChromaDB")
                         # Try to get the file content from ChromaDB by file_id in metadata
                         try:
-                            file_embeddings = collection.get(
-                                where={"file_id": requested_file_id}
-                            )
+                            # Try different where clause syntaxes for ChromaDB Cloud compatibility
+                            file_embeddings = None
+                            where_clauses = [
+                                {"file_id": requested_file_id},  # Standard syntax
+                                {"file_id": {"$eq": requested_file_id}},  # MongoDB-style syntax
+                            ]
                             
-                            if file_embeddings.get("documents"):
+                            for where_clause in where_clauses:
+                                try:
+                                    logger.debug(f"Trying where clause: {where_clause}")
+                                    file_embeddings = collection.get(where=where_clause)
+                                    if file_embeddings.get("documents"):
+                                        break  # Found it, exit loop
+                                except Exception as clause_error:
+                                    logger.debug(f"Where clause {where_clause} failed: {clause_error}, trying next...")
+                                    continue
+                            
+                            # If still not found, try getting all files and filtering manually
+                            if not file_embeddings or not file_embeddings.get("documents"):
+                                logger.info(f"Direct query failed, trying manual filter for file_id {requested_file_id}")
+                                all_session_files = collection.get(
+                                    where={"session_id": session_id_str}
+                                )
+                                all_ids = all_session_files.get("ids", [])
+                                all_docs = all_session_files.get("documents", [])
+                                all_metas = all_session_files.get("metadatas", [])
+                                
+                                for i, meta in enumerate(all_metas):
+                                    file_id = None
+                                    if isinstance(meta, dict):
+                                        file_id = meta.get("file_id")
+                                    if file_id == requested_file_id:
+                                        doc = all_docs[i]
+                                        logger.info(f"✅ Retrieved file {requested_file_id} from ChromaDB (manual filter), content length: {len(doc)} chars")
+                                        # Truncate if too long
+                                        if len(doc) > 15000:
+                                            doc = doc[:15000] + f"\n\n[Content truncated - original was {len(doc)} characters. This is a large file, focusing on the beginning.]"
+                                        return [doc]
+                            
+                            if file_embeddings and file_embeddings.get("documents"):
                                 # Found the file in ChromaDB
                                 doc = file_embeddings["documents"][0]
                                 logger.info(f"✅ Retrieved file {requested_file_id} from ChromaDB, content length: {len(doc)} chars")
@@ -705,9 +740,9 @@ class MemoryManager:
                                     doc = doc[:15000] + f"\n\n[Content truncated - original was {len(doc)} characters. This is a large file, focusing on the beginning.]"
                                 return [doc]
                             else:
-                                logger.warning(f"File {requested_file_id} exists in database but not found in ChromaDB embeddings")
+                                logger.warning(f"File {requested_file_id} exists in database but not found in ChromaDB embeddings. Collection has {len(collection.get().get('ids', []))} total embeddings.")
                         except Exception as chroma_error:
-                            logger.warning(f"Error retrieving file {requested_file_id} from ChromaDB: {chroma_error}")
+                            logger.error(f"Error retrieving file {requested_file_id} from ChromaDB: {chroma_error}", exc_info=True)
                     else:
                         logger.info(f"File {requested_file_id} not found in database for session {session_id}")
                 except ValueError as uuid_error:
@@ -723,14 +758,66 @@ class MemoryManager:
             
             # First, check if there are any files for this session
             session_id_str = str(session_id)
-            all_files = collection.get(
-                where={"session_id": session_id_str},
-            )
+            logger.info(f"🔍 Retrieving files for session {session_id_str}, tenant: {effective_tenant_id}, collection: {collection.name if hasattr(collection, 'name') else 'unknown'}")
             
-            logger.info(f"Checking files for session {session_id_str}: found {len(all_files.get('ids', []))} embeddings in ChromaDB")
+            try:
+                all_files = collection.get(
+                    where={"session_id": session_id_str},
+                )
+                logger.info(f"✅ ChromaDB query successful: found {len(all_files.get('ids', []))} embeddings for session {session_id_str}")
+            except Exception as get_error:
+                logger.error(f"❌ Error querying ChromaDB collection: {get_error}", exc_info=True)
+                # Try without where clause to see if collection has any data
+                try:
+                    all_files_raw = collection.get()
+                    logger.warning(f"⚠️  Query with where clause failed, but collection has {len(all_files_raw.get('ids', []))} total embeddings")
+                    logger.warning(f"   Trying to filter manually...")
+                    # Filter manually
+                    all_ids = all_files_raw.get("ids", [])
+                    all_docs = all_files_raw.get("documents", [])
+                    all_metas = all_files_raw.get("metadatas", [])
+                    filtered_ids = []
+                    filtered_docs = []
+                    filtered_metas = []
+                    for i, meta in enumerate(all_metas):
+                        meta_session_id = None
+                        if isinstance(meta, dict):
+                            meta_session_id = meta.get("session_id")
+                        if meta_session_id == session_id_str:
+                            filtered_ids.append(all_ids[i])
+                            filtered_docs.append(all_docs[i])
+                            filtered_metas.append(meta)
+                    all_files = {
+                        "ids": filtered_ids,
+                        "documents": filtered_docs,
+                        "metadatas": filtered_metas,
+                    }
+                    logger.info(f"✅ Manual filter successful: found {len(filtered_ids)} embeddings for session {session_id_str}")
+                except Exception as fallback_error:
+                    logger.error(f"❌ Fallback query also failed: {fallback_error}", exc_info=True)
+                    return []
             
             if not all_files.get("ids"):
-                logger.warning(f"No files found in ChromaDB for session {session_id_str}")
+                logger.warning(f"⚠️  No files found in ChromaDB for session {session_id_str} (tenant: {effective_tenant_id})")
+                # Check if there are any files in the database for this session
+                if db is not None:
+                    try:
+                        from sqlalchemy import select
+                        from app.models.database import File as FileModel
+                        db_file_result = await db.execute(
+                            select(FileModel.id).where(
+                                FileModel.session_id == session_id,
+                                FileModel.tenant_id == effective_tenant_id
+                            )
+                        )
+                        db_file_ids = [str(fid) for fid, in db_file_result.all()]
+                        if db_file_ids:
+                            logger.warning(f"⚠️  Found {len(db_file_ids)} files in database but 0 embeddings in ChromaDB. Files may not have been embedded correctly.")
+                            logger.warning(f"   Database file IDs: {db_file_ids[:5]}{'...' if len(db_file_ids) > 5 else ''}")
+                        else:
+                            logger.info(f"ℹ️  No files in database for session {session_id_str} either")
+                    except Exception as db_check_error:
+                        logger.debug(f"Could not check database files: {db_check_error}")
                 return []
             
             # If db is provided, filter out embeddings for files that no longer exist
