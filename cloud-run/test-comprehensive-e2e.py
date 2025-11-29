@@ -1238,29 +1238,50 @@ def test_web_search_endpoint():
     
     # Note: In Cloud Run, web search uses customsearch_search built-in tool
     # which uses Google Custom Search API, not MCP Gateway
+    # Requires GOOGLE_PSE_API_KEY and GOOGLE_PSE_CX environment variables
     try:
         headers = {"Authorization": f"Bearer {access_token}"}
+        # Use a simple test query
+        test_query = "Python programming"
         response = requests.post(
             f"{BACKEND_URL}/api/web/search",
             headers=headers,
-            json={"query": "test search"},
+            json={"query": test_query},
             timeout=30
         )
         
         if response.status_code == 200:
             data = response.json()
             # Check if result contains search results
-            if "result" in data or "results" in data or "query" in data:
-                test_pass("Web", "Web search endpoint accessible (customsearch_search)")
-                return True
-            test_pass("Web", "Web search endpoint accessible")
+            result = data.get("result", {})
+            if isinstance(result, dict):
+                # Check for error in result
+                if "error" in result:
+                    error_msg = result.get("error", "")
+                    if "not configured" in error_msg.lower() or "api key" in error_msg.lower():
+                        test_skip("Web", "Web search - Google Custom Search API key not configured")
+                        return False
+                    else:
+                        test_fail("Web", f"Web search error: {error_msg}")
+                        return False
+                # Check for search results
+                if "results" in result or "items" in result or "query" in data:
+                    results_count = len(result.get("results", result.get("items", [])))
+                    test_pass("Web", f"Web search successful - {results_count} result(s) for '{test_query}'")
+                    return True
+            # If result is a string or other format, still consider it success
+            test_pass("Web", "Web search endpoint accessible (customsearch_search)")
             return True
         elif response.status_code == 503:
             test_skip("Web", "Web search - Service unavailable (Custom Search API may need configuration)")
             return False
         elif response.status_code == 400:
             # 400 might mean missing API key or invalid query
-            test_skip("Web", "Web search - Requires Google Custom Search API key configuration")
+            error_text = response.text[:200] if hasattr(response, 'text') else ""
+            if "not configured" in error_text.lower() or "api key" in error_text.lower():
+                test_skip("Web", "Web search - Requires Google Custom Search API key configuration")
+            else:
+                test_fail("Web", f"Web search fails - HTTP 400: {error_text}")
             return False
         test_fail("Web", f"Web search fails - HTTP {response.status_code}: {response.text[:200]}")
         return False
@@ -1281,9 +1302,14 @@ def test_memory_add_long_term():
     
     try:
         headers = {"Authorization": f"Bearer {access_token}"}
-        # The endpoint expects learned_from_sessions as query param
+        # The endpoint expects learned_from_sessions as query parameter (List[UUID])
+        # FastAPI will parse it from query string
+        import urllib.parse
+        params = {"learned_from_sessions": [str(session_id)]}
+        query_string = urllib.parse.urlencode({"learned_from_sessions": str(session_id)}, doseq=True)
+        
         response = requests.post(
-            f"{BACKEND_URL}/api/memory/long?learned_from_sessions={session_id}",
+            f"{BACKEND_URL}/api/memory/long?{query_string}",
             headers=headers,
             json={
                 "content": "This is a test memory for comprehensive E2E tests",
