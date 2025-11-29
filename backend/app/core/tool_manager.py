@@ -1204,6 +1204,7 @@ class ToolManager:
 
             logger.info(f"   Integration {integration.id}:")
             logger.info(f"     Server URL: {server_url}")
+            logger.info(f"     Session metadata keys: {list(session_metadata.keys()) if session_metadata else 'None'}")
             logger.info(f"     Looking for tool: '{actual_tool_name}'")
 
             # Get MCP client and list all available tools from this integration
@@ -1211,6 +1212,13 @@ class ToolManager:
             from app.api.integrations.mcp import _get_mcp_client_for_integration
             from app.models.database import User as UserModel
             # select is already imported globally at the top of the file
+            
+            # Log before calling _get_mcp_client_for_integration to debug URL resolution
+            logger.info(f"   📡 About to create MCP client for integration {integration.id}")
+            logger.info(f"      server_url from metadata: {repr(server_url)}")
+            logger.info(f"      integration.session_metadata type: {type(integration.session_metadata)}")
+            if integration.session_metadata:
+                logger.info(f"      integration.session_metadata content: {integration.session_metadata}")
 
             # Get current_user for OAuth - prioritize passed current_user, fallback to session
             current_user_for_oauth = None
