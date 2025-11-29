@@ -1,0 +1,50 @@
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#2563eb', 'primaryTextColor':'#ffffff', 'primaryBorderColor':'#1e40af', 'lineColor':'#3b82f6', 'secondaryColor':'#60a5fa', 'tertiaryColor':'#93c5fd'}}}%%
+graph TB
+    subgraph "Knowledge Navigator Architecture"
+        User[👤 User] --> Frontend[🌐 Next.js Frontend]
+        Frontend --> Backend[⚙️ FastAPI Backend]
+        
+        subgraph "Multi-Agent System"
+            Backend --> LangGraph[🔄 LangGraph Orchestrator]
+            LangGraph --> MainAgent[🤖 Main Agent]
+            LangGraph --> KnowledgeAgent[📚 Knowledge Agent]
+            LangGraph --> IntegrityAgent[✅ Integrity Agent]
+            LangGraph --> PlannerAgent[📋 Planner Agent]
+        end
+        
+        subgraph "Memory System"
+            KnowledgeAgent --> ShortMem[💭 Short-Term<br/>1 hour TTL]
+            KnowledgeAgent --> MediumMem[📝 Medium-Term<br/>30 days TTL]
+            KnowledgeAgent --> LongMem[💾 Long-Term<br/>Persistent]
+            LongMem --> ChromaDB[(🔍 ChromaDB<br/>Semantic Search)]
+        end
+        
+        subgraph "Tools & Integrations"
+            MainAgent --> MCP[MCP Tools<br/>Browser, Custom]
+            MainAgent --> Google[Google Workspace<br/>Calendar, Gmail, Tasks]
+            MainAgent --> Web[Web Search<br/>Custom Search API]
+        end
+        
+        subgraph "Observability"
+            Backend --> Tracing[📊 OpenTelemetry<br/>Tracing]
+            Backend --> Metrics[📈 Prometheus<br/>Metrics]
+        end
+        
+        Backend --> PostgreSQL[(🗄️ PostgreSQL<br/>Supabase)]
+        Backend --> VertexAI[🤖 Vertex AI<br/>Gemini 2.5 Flash]
+        
+        Frontend -.->|SSE| Notifications[🔔 Real-time<br/>Notifications]
+    end
+    
+    style User fill:#3b82f6,stroke:#1e40af,color:#fff
+    style Frontend fill:#60a5fa,stroke:#3b82f6,color:#fff
+    style Backend fill:#2563eb,stroke:#1e40af,color:#fff
+    style LangGraph fill:#10b981,stroke:#059669,color:#fff
+    style MainAgent fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style KnowledgeAgent fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style IntegrityAgent fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style PlannerAgent fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style ChromaDB fill:#f59e0b,stroke:#d97706,color:#fff
+    style PostgreSQL fill:#f59e0b,stroke:#d97706,color:#fff
+    style VertexAI fill:#ef4444,stroke:#dc2626,color:#fff
+
