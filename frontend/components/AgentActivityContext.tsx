@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AgentActivityEvent, AgentActivityStatus } from '@/types'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface AgentStatusSummary {
   agentId: string
@@ -59,6 +60,7 @@ function normaliseEvent(raw: any): AgentActivityEvent | null {
 }
 
 export function AgentActivityProvider({ sessionId, children }: { sessionId: string; children: ReactNode }) {
+  const { token, refreshToken } = useAuth()
   const [events, setEvents] = useState<AgentActivityEvent[]>([])
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const eventKeysRef = useRef<Set<string>>(new Set())
@@ -94,7 +96,7 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
     []
   )
 
-  const connectStream = useCallback(() => {
+  const connectStream = useCallback(async () => {
     if (!sessionId) return
 
     if (eventSourceRef.current) {
@@ -112,13 +114,30 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
 
     setConnectionState('connecting')
 
+    // Try to get token from AuthContext, or refresh if needed
+    let currentToken = token
+    if (!currentToken && typeof window !== 'undefined') {
+      // Fallback to localStorage if AuthContext token is not available
+      currentToken = localStorage.getItem('access_token')
+      
+      // If still no token, try to refresh
+      if (!currentToken && refreshToken) {
+        try {
+          console.log('[AgentActivity] No token available, attempting refresh...')
+          currentToken = await refreshToken()
+        } catch (error) {
+          console.error('[AgentActivity] Failed to refresh token:', error)
+          // Will try to connect without token (will fail with 401, but that's expected)
+        }
+      }
+    }
+
     // EventSource doesn't support custom headers, so we pass token as query param
-    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
-    const streamUrl = token 
-      ? `${API_BASE_URL}/api/sessions/${sessionId}/agent-activity/stream?token=${encodeURIComponent(token)}`
+    const streamUrl = currentToken 
+      ? `${API_BASE_URL}/api/sessions/${sessionId}/agent-activity/stream?token=${encodeURIComponent(currentToken)}`
       : `${API_BASE_URL}/api/sessions/${sessionId}/agent-activity/stream`
-    console.log('[AgentActivity] Connecting to SSE stream:', streamUrl.replace(token || '', '[TOKEN]'))
-    console.log('[AgentActivity] Token present:', !!token, 'Token length:', token?.length || 0)
+    console.log('[AgentActivity] Connecting to SSE stream:', streamUrl.replace(currentToken || '', '[TOKEN]'))
+    console.log('[AgentActivity] Token present:', !!currentToken, 'Token length:', currentToken?.length || 0)
     const source = new EventSource(streamUrl)
 
     source.onopen = () => {
@@ -126,20 +145,45 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
       setConnectionState('open')
     }
 
-    source.onerror = (error) => {
+    source.onerror = async (error) => {
       console.error('[AgentActivity] ❌❌❌ SSE connection error:', error)
       console.error('[AgentActivity] Error details:', {
         readyState: source.readyState,
-        url: streamUrl.replace(token || '', '[TOKEN]'),
+        url: streamUrl.replace(currentToken || '', '[TOKEN]'),
         sessionId,
       })
       source.close()
       setConnectionState('closed')
+      
+      // If 401 error and we have refreshToken, try to refresh before reconnecting
+      if (source.readyState === EventSource.CLOSED && refreshToken && !currentToken) {
+        try {
+          console.log('[AgentActivity] 401 error detected, attempting token refresh before reconnect...')
+          await refreshToken()
+          // Token refreshed, reconnect immediately
+          if (!isUnmountedRef.current && !reconnectTimerRef.current) {
+            reconnectTimerRef.current = setTimeout(() => {
+              reconnectTimerRef.current = null
+              console.log('[AgentActivity] 🔄 Reconnecting SSE stream after token refresh...')
+              connectStream().catch((err) => {
+                console.error('[AgentActivity] Error reconnecting after refresh:', err)
+              })
+            }, 1000) // Shorter delay after refresh
+          }
+          return
+        } catch (refreshError) {
+          console.error('[AgentActivity] Token refresh failed:', refreshError)
+          // Continue with normal reconnect logic
+        }
+      }
+      
       if (!isUnmountedRef.current && !reconnectTimerRef.current) {
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null
           console.log('[AgentActivity] 🔄 Reconnecting SSE stream...')
-          connectStream()
+          connectStream().catch((err) => {
+            console.error('[AgentActivity] Error reconnecting:', err)
+          })
         }, 3000)
       }
     }
@@ -171,12 +215,24 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
     }
 
     eventSourceRef.current = source
-  }, [ingestBatch, reset, sessionId])
+  }, [ingestBatch, reset, sessionId, token, refreshToken])
+  
+  // Reconnect when token changes
+  useEffect(() => {
+    if (token && eventSourceRef.current && eventSourceRef.current.readyState === EventSource.CLOSED) {
+      console.log('[AgentActivity] Token updated, reconnecting SSE stream...')
+      connectStream().catch((err) => {
+        console.error('[AgentActivity] Error reconnecting after token update:', err)
+      })
+    }
+  }, [token, connectStream])
 
   useEffect(() => {
     isUnmountedRef.current = false
     reset()
-    connectStream()
+    connectStream().catch((err) => {
+      console.error('[AgentActivity] Error connecting stream on mount:', err)
+    })
     return () => {
       isUnmountedRef.current = true
       if (eventSourceRef.current) {
