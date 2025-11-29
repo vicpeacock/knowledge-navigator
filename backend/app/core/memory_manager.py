@@ -87,19 +87,36 @@ class MemoryManager:
         logger = logging.getLogger(__name__)
         collection = None
         
+        # Strategy 1: Try to get existing collection first (without metadata requirements)
+        try:
+            collection = self.chroma_client.get_collection(name=collection_name)
+            if collection:
+                logger.info(
+                    "✅ Successfully retrieved existing collection '%s'",
+                    collection_name,
+                )
+                self._collections_cache[collection_name] = collection
+                return collection
+        except Exception as e:
+            # Collection doesn't exist, continue to creation strategies
+            pass
+        
+        # Strategy 2: Try to create with minimal metadata (no _type)
+        # ChromaDB 0.6.0 might have issues with _type in metadata
         strategies = [
-            lambda: self.chroma_client.get_or_create_collection(name=collection_name, metadata=metadata),
-            lambda: self.chroma_client.get_collection(name=collection_name),
-            lambda: self.chroma_client.create_collection(name=collection_name, metadata={"tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "00000000-0000-0000-0000-000000000000", "_type": "collection"}),
-            lambda: self.chroma_client.create_collection(name=collection_name, metadata={"_type": "collection"}),
+            lambda: self.chroma_client.create_collection(name=collection_name, metadata={"tenant_id": str(tenant_id or self.tenant_id) if (tenant_id or self.tenant_id) else "00000000-0000-0000-0000-000000000000"}),
+            lambda: self.chroma_client.create_collection(name=collection_name, metadata={}),
             lambda: self.chroma_client.create_collection(name=collection_name),
+            # Last resort: try with _type (might work if collection was deleted)
+            lambda: self.chroma_client.create_collection(name=collection_name, metadata=metadata),
+            lambda: self.chroma_client.get_or_create_collection(name=collection_name, metadata=metadata),
         ]
         strategy_names = [
-            "get_or_create with metadata",
-            "get existing collection",
-            "create with metadata + _type",
+            "create with tenant_id only",
             "create with empty metadata",
             "create without metadata",
+            "create with full metadata (including _type)",
+            "get_or_create with full metadata",
         ]
         
         last_error = None
@@ -108,15 +125,28 @@ class MemoryManager:
                 collection = strategy()
                 if collection:
                     logger.info(
-                        "✅ Successfully got/created collection '%s' using: %s",
+                        "✅ Successfully created collection '%s' using: %s",
                         collection_name,
                         strategy_name,
                     )
                     break
             except Exception as e:
                 error_str = str(e)
+                # Check if it's a KeyError related to _type or if collection already exists
                 if "'_type'" in error_str or "KeyError" in error_str:
                     logger.warning("⚠️  ChromaDB KeyError('_type') detected, trying next strategy...")
+                elif "already exists" in error_str.lower() or "duplicate" in error_str.lower():
+                    # Collection exists but we couldn't get it - try to get it again
+                    try:
+                        collection = self.chroma_client.get_collection(name=collection_name)
+                        if collection:
+                            logger.info(
+                                "✅ Successfully retrieved collection '%s' after 'already exists' error",
+                                collection_name,
+                            )
+                            break
+                    except Exception as get_error:
+                        logger.warning(f"⚠️  Collection exists but cannot be retrieved: {get_error}, trying next strategy...")
                 last_error = e
                 continue
         
