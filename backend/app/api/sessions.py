@@ -1309,6 +1309,14 @@ Giorno della settimana: {day_name}
         try:
             logger.debug("🚀 Calling run_langgraph_chat...")
             print(f"[SESSIONS] Calling run_langgraph_chat", file=sys.stderr)
+            
+            # Check if LLM client is available
+            if ollama is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="LLM client is not available. Please check your LLM provider configuration (Ollama/Gemini/Vertex AI)."
+                )
+            
             ollama._time_context = time_context
             langgraph_result = await run_langgraph_chat(
                 db=db,
@@ -1464,6 +1472,13 @@ Giorno della settimana: {day_name}
                 # Use native tool calling if tools are available, otherwise fallback to prompt-based
                 pass_tools = available_tools if tool_iteration == 0 else None
                 pass_tools_description = tools_description if tool_iteration == 0 and not available_tools else None
+                
+                # Check if LLM client is available
+                if ollama is None:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="LLM client is not available. Please check your LLM provider configuration (Ollama/Gemini/Vertex AI)."
+                    )
                 
                 # Add time context to ollama client
                 ollama._time_context = time_context
@@ -1719,6 +1734,13 @@ Analizza i risultati dei tool sopra e rispondi all'utente in modo naturale e dir
             
             # Call LLM with formatted tool results
             try:
+                # Check if LLM client is available
+                if ollama is None:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="LLM client is not available. Please check your LLM provider configuration (Ollama/Gemini/Vertex AI)."
+                    )
+                
                 ollama._time_context = time_context
                 response_data = await ollama.generate_with_context(
                     prompt=current_prompt,
