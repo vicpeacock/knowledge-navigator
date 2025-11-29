@@ -154,7 +154,8 @@ class EventMonitor:
             self._agent_activity_stream.publish_to_all_active_sessions(event)
             
             if not active_sessions:
-                logger.warning("⚠️  EventMonitor: No active sessions, event will not be delivered to frontend")
+                # Log at DEBUG level to reduce log noise (no active sessions is normal when users are offline)
+                logger.debug("EventMonitor: No active sessions, event will not be delivered to frontend")
         except Exception as e:
             logger.error(f"❌ Unable to publish event monitor telemetry: {e}", exc_info=True)
     

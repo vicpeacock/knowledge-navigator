@@ -227,7 +227,8 @@ class AgentScheduler:
         )
         
         if not active_sessions:
-            logger.warning("⚠️  No active sessions, event will not be delivered")
+            # Log at DEBUG level to reduce log noise (no active sessions is normal when users are offline)
+            logger.debug("No active sessions, event will not be delivered")
         
         # Publish to all sessions with active subscribers (frontend connections)
         self._agent_activity_stream.publish_to_all_active_sessions(event)
