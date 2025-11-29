@@ -1,7 +1,7 @@
 """
 API endpoints for notifications
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
@@ -15,7 +15,9 @@ from app.services.notification_service import NotificationService
 from app.models.schemas import Notification as NotificationSchema
 from app.core.tenant_context import get_tenant_id
 from app.core.user_context import get_current_user
+from app.core.auth import decode_token
 from app.models.database import User
+from sqlalchemy import select
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -93,12 +95,74 @@ async def stream_notifications(
     request: Request,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
-    current_user: User = Depends(get_current_user),
+    token: Optional[str] = Query(None, description="JWT token for authentication (for SSE)"),
+    authorization: Optional[str] = Header(None),
 ):
     """
     Server-Sent Events stream for real-time notifications.
     Sends notifications as they are created or updated.
+    
+    Note: EventSource doesn't support custom headers, so token is passed as query param.
     """
+    # Get user from token (query param for SSE, or header for regular requests)
+    current_user = None
+    user_id_from_token = None
+    payload = None
+    
+    if token:
+        # Decode token from query parameter (fast, no DB query)
+        payload = decode_token(token)
+        if payload:
+            user_id_from_token = payload.get("sub")
+            logger.debug(f"   Token decoded from query param, user_id: {user_id_from_token}")
+    
+    # Fallback to header if query param not provided
+    if not user_id_from_token and authorization:
+        try:
+            # Extract token from "Bearer <token>"
+            scheme, auth_token = authorization.split()
+            if scheme.lower() == "bearer":
+                payload = decode_token(auth_token)
+                if payload:
+                    user_id_from_token = payload.get("sub")
+                    logger.debug(f"   Token decoded from header, user_id: {user_id_from_token}")
+        except Exception as e:
+            logger.debug(f"   Header auth error: {e}")
+    
+    # Get user from database
+    if not user_id_from_token:
+        logger.warning(f"❌ Unauthorized notification stream attempt")
+        logger.warning(f"   Token was provided: {bool(token)}")
+        logger.warning(f"   Authorization header present: {bool(authorization)}")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Verify token type is access token
+    if payload and payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type. Expected access token")
+    
+    try:
+        user_uuid = UUID(str(user_id_from_token))
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid user ID format in token")
+    
+    # Get user from database
+    try:
+        result = await db.execute(
+            select(User).where(
+                User.id == user_uuid,
+                User.tenant_id == tenant_id,
+                User.active == True
+            )
+        )
+        current_user = result.scalar_one_or_none()
+    except Exception as db_error:
+        logger.error(f"Database query failed: {db_error}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Database error during authentication")
+    
+    if not current_user:
+        logger.warning(f"User not found or inactive: {user_uuid} (tenant: {tenant_id})")
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    
     async def event_generator():
         notification_service = NotificationService(db)
         last_count = 0
