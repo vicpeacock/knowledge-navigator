@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 def _resolve_mcp_url(server_url: Optional[str]) -> str:
     """
-    Resolve MCP server URL, handling Docker vs localhost conversion.
+    Resolve MCP server URL, handling Docker vs localhost vs Cloud Run conversion.
     
     Args:
         server_url: The server URL from integration metadata or None
@@ -73,20 +73,43 @@ def _resolve_mcp_url(server_url: Optional[str]) -> str:
     Returns:
         Resolved server URL
     """
-    # Detect if we're running in Docker
+    # Detect if we're running in Cloud Run
+    is_cloud_run = bool(os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_PROJECT"))
+    
+    # Detect if we're running in Docker (but not Cloud Run)
     is_docker = (
-        os.path.exists("/.dockerenv") or
-        (os.path.exists("/proc/self/cgroup") and "docker" in open("/proc/self/cgroup", "r").read())
+        not is_cloud_run and (
+            os.path.exists("/.dockerenv") or
+            (os.path.exists("/proc/self/cgroup") and "docker" in open("/proc/self/cgroup", "r").read())
+        )
     )
     
+    # If no server_url provided, use default
     if not server_url:
-        server_url = settings.mcp_gateway_url  # Default
-        logger.info(f"   Using default URL: {server_url}")
+        # In Cloud Run, don't use localhost default - require explicit URL
+        if is_cloud_run:
+            # Use settings.mcp_gateway_url if it's not localhost, otherwise raise error
+            if settings.mcp_gateway_url and "localhost" not in settings.mcp_gateway_url:
+                server_url = settings.mcp_gateway_url
+                logger.info(f"   Using Cloud Run default URL: {server_url}")
+            else:
+                error_msg = "MCP server URL not configured. In Cloud Run, you must provide a server_url when creating the integration (e.g., https://your-mcp-server.run.app)"
+                logger.error(f"❌ {error_msg}")
+                raise ValueError(error_msg)
+        else:
+            server_url = settings.mcp_gateway_url  # Default for local/Docker
+            logger.info(f"   Using default URL: {server_url}")
         return server_url
     
-    logger.info(f"🔍 MCP URL resolution: saved_url={server_url}, settings.mcp_gateway_url={settings.mcp_gateway_url}, is_docker={is_docker}")
+    logger.info(f"🔍 MCP URL resolution: saved_url={server_url}, settings.mcp_gateway_url={settings.mcp_gateway_url}, is_cloud_run={is_cloud_run}, is_docker={is_docker}")
     
-    # Only convert if we're in Docker and saved URL uses localhost
+    # In Cloud Run, reject localhost URLs (they won't work)
+    if is_cloud_run and ("localhost" in server_url or "127.0.0.1" in server_url):
+        error_msg = f"Invalid MCP server URL for Cloud Run: {server_url}. Use a Cloud Run URL (e.g., https://your-mcp-server.run.app)"
+        logger.error(f"❌ {error_msg}")
+        raise ValueError(error_msg)
+    
+    # Only convert if we're in Docker (not Cloud Run) and saved URL uses localhost
     # OR if we're NOT in Docker and saved URL uses host.docker.internal
     if is_docker and "localhost" in server_url:
         # Running in Docker, convert localhost to host.docker.internal
