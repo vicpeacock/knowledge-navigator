@@ -343,11 +343,26 @@ class VertexAIClient:
             from google.genai import types
             
             contents = []
+            system_messages = []  # Collect system messages separately
             
             for msg in session_context:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
                 parts = msg.get("parts", [])
+                
+                # CRITICAL: Vertex AI does NOT allow system role in contents array
+                # System messages must be in system_instruction only
+                if role == "system":
+                    # Collect system messages to add to system_instruction instead
+                    if content:
+                        system_messages.append(content)
+                    elif parts:
+                        for part in parts:
+                            if isinstance(part, str):
+                                system_messages.append(part)
+                            elif isinstance(part, dict) and "text" in part:
+                                system_messages.append(part["text"])
+                    continue  # Skip adding to contents array
                 
                 # Handle function_response format (from langgraph_app synthesis_context)
                 if role == "function" and parts:
@@ -383,6 +398,15 @@ class VertexAIClient:
                         contents.append(types.Content(role="model", parts=model_parts))
                 elif content:  # Regular user message
                     contents.append(types.Content(role=role, parts=[types.Part(text=content)]))
+            
+            # Add collected system messages to system_instruction instead of contents
+            if system_messages:
+                logger.info(f"📋 Found {len(system_messages)} system messages in session_context, adding to system_instruction instead of contents")
+                system_content = "\n\n".join(system_messages)
+                if system_prompt:
+                    system_prompt = system_prompt + "\n\n" + system_content
+                else:
+                    system_prompt = system_content
             
             # Add current prompt
             contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
