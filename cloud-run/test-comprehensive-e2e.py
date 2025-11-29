@@ -1302,11 +1302,12 @@ def test_memory_add_long_term():
     
     try:
         headers = {"Authorization": f"Bearer {access_token}"}
-        # The endpoint expects learned_from_sessions as query parameter (List[UUID])
-        # FastAPI will parse it from query string
+        # The endpoint has two separate parameters:
+        # - memory_data: MemoryLongCreate (in body) - contains content and importance_score
+        # - learned_from_sessions: List[UUID] (as query parameter)
         import urllib.parse
-        params = {"learned_from_sessions": [str(session_id)]}
-        query_string = urllib.parse.urlencode({"learned_from_sessions": str(session_id)}, doseq=True)
+        # FastAPI expects query params as: learned_from_sessions=uuid1&learned_from_sessions=uuid2
+        query_string = urllib.parse.urlencode({"learned_from_sessions": str(session_id)})
         
         response = requests.post(
             f"{BACKEND_URL}/api/memory/long?{query_string}",
