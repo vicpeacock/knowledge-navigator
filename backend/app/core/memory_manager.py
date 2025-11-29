@@ -310,14 +310,19 @@ class MemoryManager:
         db: AsyncSession,
         session_id: UUID,
         content: str,
+        tenant_id: Optional[UUID] = None,
     ):
-        """Add content to medium-term memory"""
+        """Add content to medium-term memory (for specific tenant)"""
+        # Get tenant-specific collection
+        effective_tenant_id = tenant_id or self.tenant_id
+        collection = self._get_collection("session_memory", effective_tenant_id)
+        
         # Generate embedding
         embedding = self.embedding_service.generate_embedding(content)
         
         # Store in ChromaDB
         embedding_id = f"medium_{session_id}_{datetime.now().isoformat()}"
-        self.session_memory_collection.add(
+        collection.add(
             ids=[embedding_id],
             embeddings=[embedding],
             documents=[content],
