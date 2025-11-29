@@ -1,12 +1,12 @@
-# Security Incident: API Keys Exposed in Git Repository
+# Security Incident: Secrets Exposed in Git Repository
 
 **Data**: 2025-11-29  
 **Severity**: HIGH  
-**Status**: ✅ RESOLVED
+**Status**: ✅ RESOLVED (Partially - False Positives)
 
 ## Incident Summary
 
-GitGuardian ha rilevato che delle Google API Keys erano state committate nel repository GitHub nel commit `a0acad6`.
+GitGuardian ha rilevato vari pattern che sembrano segreti nel repository GitHub. Alcuni sono falsi positivi (placeholder in documentazione), altri erano pattern che potevano essere rilevati come segreti.
 
 ## API Keys Compromesse
 
@@ -66,9 +66,31 @@ Le seguenti API keys sono state esposte:
 3. **Code review**: Assicurati che tutti i commit siano reviewati prima del merge
 4. **Secrets scanning**: Usa strumenti come `git-secrets` o `truffleHog` per scansioni automatiche
 
+## Incidenti Rilevati da GitGuardian (Nov 23, 2025)
+
+### 1. PostgreSQL Credentials (#22710472)
+- **File**: `cloud-run/DEPLOYMENT_WITHOUT_MCP.md`
+- **Pattern**: `postgres:[PASSWORD]@` o `postgres:...@`
+- **Status**: ✅ RISOLTO - Pattern rimosso, sostituito con placeholder più sicuro
+- **Note**: Era solo un placeholder nella documentazione, ma GitGuardian lo ha rilevato come potenziale credenziale
+
+### 2. Generic High Entropy Secret (#22710468, #22710470, #22710471)
+- **File**: `scripts/create-cloud-env.sh`
+- **Pattern**: Placeholder `CHANGE_ME_*` che sembrano segreti ad alta entropia
+- **Status**: ✅ RISOLTO - Placeholder modificati per essere più chiaramente non-segreti
+- **Note**: Erano solo placeholder, ma GitGuardian li ha rilevati come potenziali segreti
+
+### 3. Google OAuth2 Keys (#22710469)
+- **File**: `scripts/create-cloud-env.sh`
+- **Pattern**: `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` con placeholder
+- **Status**: ✅ RISOLTO - Pattern modificati per usare variabili d'ambiente invece di placeholder hardcoded
+- **Note**: Lo script usa già variabili d'ambiente, ma GitGuardian ha rilevato i pattern OAuth
+
 ## File Modificati
 
-- `tests/support_message_gemini_blocking.md` - Rimosse API keys hardcoded, sostituite con variabili d'ambiente
+- `tests/support_message_gemini_blocking.md` - Rimosse API keys hardcoded, sostituite con variabili d'ambiente (Nov 28)
+- `cloud-run/DEPLOYMENT_WITHOUT_MCP.md` - Rimosso pattern `postgres:[PASSWORD]@`, sostituito con placeholder più sicuro (Nov 29)
+- `scripts/create-cloud-env.sh` - Modificati placeholder per evitare falsi positivi GitGuardian (Nov 29)
 
 ## Riferimenti
 

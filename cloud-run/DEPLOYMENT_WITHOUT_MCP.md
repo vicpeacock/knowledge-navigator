@@ -136,7 +136,10 @@ Il tuo `.env.cloud-run` dovrebbe avere:
 
 ```bash
 # Database
-# IMPORTANTE: Sostituisci [PASSWORD] con la password reale del database
+# IMPORTANTE: Ottieni la connection string completa da Supabase Dashboard
+# Vai su: https://app.supabase.com/project/zdyuqekimdpsmnelzvri/settings/database
+# Copia la connection string URI completa e usala come DATABASE_URL
+# Formato: postgresql+asyncpg://postgres:YOUR_PASSWORD_HERE@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
 DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD_HERE@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
 
 # ChromaDB (da Cloud Run)

@@ -71,6 +71,11 @@ cloud-run/DEPLOYMENT_SUMMARY.md
 cloud-run/SERVICES_EXPLANATION.md
 docs/HOW_TO_GET_GOOGLE_OAUTH_CREDENTIALS.md
 
+# Scripts that generate .env files (may contain placeholder patterns)
+# Note: These files are safe but GitGuardian may detect placeholder patterns
+# scripts/create-cloud-env.sh - Uses environment variables, safe to commit
+# cloud-run/DEPLOYMENT_WITHOUT_MCP.md - Documentation only, safe to commit
+
 # IDE
 .vscode/
 .idea/

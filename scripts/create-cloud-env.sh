@@ -52,9 +52,10 @@ cat > "$CLOUD_ENV_FILE" << EOF
 # ============================================
 # DATABASE CONFIGURATION - SUPABASE
 # ============================================
-# IMPORTANTE: Completa DATABASE_URL con la password del database Supabase
+# IMPORTANTE: Ottieni la connection string completa da Supabase Dashboard
 # Vai su: https://app.supabase.com/project/zdyuqekimdpsmnelzvri/settings/database
-# Copia la connection string URI e sostituisci YOUR_PASSWORD_HERE con la password del database
+# Copia la connection string URI completa e usala come DATABASE_URL
+# NON committare mai la password reale in questo file!
 # Formato: postgresql+asyncpg://postgres:YOUR_PASSWORD_HERE@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
 DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD_HERE@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
 POSTGRES_HOST=db.zdyuqekimdpsmnelzvri.supabase.co
@@ -155,8 +156,9 @@ echo "✅ File .env.cloud-run creato!"
 echo ""
 echo "⚠️  IMPORTANTE: Completa la password del database Supabase:"
 echo "   1. Vai su: https://app.supabase.com/project/zdyuqekimdpsmnelzvri/settings/database"
-echo "   2. Copia la connection string URI"
-echo "   3. Sostituisci YOUR_PASSWORD_HERE in DATABASE_URL e POSTGRES_PASSWORD"
+echo "   2. Copia la connection string URI completa"
+echo "   3. Sostituisci YOUR_PASSWORD_HERE in DATABASE_URL e POSTGRES_PASSWORD con la password reale"
+echo "   4. NON committare mai il file .env.cloud-run con password reali!"
 echo ""
 echo "⚠️  IMPORTANTE: Assicurati di aver esportato tutte le variabili d'ambiente necessarie:"
 echo "   - SECRET_KEY, ENCRYPTION_KEY, JWT_SECRET_KEY"
