@@ -348,28 +348,57 @@ class ToolManager:
                             all_tools = []  # Empty for non-OAuth servers on timeout
                     except Exception as tools_error:
                         error_msg = str(tools_error).lower()
-                        logger.info(f"⚠️  Error fetching tools: {error_msg[:100]}")
-                        logger.info(f"   Is OAuth server: {is_oauth}, Checking if this is expected...")
+                        error_type = type(tools_error).__name__
                         
-                        # For OAuth 2.1 servers, "Session terminated" is EXPECTED behavior
-                        # The server requires user to authenticate when using tools for the first time
-                        # We don't pass OAuth tokens to the server - it handles auth internally
-                        from app.core.oauth_utils import is_oauth_error
-                        if is_oauth and is_oauth_error(error_msg):
-                            logger.info(f"✅ OAuth 2.1 server requires user authentication (expected behavior)")
-                            logger.info(f"   Server handles OAuth internally - user will authenticate when using a tool for the first time")
+                        # Check if this is a connection error (server not available)
+                        is_connection_error = (
+                            "connecterror" in error_msg or
+                            "connection" in error_msg or
+                            "connection refused" in error_msg or
+                            "all connection attempts failed" in error_msg or
+                            error_type == "ConnectError" or
+                            "httpx.connecterror" in error_msg
+                        )
+                        
+                        if is_connection_error:
+                            # Connection errors are expected when MCP server is not available (e.g., in local dev)
+                            logger.warning(f"⚠️  MCP server not available for integration {integration.id} (server: {server_url})")
+                            logger.debug(f"   Connection error: {error_msg[:200]}")
+                            logger.debug(f"   This is expected if the MCP server is not running locally")
                             
-                            # For Google Workspace MCP, provide a list of known tools based on OAuth scopes
-                            # These tools will be available after user authenticates when using them
-                            if "workspace" in server_url.lower() or "8003" in server_url or "google" in server_url.lower():
-                                logger.info(f"   Providing known Google Workspace tools based on OAuth scopes")
-                                all_tools = _get_known_google_workspace_tools()
+                            # For OAuth servers, provide known tools even if server is unavailable
+                            if is_oauth:
+                                if "workspace" in server_url.lower() or "8003" in server_url or "google" in server_url.lower():
+                                    logger.info(f"   Providing known Google Workspace tools (server unavailable)")
+                                    all_tools = _get_known_google_workspace_tools()
+                                else:
+                                    all_tools = []
                             else:
-                                all_tools = []  # Empty for other OAuth servers
+                                all_tools = []  # Empty for non-OAuth servers when connection fails
                         else:
-                            # Re-raise if it's a different error or not an OAuth server
-                            logger.error(f"❌ Error fetching tools from MCP integration {integration.id}: {tools_error}", exc_info=True)
-                            raise
+                            logger.info(f"⚠️  Error fetching tools: {error_msg[:100]}")
+                            logger.info(f"   Is OAuth server: {is_oauth}, Checking if this is expected...")
+                            
+                            # For OAuth 2.1 servers, "Session terminated" is EXPECTED behavior
+                            # The server requires user to authenticate when using tools for the first time
+                            # We don't pass OAuth tokens to the server - it handles auth internally
+                            from app.core.oauth_utils import is_oauth_error
+                            if is_oauth and is_oauth_error(error_msg):
+                                logger.info(f"✅ OAuth 2.1 server requires user authentication (expected behavior)")
+                                logger.info(f"   Server handles OAuth internally - user will authenticate when using a tool for the first time")
+                                
+                                # For Google Workspace MCP, provide a list of known tools based on OAuth scopes
+                                # These tools will be available after user authenticates when using them
+                                if "workspace" in server_url.lower() or "8003" in server_url or "google" in server_url.lower():
+                                    logger.info(f"   Providing known Google Workspace tools based on OAuth scopes")
+                                    all_tools = _get_known_google_workspace_tools()
+                                else:
+                                    all_tools = []  # Empty for other OAuth servers
+                            else:
+                                # Only log as WARNING if it's not a connection error and not an expected OAuth error
+                                logger.warning(f"⚠️  Error fetching tools from MCP integration {integration.id}: {error_msg[:200]}")
+                                logger.debug(f"   Full error: {tools_error}", exc_info=True)
+                                all_tools = []  # Don't raise, just return empty tools
                     
                     # Get integration name for display (outside try-except so it always runs)
                     session_metadata = integration.session_metadata or {}
