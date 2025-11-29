@@ -622,6 +622,20 @@ NON rispondere con informazioni generiche o ipotetiche. Usa SEMPRE i tool approp
                     config["tools"] = vertex_tools_list
                     logger.info(f"🔧 Adding {len(vertex_tools_list)} Tool objects to config")
                 
+                # CRITICAL: Verify no system role in contents array
+                system_roles_in_contents = [c for c in contents if hasattr(c, 'role') and c.role == "system"]
+                if system_roles_in_contents:
+                    logger.error(f"❌ ERROR: Found {len(system_roles_in_contents)} system role(s) in contents array! This will cause Vertex AI error.")
+                    logger.error(f"   System roles found: {[str(c) for c in system_roles_in_contents]}")
+                    # Remove system roles from contents (they should be in system_instruction only)
+                    contents = [c for c in contents if not (hasattr(c, 'role') and c.role == "system")]
+                    logger.warning(f"   Removed system roles from contents, now {len(contents)} items remain")
+                
+                # Log final state
+                logger.debug(f"📋 Final contents array: {len(contents)} items")
+                logger.debug(f"📋 System instruction length: {len(config.get('system_instruction', ''))} chars")
+                logger.debug(f"📋 System instruction preview: {config.get('system_instruction', '')[:200]}...")
+                
                 response = self.client.models.generate_content(
                     model=self.model_name,
                     contents=contents,
