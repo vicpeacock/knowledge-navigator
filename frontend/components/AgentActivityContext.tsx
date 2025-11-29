@@ -114,23 +114,51 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
 
     setConnectionState('connecting')
 
+    // Helper function to check if token is expired
+    const isTokenExpired = (tokenStr: string | null): boolean => {
+      if (!tokenStr) return true
+      try {
+        const payload = JSON.parse(atob(tokenStr.split('.')[1]))
+        const exp = payload.exp
+        if (!exp) return true
+        const now = Math.floor(Date.now() / 1000)
+        return exp < now
+      } catch (e) {
+        console.error('[AgentActivity] Error checking token expiration:', e)
+        return true // Assume expired if we can't parse it
+      }
+    }
+
     // Try to get token from AuthContext, or refresh if needed
     let currentToken = token
     if (!currentToken && typeof window !== 'undefined') {
       // Fallback to localStorage if AuthContext token is not available
       currentToken = localStorage.getItem('access_token')
-      
-      // If still no token, try to refresh
-      if (!currentToken && refreshToken) {
-        try {
-          console.log('[AgentActivity] No token available, attempting refresh...')
-          await refreshToken()
-          // After refresh, get token from localStorage (refreshToken updates it)
-          currentToken = localStorage.getItem('access_token')
-        } catch (error) {
-          console.error('[AgentActivity] Failed to refresh token:', error)
-          // Will try to connect without token (will fail with 401, but that's expected)
-        }
+    }
+    
+    // Check if token is expired and refresh if needed
+    if (currentToken && isTokenExpired(currentToken) && refreshToken) {
+      try {
+        console.log('[AgentActivity] Token expired, attempting refresh...')
+        await refreshToken()
+        // After refresh, get token from localStorage (refreshToken updates it)
+        currentToken = localStorage.getItem('access_token')
+      } catch (error) {
+        console.error('[AgentActivity] Failed to refresh expired token:', error)
+        currentToken = null // Clear expired token
+      }
+    }
+    
+    // If still no token, try to refresh
+    if (!currentToken && refreshToken) {
+      try {
+        console.log('[AgentActivity] No token available, attempting refresh...')
+        await refreshToken()
+        // After refresh, get token from localStorage (refreshToken updates it)
+        currentToken = localStorage.getItem('access_token')
+      } catch (error) {
+        console.error('[AgentActivity] Failed to refresh token:', error)
+        // Will try to connect without token (will fail with 401, but that's expected)
       }
     }
 
@@ -147,7 +175,7 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
       setConnectionState('open')
     }
 
-    source.onerror = async (error) => {
+      source.onerror = async (error) => {
       console.error('[AgentActivity] ❌❌❌ SSE connection error:', error)
       console.error('[AgentActivity] Error details:', {
         readyState: source.readyState,
@@ -157,10 +185,11 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
       source.close()
       setConnectionState('closed')
       
-      // If 401 error and we have refreshToken, try to refresh before reconnecting
-      if (source.readyState === EventSource.CLOSED && refreshToken && !currentToken) {
+      // If 401 error (CLOSED state) and we have refreshToken, try to refresh before reconnecting
+      // Note: EventSource.CLOSED (2) indicates the connection was closed, often due to 401
+      if (source.readyState === EventSource.CLOSED && refreshToken) {
         try {
-          console.log('[AgentActivity] 401 error detected, attempting token refresh before reconnect...')
+          console.log('[AgentActivity] 401 error detected (CLOSED state), attempting token refresh before reconnect...')
           await refreshToken()
           // Token refreshed, reconnect immediately
           if (!isUnmountedRef.current && !reconnectTimerRef.current) {
