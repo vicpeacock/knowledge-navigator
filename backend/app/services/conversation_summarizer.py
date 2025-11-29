@@ -146,15 +146,26 @@ Riassunto (massimo 500 parole, mantieni tutti i dettagli importanti):"""
                 logger.warning("Failed to generate summary")
                 return None
             
-            # Get tenant_id from session
-            from app.models.database import Session as SessionModel
-            from sqlalchemy import select
-            session_result = await db.execute(
-                select(SessionModel.tenant_id).where(SessionModel.id == session_id)
-            )
-            tenant_id = session_result.scalar_one_or_none()
+            # Get tenant_id from session (handle potential rollback)
+            try:
+                from app.models.database import Session as SessionModel
+                from sqlalchemy import select
+                session_result = await db.execute(
+                    select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                )
+                tenant_id = session_result.scalar_one_or_none()
+            except Exception as e:
+                # If transaction was rolled back, rollback explicitly and retry
+                logger.warning(f"Error getting tenant_id from session, rolling back and retrying: {e}")
+                await db.rollback()
+                from app.models.database import Session as SessionModel
+                from sqlalchemy import select
+                session_result = await db.execute(
+                    select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+                )
+                tenant_id = session_result.scalar_one_or_none()
             
-            # Store in medium-term memory
+            # Store in medium-term memory (will handle tenant_id retrieval if None)
             await self.memory_manager.add_medium_term_memory(
                 db=db,
                 session_id=session_id,

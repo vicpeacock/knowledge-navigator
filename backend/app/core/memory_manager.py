@@ -315,6 +315,18 @@ class MemoryManager:
         """Add content to medium-term memory (for specific tenant)"""
         # Get tenant-specific collection
         effective_tenant_id = tenant_id or self.tenant_id
+        
+        # If tenant_id is still None, get it from session
+        if not effective_tenant_id:
+            from app.models.database import Session as SessionModel
+            session_result = await db.execute(
+                select(SessionModel.tenant_id).where(SessionModel.id == session_id)
+            )
+            effective_tenant_id = session_result.scalar_one_or_none()
+        
+        if not effective_tenant_id:
+            raise ValueError(f"Cannot add medium-term memory: tenant_id is required for session {session_id}")
+        
         collection = self._get_collection("session_memory", effective_tenant_id)
         
         # Generate embedding
@@ -331,6 +343,7 @@ class MemoryManager:
         
         # Store in PostgreSQL
         memory_medium = MemoryMedium(
+            tenant_id=effective_tenant_id,  # CRITICAL: tenant_id is required
             session_id=session_id,
             content=content,
             embedding_id=embedding_id,

@@ -1494,28 +1494,43 @@ Giorno della settimana: {day_name}
                 pass_tools_description = tools_description if tool_iteration == 0 and not available_tools else None
                 
                 # If file content is already available in retrieved_memory, filter out MCP file-related tools
-                # This prevents Vertex AI from trying to use tools to read files that are already in context
+                # BUT: Do NOT filter if user explicitly asks for Drive files
+                # This prevents Vertex AI from trying to use tools to read files that are already in context,
+                # while still allowing access to Drive files when explicitly requested
                 if pass_tools and file_content:
-                    file_related_tool_names = [
-                        "mcp_get_drive_file_content",
-                        "mcp_get_drive_file",
-                        "drive_get_file",
-                        "drive_get_file_content",
-                        "mcp_read_file",
-                        "read_file",
+                    # Check if user explicitly asks for Drive files
+                    message_lower = request.message.lower()
+                    drive_keywords = [
+                        "drive", "google drive", "file su drive", "file drive",
+                        "file su google drive", "da drive", "su drive",
+                        "drive file", "google drive file", "file id", "drive id"
                     ]
-                    filtered_tools = []
-                    filtered_count = 0
-                    for tool in pass_tools:
-                        tool_name = tool.get("name", "")
-                        if tool_name in file_related_tool_names:
-                            logger.info(f"🚫 Filtering out file-related tool '{tool_name}' because file content is already available in memory")
-                            filtered_count += 1
-                            continue
-                        filtered_tools.append(tool)
-                    if filtered_count > 0:
-                        logger.info(f"✅ Filtered {filtered_count} file-related tools. Passing {len(filtered_tools)} tools to LLM (file content already in context)")
-                        pass_tools = filtered_tools
+                    user_asks_for_drive = any(keyword in message_lower for keyword in drive_keywords)
+                    
+                    if not user_asks_for_drive:
+                        # User is asking about uploaded files, filter out Drive tools
+                        file_related_tool_names = [
+                            "mcp_get_drive_file_content",
+                            "mcp_get_drive_file",
+                            "drive_get_file",
+                            "drive_get_file_content",
+                            "mcp_read_file",
+                            "read_file",
+                        ]
+                        filtered_tools = []
+                        filtered_count = 0
+                        for tool in pass_tools:
+                            tool_name = tool.get("name", "")
+                            if tool_name in file_related_tool_names:
+                                logger.info(f"🚫 Filtering out file-related tool '{tool_name}' because file content is already available in memory and user is not asking for Drive files")
+                                filtered_count += 1
+                                continue
+                            filtered_tools.append(tool)
+                        if filtered_count > 0:
+                            logger.info(f"✅ Filtered {filtered_count} file-related tools. Passing {len(filtered_tools)} tools to LLM (file content already in context, user asking about uploaded files)")
+                            pass_tools = filtered_tools
+                    else:
+                        logger.info(f"✅ User explicitly asks for Drive files, keeping Drive tools available (message: '{request.message[:100]}...')")
                 
                 # Check if LLM client is available
                 if ollama is None:

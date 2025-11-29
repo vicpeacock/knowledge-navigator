@@ -439,7 +439,42 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                 memory_context += f"\n[Note: {len(retrieved_memory) - max_memory_items} additional memory items were omitted to reduce prompt complexity]\n"
             
             memory_context += "\n=== End of Context Information ===\n"
-            memory_context += "CRITICAL: The file contents shown above are ALREADY AVAILABLE. DO NOT use tools to read files that are already shown above. Use the content directly.\n"
+            
+            # Check if any memory contains file content
+            has_file_content = any("[Content from uploaded file" in mem or "uploaded file" in mem.lower() for mem in retrieved_memory)
+            
+            if has_file_content:
+                memory_context += "\n🚨🚨🚨 CRITICAL: DISTINGUERE TRA FILE CARICATI E FILE DRIVE 🚨🚨🚨\n\n"
+                memory_context += "=== FILE CARICATI NELLA SESSIONE (IN MEMORIA) ===\n"
+                memory_context += "I file con il prefisso '[Content from uploaded file]' sono stati CARICATI DIRETTAMENTE nella sessione corrente.\n"
+                memory_context += "Questi file sono GIÀ DISPONIBILI nel contesto e NON richiedono tool.\n\n"
+                memory_context += "QUANDO L'UTENTE CHIEDE DI:\n"
+                memory_context += "- 'riassumi il file', 'analizza il file', 'spiegami il file'\n"
+                memory_context += "- 'riassumi il documento', 'cosa contiene il file'\n"
+                memory_context += "- 'ultimo file', 'file caricato', 'file in memoria'\n"
+                memory_context += "→ Cerca '[Content from uploaded file]' nel contesto sopra e usa quel contenuto DIRETTAMENTE.\n"
+                memory_context += "→ NON usare tool - il contenuto è già disponibile.\n\n"
+                memory_context += "=== FILE SU GOOGLE DRIVE ===\n"
+                memory_context += "I file su Google Drive NON sono nel contesto e richiedono tool specifici.\n\n"
+                memory_context += "QUANDO L'UTENTE CHIEDE DI:\n"
+                memory_context += "- 'file su Drive', 'file su Google Drive', 'file Drive'\n"
+                memory_context += "- 'leggi il file [nome] su Drive', 'apri il file [nome] da Drive'\n"
+                memory_context += "- 'file con ID [id] su Drive', 'file Drive con nome [nome]'\n"
+                memory_context += "→ Usa il tool 'mcp_get_drive_file_content' o 'drive_get_file' per accedere al file.\n"
+                memory_context += "→ Questi file NON sono nel contesto e devono essere recuperati da Drive.\n\n"
+                memory_context += "REGOLA GENERALE:\n"
+                memory_context += "1. Se vedi '[Content from uploaded file]' → usa quel contenuto direttamente (NO tool)\n"
+                memory_context += "2. Se l'utente menziona 'Drive', 'Google Drive', o un nome file specifico non nel contesto → usa tool Drive\n"
+                memory_context += "3. Se l'utente dice solo 'il file' senza menzionare Drive → probabilmente si riferisce al file caricato\n\n"
+            else:
+                memory_context += "\n🚨 CRITICAL INSTRUCTIONS - DISTINGUERE TRA FILE CARICATI E FILE DRIVE:\n\n"
+                memory_context += "=== FILE CARICATI NELLA SESSIONE ===\n"
+                memory_context += "Se vedi '[Content from uploaded file]' nel contesto sopra, quello è un file CARICATO nella sessione.\n"
+                memory_context += "Usa quel contenuto DIRETTAMENTE senza tool.\n\n"
+                memory_context += "=== FILE SU GOOGLE DRIVE ===\n"
+                memory_context += "Se l'utente menziona 'Drive', 'Google Drive', o un nome file specifico non nel contesto:\n"
+                memory_context += "→ Usa 'mcp_get_drive_file_content' o 'drive_get_file' per accedere al file.\n\n"
+                memory_context += "REGOLA: File caricati = già nel contesto (NO tool). File Drive = richiede tool.\n\n"
             enhanced_system += memory_context
             logger.debug(f"📊 Memory context added: {len(retrieved_memory)} items, {total_memory_chars} chars total (limited to reduce safety filter triggers)")
         
