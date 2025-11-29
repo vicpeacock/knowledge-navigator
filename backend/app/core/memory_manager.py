@@ -435,7 +435,7 @@ class MemoryManager:
                             # Note: similar_content might have formatting (e.g., [PERSONAL_INFO] prefix),
                             # so we search by content similarity or exact match
                             from sqlalchemy import select
-                            from app.models.database import MemoryLong
+                            # MemoryLong is already imported at the top of the file
                             
                             # Try exact match first
                             result = await db.execute(
