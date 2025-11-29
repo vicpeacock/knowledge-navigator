@@ -764,9 +764,9 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
       try {
         console.log('[ChatInterface] Resending message to current session after staying on previous day:', messageToResend.substring(0, 50))
         
-        // Resend the message to the CURRENT session with proceed_with_new_day=false
-        // This tells the backend to use the current session instead of the new one
-        const response = await sessionsApi.chat(sessionId, messageToResend, false) // proceedWithNewDay = false
+        // Resend the message to the CURRENT session with stay_on_previous_day=true
+        // This tells the backend to process the message on the current session instead of showing the dialog again
+        const response = await sessionsApi.chat(sessionId, messageToResend, false, true) // proceedWithNewDay = false, stayOnPreviousDay = true
         
         console.log('[ChatInterface] ✅ Message resent successfully after staying on previous day')
         

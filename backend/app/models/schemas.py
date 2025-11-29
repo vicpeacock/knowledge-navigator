@@ -156,6 +156,7 @@ class ChatRequest(BaseModel):
     use_memory: bool = True
     force_web_search: bool = False  # Force web search for this request (like Ollama's web toggle)
     proceed_with_new_day: bool = False  # Flag to proceed with new day session when day transition occurs
+    stay_on_previous_day: bool = False  # Flag to stay on previous day session when day transition occurs (used when user chooses "Rimani su Ieri")
 
 
 class ToolExecutionDetail(BaseModel):

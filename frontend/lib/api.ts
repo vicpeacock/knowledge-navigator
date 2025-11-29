@@ -258,8 +258,8 @@ export const sessionsApi = {
   archive: (id: string) => api.post(`/api/sessions/${id}/archive`),
   restore: (id: string) => api.post(`/api/sessions/${id}/restore`),
   getMessages: (id: string) => api.get(`/api/sessions/${id}/messages`),
-  chat: (id: string, message: string, proceedWithNewDay: boolean = false) =>
-    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: true, force_web_search: false, proceed_with_new_day: proceedWithNewDay }, { timeout: 600000 }), // 10 minutes to allow long-running operations (Gmail API, LangGraph, tool execution)
+  chat: (id: string, message: string, proceedWithNewDay: boolean = false, stayOnPreviousDay: boolean = false) =>
+    api.post(`/api/sessions/${id}/chat`, { message, session_id: id, use_memory: true, force_web_search: false, proceed_with_new_day: proceedWithNewDay, stay_on_previous_day: stayOnPreviousDay }, { timeout: 600000 }), // 10 minutes to allow long-running operations (Gmail API, LangGraph, tool execution)
   getMemory: (id: string) => api.get(`/api/sessions/${id}/memory`, { timeout: 30000 }), // 30 seconds
   cleanContradictionNotifications: () => api.delete('/api/sessions/notifications/contradictions'),
 }
