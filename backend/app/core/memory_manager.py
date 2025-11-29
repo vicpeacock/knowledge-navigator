@@ -98,7 +98,16 @@ class MemoryManager:
                 self._collections_cache[collection_name] = collection
                 return collection
         except Exception as e:
-            # Collection doesn't exist, continue to creation strategies
+            # Collection doesn't exist or has issues, continue to creation strategies
+            error_str = str(e)
+            if "'_type'" in error_str or "KeyError" in error_str:
+                # Collection exists but has corrupted metadata - try to delete it
+                logger.warning(f"⚠️  Collection '%s' exists but has corrupted metadata, attempting to delete...", collection_name)
+                try:
+                    self.chroma_client.delete_collection(name=collection_name)
+                    logger.info(f"✅ Successfully deleted corrupted collection '%s'", collection_name)
+                except Exception as delete_error:
+                    logger.warning(f"⚠️  Could not delete collection '%s': {delete_error}", collection_name)
             pass
         
         # Strategy 2: Try to create with minimal metadata (no _type)
@@ -132,9 +141,29 @@ class MemoryManager:
                     break
             except Exception as e:
                 error_str = str(e)
-                # Check if it's a KeyError related to _type or if collection already exists
+                # Check if it's a KeyError related to _type
                 if "'_type'" in error_str or "KeyError" in error_str:
                     logger.warning("⚠️  ChromaDB KeyError('_type') detected, trying next strategy...")
+                    # If this is a KeyError and we haven't tried deleting yet, try to delete and retry
+                    if "KeyError" in error_str and strategy_name == "create with tenant_id only":
+                        try:
+                            logger.warning(f"⚠️  Attempting to delete potentially corrupted collection '%s'...", collection_name)
+                            self.chroma_client.delete_collection(name=collection_name)
+                            logger.info(f"✅ Deleted collection '%s', retrying creation...", collection_name)
+                            # Retry the same strategy after deletion
+                            try:
+                                collection = strategy()
+                                if collection:
+                                    logger.info(
+                                        "✅ Successfully created collection '%s' after deletion using: %s",
+                                        collection_name,
+                                        strategy_name,
+                                    )
+                                    break
+                            except Exception as retry_error:
+                                logger.warning(f"⚠️  Retry after deletion failed: {retry_error}, continuing to next strategy...")
+                        except Exception as delete_error:
+                            logger.warning(f"⚠️  Could not delete collection '%s': {delete_error}, continuing...", collection_name)
                 elif "already exists" in error_str.lower() or "duplicate" in error_str.lower():
                     # Collection exists but we couldn't get it - try to get it again
                     try:
