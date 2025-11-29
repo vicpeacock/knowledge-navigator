@@ -439,7 +439,7 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
                 memory_context += f"\n[Note: {len(retrieved_memory) - max_memory_items} additional memory items were omitted to reduce prompt complexity]\n"
             
             memory_context += "\n=== End of Context Information ===\n"
-            # No imperative instructions - let the model use memory naturally
+            memory_context += "CRITICAL: The file contents shown above are ALREADY AVAILABLE. DO NOT use tools to read files that are already shown above. Use the content directly.\n"
             enhanced_system += memory_context
             logger.debug(f"📊 Memory context added: {len(retrieved_memory)} items, {total_memory_chars} chars total (limited to reduce safety filter triggers)")
         
