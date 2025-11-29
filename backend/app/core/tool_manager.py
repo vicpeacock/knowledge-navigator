@@ -1322,6 +1322,13 @@ class ToolManager:
                     # Call the MCP tool with timeout to prevent blocking
                     logger.info(f"   Calling tool '{actual_tool_name}' on MCP server")
                     logger.info(f"   Parameters: {parameters}")
+                    # Log message_ids specifically for Gmail batch tools
+                    if "gmail" in actual_tool_name.lower() and "batch" in actual_tool_name.lower():
+                        message_ids = parameters.get("message_ids", [])
+                        logger.info(f"   📧 Gmail batch tool - message_ids count: {len(message_ids) if isinstance(message_ids, list) else 'N/A'}")
+                        if isinstance(message_ids, list) and len(message_ids) > 0:
+                            logger.info(f"   📧 First message_id: {message_ids[0]}")
+                            logger.info(f"   📧 Last message_id: {message_ids[-1]}")
                     logger.info(f"   OAuth token present: {bool(oauth_token)}")
                     if oauth_token:
                         logger.info(f"   OAuth token length: {len(oauth_token)}")
@@ -1386,6 +1393,43 @@ class ToolManager:
                             if "error" in content_lower or "not enabled" in content_lower or "api error" in content_lower:
                                 is_error = True
                                 error_message = result["content"]
+                    
+                    # Handle Gmail API errors specifically in result
+                    if is_error and error_message and ("gmail" in actual_tool_name.lower() or "message" in actual_tool_name.lower()):
+                        error_lower = error_message.lower()
+                        # Handle "Invalid message ID" or similar Gmail errors
+                        if "invalid" in error_lower and ("message" in error_lower or "id" in error_lower):
+                            message_ids = parameters.get("message_ids", parameters.get("message_id", []))
+                            if isinstance(message_ids, str):
+                                message_ids = [message_ids]
+                            logger.warning(f"   ⚠️  Invalid Gmail message ID(s) in result: {message_ids}")
+                            return {
+                                "error": f"Uno o più ID delle email non sono validi: {message_ids}. Verifica che gli ID siano corretti e che le email esistano ancora.",
+                                "invalid_message_ids": message_ids,
+                                "suggestion": "Usa 'mcp_search_gmail_messages' per ottenere gli ID validi delle email.",
+                                "tool": actual_tool_name
+                            }
+                        # Handle "Insufficient authentication scopes" error (403) for Gmail
+                        elif "insufficient authentication scopes" in error_lower or "insufficient permission" in error_lower or ("403" in error_message and "gmail.googleapis.com" in error_message):
+                            logger.warning(f"   ⚠️  Insufficient authentication scopes for Gmail")
+                            return {
+                                "error": "Il token OAuth non ha i permessi necessari per utilizzare Gmail. È necessario riautenticarsi con gli scope corretti per Gmail.",
+                                "oauth_scope_error": True,
+                                "suggestion": "Vai nella pagina Integrazioni e clicca su 'Authorize OAuth' per il server Google Workspace MCP. Assicurati di concedere i permessi per Gmail durante l'autenticazione.",
+                                "tool": actual_tool_name,
+                                "re_authentication_required": True
+                            }
+                        # Handle other Gmail API errors
+                        elif "gmail.googleapis.com" in error_message or "gmail api" in error_lower:
+                            message_ids = parameters.get("message_ids", parameters.get("message_id", []))
+                            logger.warning(f"   ⚠️  Gmail API error in result: {error_message[:200]}")
+                            return {
+                                "error": f"Errore durante l'operazione su Gmail: {error_message[:200]}",
+                                "original_error": error_message,
+                                "message_ids": message_ids,
+                                "suggestion": "Verifica che gli ID delle email siano corretti e che tu abbia i permessi necessari per questa operazione.",
+                                "tool": actual_tool_name
+                            }
                     
                     # Handle Google Tasks API errors specifically in result
                     if is_error and error_message:
@@ -1472,6 +1516,43 @@ class ToolManager:
                 except Exception as e:
                     error_msg = str(e)
                     logger.error(f"   ❌ Error calling MCP tool {actual_tool_name}: {e}", exc_info=True)
+                    
+                    # Handle Gmail API errors specifically
+                    error_lower = error_msg.lower()
+                    if "gmail" in actual_tool_name.lower() or "message" in actual_tool_name.lower():
+                        # Handle "Invalid message ID" or similar Gmail errors
+                        if "invalid" in error_lower and ("message" in error_lower or "id" in error_lower):
+                            message_ids = parameters.get("message_ids", parameters.get("message_id", []))
+                            if isinstance(message_ids, str):
+                                message_ids = [message_ids]
+                            logger.warning(f"   ⚠️  Invalid Gmail message ID(s): {message_ids}")
+                            return {
+                                "error": f"Uno o più ID delle email non sono validi: {message_ids}. Verifica che gli ID siano corretti e che le email esistano ancora.",
+                                "invalid_message_ids": message_ids,
+                                "suggestion": "Usa 'mcp_search_gmail_messages' per ottenere gli ID validi delle email.",
+                                "tool": actual_tool_name
+                            }
+                        # Handle "Insufficient authentication scopes" error (403) for Gmail
+                        elif "insufficient authentication scopes" in error_lower or "insufficient permission" in error_lower or ("403" in error_msg and "gmail.googleapis.com" in error_msg):
+                            logger.warning(f"   ⚠️  Insufficient authentication scopes for Gmail")
+                            return {
+                                "error": "Il token OAuth non ha i permessi necessari per utilizzare Gmail. È necessario riautenticarsi con gli scope corretti per Gmail.",
+                                "oauth_scope_error": True,
+                                "suggestion": "Vai nella pagina Integrazioni e clicca su 'Authorize OAuth' per il server Google Workspace MCP. Assicurati di concedere i permessi per Gmail durante l'autenticazione.",
+                                "tool": actual_tool_name,
+                                "re_authentication_required": True
+                            }
+                        # Handle other Gmail API errors
+                        elif "gmail.googleapis.com" in error_msg or "gmail api" in error_lower:
+                            message_ids = parameters.get("message_ids", parameters.get("message_id", []))
+                            logger.warning(f"   ⚠️  Gmail API error: {error_msg[:200]}")
+                            return {
+                                "error": f"Errore durante l'operazione su Gmail: {error_msg[:200]}",
+                                "original_error": error_msg,
+                                "message_ids": message_ids,
+                                "suggestion": "Verifica che gli ID delle email siano corretti e che tu abbia i permessi necessari per questa operazione.",
+                                "tool": actual_tool_name
+                            }
                     
                     # Handle Google Tasks API errors specifically
                     error_lower = error_msg.lower()
