@@ -804,20 +804,82 @@ class MemoryManager:
                     try:
                         from sqlalchemy import select
                         from app.models.database import File as FileModel
+                        from pathlib import Path
+                        from app.services.file_processor import FileProcessor
+                        from app.core.config import settings
+                        
+                        # Get file records with filepath
                         db_file_result = await db.execute(
-                            select(FileModel.id).where(
+                            select(FileModel.id, FileModel.filename, FileModel.filepath, FileModel.mime_type).where(
                                 FileModel.session_id == session_id,
                                 FileModel.tenant_id == effective_tenant_id
-                            )
+                            ).order_by(FileModel.uploaded_at.desc())
                         )
-                        db_file_ids = [str(fid) for fid, in db_file_result.all()]
-                        if db_file_ids:
-                            logger.warning(f"⚠️  Found {len(db_file_ids)} files in database but 0 embeddings in ChromaDB. Files may not have been embedded correctly.")
-                            logger.warning(f"   Database file IDs: {db_file_ids[:5]}{'...' if len(db_file_ids) > 5 else ''}")
+                        db_files = db_file_result.all()
+                        
+                        if db_files:
+                            logger.warning(f"⚠️  Found {len(db_files)} files in database but 0 embeddings in ChromaDB. Attempting to retrieve content directly from files.")
+                            logger.warning(f"   Database file IDs: {[str(fid) for fid, _, _, _ in db_files[:5]]}{'...' if len(db_files) > 5 else ''}")
+                            
+                            # Try to retrieve content directly from file system
+                            file_processor = FileProcessor()
+                            retrieved_contents = []
+                            
+                            for file_id, filename, filepath, mime_type in db_files[:n_results]:
+                                try:
+                                    file_path = Path(filepath)
+                                    if file_path.exists():
+                                        logger.info(f"📄 File exists on filesystem: {filename}, attempting to extract content...")
+                                        # Extract text from file
+                                        file_data = file_processor.extract_text(str(file_path), mime_type)
+                                        
+                                        if file_data.get("text"):
+                                            text_content = file_data["text"]
+                                            # Truncate if too long
+                                            if len(text_content) > 15000:
+                                                text_content = text_content[:15000] + f"\n\n[Content truncated - original was {len(text_content)} characters. This is a large file, focusing on the beginning.]"
+                                            retrieved_contents.append(text_content)
+                                            logger.info(f"✅ Retrieved content from file {filename}, length: {len(text_content)} chars")
+                                            
+                                            # Try to create embedding now (async, don't wait)
+                                            try:
+                                                embedding = self.embedding_service.generate_embedding(text_content)
+                                                embedding_id = f"file_{file_id}"
+                                                
+                                                # Truncate text for ChromaDB
+                                                text_for_embedding = text_content
+                                                if len(text_for_embedding) > 20000:
+                                                    text_for_embedding = text_for_embedding[:20000] + "... [truncated]"
+                                                
+                                                collection.add(
+                                                    ids=[embedding_id],
+                                                    embeddings=[embedding],
+                                                    documents=[text_for_embedding],
+                                                    metadatas=[{
+                                                        "session_id": session_id_str,
+                                                        "file_id": str(file_id),
+                                                        "filename": filename,
+                                                    }],
+                                                )
+                                                logger.info(f"✅ Created embedding for file {filename} (ID: {file_id})")
+                                            except Exception as embed_error:
+                                                logger.warning(f"⚠️  Could not create embedding for file {filename}: {embed_error}")
+                                        else:
+                                            logger.warning(f"⚠️  No text extracted from file {filename}")
+                                    else:
+                                        logger.warning(f"⚠️  File not found on filesystem: {filepath} (may have been deleted or is on different instance)")
+                                except Exception as file_error:
+                                    logger.warning(f"⚠️  Error retrieving content from file {filename}: {file_error}")
+                            
+                            if retrieved_contents:
+                                logger.info(f"✅ Retrieved {len(retrieved_contents)} file contents directly from filesystem")
+                                return retrieved_contents
+                            else:
+                                logger.warning(f"⚠️  Could not retrieve any file content from filesystem. Files may need to be re-uploaded.")
                         else:
                             logger.info(f"ℹ️  No files in database for session {session_id_str} either")
                     except Exception as db_check_error:
-                        logger.debug(f"Could not check database files: {db_check_error}")
+                        logger.error(f"❌ Error checking database files: {db_check_error}", exc_info=True)
                 return []
             
             # If db is provided, filter out embeddings for files that no longer exist

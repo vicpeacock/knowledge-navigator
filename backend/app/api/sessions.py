@@ -1170,6 +1170,20 @@ async def chat(
                 logger.warning(f"File content {i+1} is empty or None")
     else:
         logger.warning(f"No file content retrieved for session {session_id}")
+        
+        # If no file content but there are files in database, add warning to context
+        # This helps the LLM understand that files exist but weren't found in ChromaDB
+        if latest_file:
+            warning_message = (
+                f"[IMPORTANT: File Upload Status]\n"
+                f"A file was uploaded to this session (ID: {latest_file.id}, Name: {latest_file.filename}), "
+                f"but its content could not be retrieved from memory. "
+                f"This is an uploaded file (NOT a Google Drive file), and it may need to be re-uploaded "
+                f"if the embeddings were not saved correctly. "
+                f"DO NOT try to access this file via Google Drive tools - it is an uploaded file, not a Drive file.\n"
+            )
+            retrieved_memory.append(warning_message)
+            logger.warning(f"Added warning about missing file content for file {latest_file.id}")
     
     # Check if user explicitly requests a search - if so, don't use memory to force fresh search
     search_keywords = ["cerca", "search", "ricerca", "google scholar", "cerca su", "trova", "find", "lookup"]
