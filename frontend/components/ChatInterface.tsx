@@ -792,7 +792,7 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
         }
       } catch (error: any) {
         console.error('[ChatInterface] Error resending message after staying on previous day:', error)
-        addStatusMessage('Errore nell\'invio del messaggio. Riprova.', 'error')
+        addStatusMessage('error', 'Errore nell\'invio del messaggio. Riprova.')
       } finally {
         setLoading(false)
       }
