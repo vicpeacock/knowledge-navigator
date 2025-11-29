@@ -31,6 +31,12 @@ else
     echo "   ⚠️  File .env non trovato"
 fi
 
+# Set GOOGLE_APPLICATION_CREDENTIALS for Vertex AI if not already set
+if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ] && [ -f "$PROJECT_ROOT/backend/credentials/knowledge-navigator-477022-95a2ce0ebf9a.json" ]; then
+    export GOOGLE_APPLICATION_CREDENTIALS="$PROJECT_ROOT/backend/credentials/knowledge-navigator-477022-95a2ce0ebf9a.json"
+    echo "✅ GOOGLE_APPLICATION_CREDENTIALS impostato automaticamente"
+fi
+
 # Attiva virtual environment
 if [ -d "venv" ]; then
     source venv/bin/activate
