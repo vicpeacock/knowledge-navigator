@@ -2019,19 +2019,10 @@ async def stream_agent_activity(
     
     if token:
         # Decode token from query parameter (fast, no DB query)
-        try:
-            payload = decode_token(token)
-            if payload:
-                user_id_from_token = payload.get("sub")
-                logger.info(f"   ✅ Token decoded successfully, user_id: {user_id_from_token}")
-                logger.debug(f"   Token payload keys: {list(payload.keys())}")
-            else:
-                logger.warning(f"   ⚠️  Token decode returned None (token might be invalid or expired)")
-        except Exception as e:
-            logger.warning(f"   ⚠️  Token decode failed: {e}")
-            user_id_from_token = None
-    else:
-        logger.debug(f"   No token provided in query parameter")
+        payload = decode_token(token)
+        if payload:
+            user_id_from_token = payload.get("sub")
+            logger.debug(f"   Token decoded, user_id: {user_id_from_token}")
     
     # Fallback to header if query param not provided
     authorization = None
@@ -2097,13 +2088,7 @@ async def stream_agent_activity(
     if not current_user:
         logger.warning(f"❌ Unauthorized SSE connection attempt for session {session_id}")
         logger.warning(f"   Token was provided: {bool(token)}")
-        logger.warning(f"   Token length: {len(token) if token else 0}")
-        logger.warning(f"   User ID from token: {user_id_from_token}")
         logger.warning(f"   Authorization header present: {bool(authorization)}")
-        if token and user_id_from_token:
-            logger.warning(f"   ⚠️  Token decoded but user not found in database (user_id: {user_id_from_token}, tenant_id: {tenant_id})")
-        elif token:
-            logger.warning(f"   ⚠️  Token provided but could not decode or extract user_id")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # Verify session exists and belongs to user (optimized query)
