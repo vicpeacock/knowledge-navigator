@@ -1044,39 +1044,67 @@ async def chat(
         current_session_id=session_id,
     )
     
+    # Verify current session exists and belongs to user (needed for both day transition and normal flow)
+    result = await db.execute(
+        select(SessionModel).where(
+            SessionModel.id == session_id,
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id
+        )
+    )
+    current_session = result.scalar_one_or_none()
+    
     # If day transition occurred, require explicit confirmation via flag
     if day_transition and new_session:
         if not request.proceed_with_new_day:
-            # Return a response indicating day transition that frontend will handle with a dialog
-            logger.info(f"Day transition detected, returning special response for frontend dialog")
-            return ChatResponse(
-                response="",  # Empty response - frontend will show dialog
-                session_id=session_id,
-                memory_used={},
-                tools_used=[],
-                notifications_count=0,
-                high_urgency_notifications=[],
-                agent_activity=[],
-                day_transition_pending=True,  # Signal to frontend
-                new_session_id=str(new_session.id),
-            )
+            # Check if current session exists and belongs to a previous day
+            # If it exists and is from a previous day, this is likely a retry after user chose "Rimani su Ieri"
+            # In that case, we should process the message on the current session
+            if current_session and current_session.session_metadata:
+                current_day = current_session.session_metadata.get("day")
+                today_date = daily_session_manager._get_today_date_str(current_user)
+                
+                if current_day and current_day != today_date and current_session.status == "active":
+                    # Current session is from a previous day and is still active
+                    # User chose to stay on previous day, process message on current session
+                    logger.info(f"Day transition detected but user chose to stay on previous day session {session_id} (day: {current_day}). Processing message on current session.")
+                    session = current_session
+                else:
+                    # First time detecting transition, show dialog
+                    logger.info(f"Day transition detected, returning special response for frontend dialog")
+                    return ChatResponse(
+                        response="",  # Empty response - frontend will show dialog
+                        session_id=session_id,
+                        memory_used={},
+                        tools_used=[],
+                        notifications_count=0,
+                        high_urgency_notifications=[],
+                        agent_activity=[],
+                        day_transition_pending=True,  # Signal to frontend
+                        new_session_id=str(new_session.id),
+                    )
+            else:
+                # Current session doesn't exist or has no metadata - first time detecting transition, show dialog
+                logger.info(f"Day transition detected, returning special response for frontend dialog")
+                return ChatResponse(
+                    response="",  # Empty response - frontend will show dialog
+                    session_id=session_id,
+                    memory_used={},
+                    tools_used=[],
+                    notifications_count=0,
+                    high_urgency_notifications=[],
+                    agent_activity=[],
+                    day_transition_pending=True,  # Signal to frontend
+                    new_session_id=str(new_session.id),
+                )
         else:
             # User confirmed via dialog, use new session
             logger.info(f"User confirmed day transition via dialog, switching to new session {new_session.id}")
             session_id = new_session.id
             session = new_session
     else:
-        # Verify session exists and belongs to user
-        result = await db.execute(
-            select(SessionModel).where(
-                SessionModel.id == session_id,
-                SessionModel.tenant_id == tenant_id,
-                SessionModel.user_id == current_user.id
-            )
-        )
-        session = result.scalar_one_or_none()
-        
-        if not session:
+        # No day transition - use current session
+        if not current_session:
             # Session not found - try to get or create today's session
             logger.info(f"Session {session_id} not found, using today's daily session")
             session, _ = await daily_session_manager.get_or_create_today_session(
@@ -1084,6 +1112,8 @@ async def chat(
                 tenant_id=tenant_id,
             )
             session_id = session.id
+        else:
+            session = current_session
     
     # NOTE: Integrity contradiction check is now handled automatically by ConversationLearner
     # when new knowledge is indexed to long-term memory. We don't need to call it here for every message.

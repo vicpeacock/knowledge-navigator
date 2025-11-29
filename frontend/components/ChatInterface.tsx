@@ -752,11 +752,61 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
     }
   }
 
+  const handleDayTransitionStay = async () => {
+    // User chose to stay on previous day - resend the message to CURRENT session with proceed_with_new_day=false
+    const messageToResend = dayTransitionDialog.pendingMessage
+    
+    if (messageToResend && messageToResend.trim()) {
+      setInput('')
+      setDayTransitionDialog({ isOpen: false, newSessionId: '', pendingMessage: undefined })
+      setLoading(true)
+      
+      try {
+        console.log('[ChatInterface] Resending message to current session after staying on previous day:', messageToResend.substring(0, 50))
+        
+        // Resend the message to the CURRENT session with proceed_with_new_day=false
+        // This tells the backend to use the current session instead of the new one
+        const response = await sessionsApi.chat(sessionId, messageToResend, false) // proceedWithNewDay = false
+        
+        console.log('[ChatInterface] ✅ Message resent successfully after staying on previous day')
+        
+        // Handle response normally
+        if (response && response.data) {
+          // Handle agent activity
+          if (response.data.agent_activity && Array.isArray(response.data.agent_activity)) {
+            ingestBatch(response.data.agent_activity)
+          }
+          
+          // Add assistant response to messages
+          if (response.data.response && response.data.response.trim()) {
+            const assistantMessage: Message = {
+              id: '',
+              session_id: sessionId,
+              role: 'assistant',
+              content: response.data.response,
+              timestamp: new Date().toISOString(),
+              metadata: {},
+            }
+            setMessages((prev) => [...prev, assistantMessage])
+          }
+        }
+      } catch (error: any) {
+        console.error('[ChatInterface] Error resending message after staying on previous day:', error)
+        addStatusMessage('Errore nell\'invio del messaggio. Riprova.', 'error')
+      } finally {
+        setLoading(false)
+      }
+    } else {
+      // No message to resend, just close the dialog
+      setDayTransitionDialog({ isOpen: false, newSessionId: '', pendingMessage: undefined })
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
       <DayTransitionDialog
         isOpen={dayTransitionDialog.isOpen}
-        onClose={() => setDayTransitionDialog({ isOpen: false, newSessionId: '' })}
+        onClose={handleDayTransitionStay}
         onConfirm={handleDayTransitionConfirm}
         newSessionId={dayTransitionDialog.newSessionId}
       />
