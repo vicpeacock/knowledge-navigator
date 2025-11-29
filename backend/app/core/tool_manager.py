@@ -1387,9 +1387,10 @@ class ToolManager:
                                 is_error = True
                                 error_message = result["content"]
                     
-                    # Handle "Invalid task list ID" error specifically in result
+                    # Handle Google Tasks API errors specifically in result
                     if is_error and error_message:
                         error_lower = error_message.lower()
+                        # Handle "Invalid task list ID" error
                         if "invalid task list id" in error_lower or "invalid task list" in error_lower:
                             task_list_id = parameters.get("task_list_id") or parameters.get("tasklist_id")
                             logger.warning(f"   ⚠️  Invalid task list ID in result: {task_list_id}")
@@ -1397,6 +1398,25 @@ class ToolManager:
                                 "error": f"Il task list ID '{task_list_id}' non è valido o non esiste più. Per ottenere gli ID validi delle tue liste di attività, usa il tool 'mcp_list_task_lists' (o 'tasks_list_tasklists'). Se vuoi usare la lista predefinita, usa '@default' come task_list_id.",
                                 "invalid_task_list_id": task_list_id,
                                 "suggestion": "Usa 'mcp_list_task_lists' per ottenere gli ID validi delle tue liste di attività.",
+                                "tool": actual_tool_name
+                            }
+                        # Handle other Google Tasks API errors (400, 403, 404, etc.)
+                        elif "tasks.googleapis.com" in error_message or "google tasks" in error_lower or "task" in actual_tool_name.lower():
+                            # Extract more helpful error information
+                            task_list_id = parameters.get("task_list_id") or parameters.get("tasklist_id")
+                            task_title = parameters.get("title", "")
+                            logger.warning(f"   ⚠️  Google Tasks API error in result: {error_message[:200]}")
+                            # Provide a more helpful error message
+                            helpful_error = f"Errore durante l'operazione su Google Tasks: {error_message[:200]}"
+                            if task_list_id and task_list_id != "@default":
+                                helpful_error += f"\n\nIl task list ID utilizzato è: '{task_list_id}'. Verifica che sia valido usando 'mcp_list_task_lists'."
+                            if task_title:
+                                helpful_error += f"\n\nTask: '{task_title}'"
+                            return {
+                                "error": helpful_error,
+                                "original_error": error_message,
+                                "task_list_id": task_list_id,
+                                "suggestion": "Verifica che il task list ID sia valido e che tu abbia i permessi necessari per questa operazione.",
                                 "tool": actual_tool_name
                             }
                     
@@ -1443,15 +1463,34 @@ class ToolManager:
                     error_msg = str(e)
                     logger.error(f"   ❌ Error calling MCP tool {actual_tool_name}: {e}", exc_info=True)
                     
-                    # Handle "Invalid task list ID" error specifically
-                    # This happens when a task list ID is no longer valid (deleted, changed, or from a different account)
-                    if "invalid task list id" in error_msg.lower() or "invalid task list" in error_msg.lower():
+                    # Handle Google Tasks API errors specifically
+                    error_lower = error_msg.lower()
+                    # Handle "Invalid task list ID" error
+                    if "invalid task list id" in error_lower or "invalid task list" in error_lower:
                         task_list_id = parameters.get("task_list_id") or parameters.get("tasklist_id")
                         logger.warning(f"   ⚠️  Invalid task list ID: {task_list_id}")
                         return {
                             "error": f"Il task list ID '{task_list_id}' non è valido o non esiste più. Per ottenere gli ID validi delle tue liste di attività, usa il tool 'mcp_list_task_lists' (o 'tasks_list_tasklists'). Se vuoi usare la lista predefinita, usa '@default' come task_list_id.",
                             "invalid_task_list_id": task_list_id,
                             "suggestion": "Usa 'mcp_list_task_lists' per ottenere gli ID validi delle tue liste di attività.",
+                            "tool": actual_tool_name
+                        }
+                    # Handle other Google Tasks API errors (400, 403, 404, etc.)
+                    elif "tasks.googleapis.com" in error_msg or "google tasks" in error_lower or "task" in actual_tool_name.lower():
+                        task_list_id = parameters.get("task_list_id") or parameters.get("tasklist_id")
+                        task_title = parameters.get("title", "")
+                        logger.warning(f"   ⚠️  Google Tasks API error: {error_msg[:200]}")
+                        # Provide a more helpful error message
+                        helpful_error = f"Errore durante l'operazione su Google Tasks: {error_msg[:200]}"
+                        if task_list_id and task_list_id != "@default":
+                            helpful_error += f"\n\nIl task list ID utilizzato è: '{task_list_id}'. Verifica che sia valido usando 'mcp_list_task_lists'."
+                        if task_title:
+                            helpful_error += f"\n\nTask: '{task_title}'"
+                        return {
+                            "error": helpful_error,
+                            "original_error": error_msg,
+                            "task_list_id": task_list_id,
+                            "suggestion": "Verifica che il task list ID sia valido e che tu abbia i permessi necessari per questa operazione.",
                             "tool": actual_tool_name
                         }
                     
