@@ -115,7 +115,8 @@ class AgentActivityStream:
         status = event.get('status', 'unknown') if isinstance(event, dict) else getattr(event, 'status', 'unknown')
         
         if not subscribers:
-            logger.warning(f"⚠️  No subscribers for session {session_id}. Event will not be delivered: {agent_id} ({status}). Active sessions: {all_sessions}")
+            # Log at DEBUG level to reduce log noise (no subscribers is normal when frontend is disconnected or session is closed)
+            logger.debug(f"⚠️  No subscribers for session {session_id}. Event will not be delivered: {agent_id} ({status}). Active sessions: {all_sessions}")
             import sys
             print(f"[TELEMETRY] No subscribers for session {session_id}, active sessions: {all_sessions}", file=sys.stderr)
             return
