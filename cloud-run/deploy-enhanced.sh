@@ -175,9 +175,12 @@ function build_env_vars_string() {
         fi
     }
     
-    # Gemini
+    # Gemini / Vertex AI
     add_env_var "GEMINI_API_KEY" "$GEMINI_API_KEY"
     add_env_var "GEMINI_MODEL" "$GEMINI_MODEL"
+    add_env_var "GEMINI_USE_VERTEX_AI" "$GEMINI_USE_VERTEX_AI"
+    add_env_var "GOOGLE_CLOUD_PROJECT_ID" "$GOOGLE_CLOUD_PROJECT_ID"
+    add_env_var "GOOGLE_CLOUD_LOCATION" "$GOOGLE_CLOUD_LOCATION"
     
     # Database
     add_env_var "DATABASE_URL" "$DATABASE_URL"
