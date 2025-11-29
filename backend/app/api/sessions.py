@@ -1493,6 +1493,30 @@ Giorno della settimana: {day_name}
                 pass_tools = available_tools if tool_iteration == 0 else None
                 pass_tools_description = tools_description if tool_iteration == 0 and not available_tools else None
                 
+                # If file content is already available in retrieved_memory, filter out MCP file-related tools
+                # This prevents Vertex AI from trying to use tools to read files that are already in context
+                if pass_tools and file_content:
+                    file_related_tool_names = [
+                        "mcp_get_drive_file_content",
+                        "mcp_get_drive_file",
+                        "drive_get_file",
+                        "drive_get_file_content",
+                        "mcp_read_file",
+                        "read_file",
+                    ]
+                    filtered_tools = []
+                    filtered_count = 0
+                    for tool in pass_tools:
+                        tool_name = tool.get("name", "")
+                        if tool_name in file_related_tool_names:
+                            logger.info(f"🚫 Filtering out file-related tool '{tool_name}' because file content is already available in memory")
+                            filtered_count += 1
+                            continue
+                        filtered_tools.append(tool)
+                    if filtered_count > 0:
+                        logger.info(f"✅ Filtered {filtered_count} file-related tools. Passing {len(filtered_tools)} tools to LLM (file content already in context)")
+                        pass_tools = filtered_tools
+                
                 # Check if LLM client is available
                 if ollama is None:
                     raise HTTPException(
