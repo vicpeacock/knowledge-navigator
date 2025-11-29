@@ -629,13 +629,14 @@ class MemoryManager:
         # These queries should retrieve ALL files, not use semantic search
         query_lower = query.lower()
         generic_file_keywords = [
-            "riassunto", "summary", "summarize", "analizza", "analyze", 
+            "riassunto", "riassumere", "summary", "summarize", "analizza", "analyze", 
             "ultimo file", "last file", "most recent file", "latest file",
             "il file", "the file", "questo file", "this file",
-            "contenuto del file", "file content", "contenuto file",
+            "contenuto del file", "file content", "contenuto file", "contenuto caricato",
             "spiegami", "explain", "descrivi", "describe", "cosa consiste", "what is",
             "nel documento", "in the document", "nel file", "in the file",
-            "documento", "document", "pdf", ".pdf"
+            "documento", "document", "pdf", ".pdf",
+            "caricato in memoria", "uploaded file", "file caricato", "file in memoria"
         ]
         is_generic_file_request = any(keyword in query_lower for keyword in generic_file_keywords)
         
