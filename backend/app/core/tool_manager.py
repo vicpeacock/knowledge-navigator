@@ -1387,6 +1387,19 @@ class ToolManager:
                                 is_error = True
                                 error_message = result["content"]
                     
+                    # Handle "Invalid task list ID" error specifically in result
+                    if is_error and error_message:
+                        error_lower = error_message.lower()
+                        if "invalid task list id" in error_lower or "invalid task list" in error_lower:
+                            task_list_id = parameters.get("task_list_id") or parameters.get("tasklist_id")
+                            logger.warning(f"   ⚠️  Invalid task list ID in result: {task_list_id}")
+                            return {
+                                "error": f"Il task list ID '{task_list_id}' non è valido o non esiste più. Per ottenere gli ID validi delle tue liste di attività, usa il tool 'mcp_list_task_lists' (o 'tasks_list_tasklists'). Se vuoi usare la lista predefinita, usa '@default' come task_list_id.",
+                                "invalid_task_list_id": task_list_id,
+                                "suggestion": "Usa 'mcp_list_task_lists' per ottenere gli ID validi delle tue liste di attività.",
+                                "tool": actual_tool_name
+                            }
+                    
                     tool_result = {
                         "success": not is_error,
                         "result": result,
@@ -1429,6 +1442,18 @@ class ToolManager:
                 except Exception as e:
                     error_msg = str(e)
                     logger.error(f"   ❌ Error calling MCP tool {actual_tool_name}: {e}", exc_info=True)
+                    
+                    # Handle "Invalid task list ID" error specifically
+                    # This happens when a task list ID is no longer valid (deleted, changed, or from a different account)
+                    if "invalid task list id" in error_msg.lower() or "invalid task list" in error_msg.lower():
+                        task_list_id = parameters.get("task_list_id") or parameters.get("tasklist_id")
+                        logger.warning(f"   ⚠️  Invalid task list ID: {task_list_id}")
+                        return {
+                            "error": f"Il task list ID '{task_list_id}' non è valido o non esiste più. Per ottenere gli ID validi delle tue liste di attività, usa il tool 'mcp_list_task_lists' (o 'tasks_list_tasklists'). Se vuoi usare la lista predefinita, usa '@default' come task_list_id.",
+                            "invalid_task_list_id": task_list_id,
+                            "suggestion": "Usa 'mcp_list_task_lists' per ottenere gli ID validi delle tue liste di attività.",
+                            "tool": actual_tool_name
+                        }
                     
                     # Check if this is an OAuth 2.1 server that requires authentication
                     from app.core.oauth_utils import is_oauth_server, is_oauth_error
