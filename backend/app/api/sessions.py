@@ -1168,6 +1168,13 @@ async def chat(
         short_term = await memory.get_short_term_memory(db, session_id)
         if short_term:
             memory_used["short_term"] = True
+            # Extract tool_results from short-term memory if available
+            tool_results_from_memory = short_term.get("tool_results", [])
+            if tool_results_from_memory:
+                # Add tool_results to retrieved_memory so they're available in context
+                from app.agents.langgraph_app import _format_tool_results_for_llm
+                tool_results_text = _format_tool_results_for_llm(tool_results_from_memory)
+                retrieved_memory.insert(0, f"Risultati tool precedenti:\n{tool_results_text}")
         
         # Medium-term memory
         medium_mem = await memory.retrieve_medium_term_memory(

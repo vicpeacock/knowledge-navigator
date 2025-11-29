@@ -1324,6 +1324,21 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         # Esegui piano se presente
         if plan:
             logger.debug(f"🔍 Executing plan with {len(plan)} steps, acknowledgement={acknowledgement}, plan_index={state.get('plan_index', 0)}")
+            
+            # If this is an acknowledgement, retrieve previous tool_results from short-term memory
+            if acknowledgement:
+                try:
+                    short_term = await state["memory_manager"].get_short_term_memory(
+                        state["db"],
+                        state["session_id"],
+                    )
+                    if short_term and short_term.get("tool_results"):
+                        previous_tool_results = short_term.get("tool_results", [])
+                        logger.info(f"🔍 Retrieved {len(previous_tool_results)} tool_results from short-term memory for acknowledgement")
+                        state.setdefault("tool_results", []).extend(previous_tool_results)
+                except Exception as mem_error:
+                    logger.warning(f"⚠️  Error retrieving tool_results from memory: {mem_error}")
+            
             execution = await execute_plan_steps(state, plan, state.get("plan_index", 0))
             state["plan"] = execution["plan"]
             state["plan_index"] = execution["next_index"]
@@ -2052,13 +2067,37 @@ async def knowledge_agent_node(state: LangGraphChatState) -> LangGraphChatState:
 
         logger = logging.getLogger(__name__)
 
-        # Update short-term memory with the latest exchange
+        # Update short-term memory with the latest exchange AND tool results
         try:
+            # Get existing short-term memory to preserve tool_results
+            existing_memory = await memory_manager.get_short_term_memory(
+                state["db"],
+                state["session_id"],
+            )
+            
+            # Get tool_results from state to save them
+            tool_results = state.get("tool_results", [])
+            
             new_context = {
                 "last_user_message": request.message,
                 "last_assistant_message": response_text,
                 "message_count": len(state.get("previous_messages", [])) + 2,
             }
+            
+            # Preserve tool_results from existing memory and add new ones
+            if existing_memory:
+                existing_tool_results = existing_memory.get("tool_results", [])
+                # Merge tool_results, avoiding duplicates based on tool name and parameters
+                existing_tool_ids = {(tr.get("tool"), str(tr.get("parameters", {}))) for tr in existing_tool_results}
+                for tr in tool_results:
+                    tool_id = (tr.get("tool"), str(tr.get("parameters", {})))
+                    if tool_id not in existing_tool_ids:
+                        existing_tool_results.append(tr)
+                new_context["tool_results"] = existing_tool_results
+            elif tool_results:
+                # No existing memory, save current tool_results
+                new_context["tool_results"] = tool_results
+            
             # Get tenant_id from session
             from app.models.database import Session as SessionModel
             from sqlalchemy import select
