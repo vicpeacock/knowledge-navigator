@@ -1390,8 +1390,18 @@ class ToolManager:
                     # Handle Google Tasks API errors specifically in result
                     if is_error and error_message:
                         error_lower = error_message.lower()
+                        # Handle "Insufficient authentication scopes" error (403)
+                        if "insufficient authentication scopes" in error_lower or "insufficient permission" in error_lower or ("403" in error_message and "tasks.googleapis.com" in error_message):
+                            logger.warning(f"   ⚠️  Insufficient authentication scopes for Google Tasks")
+                            return {
+                                "error": "Il token OAuth non ha i permessi necessari per utilizzare Google Tasks. È necessario riautenticarsi con gli scope corretti per Google Tasks.",
+                                "oauth_scope_error": True,
+                                "suggestion": "Vai nella pagina Integrazioni e clicca su 'Authorize OAuth' per il server Google Workspace MCP. Assicurati di concedere i permessi per Google Tasks durante l'autenticazione.",
+                                "tool": actual_tool_name,
+                                "re_authentication_required": True
+                            }
                         # Handle "Invalid task list ID" error
-                        if "invalid task list id" in error_lower or "invalid task list" in error_lower:
+                        elif "invalid task list id" in error_lower or "invalid task list" in error_lower:
                             task_list_id = parameters.get("task_list_id") or parameters.get("tasklist_id")
                             logger.warning(f"   ⚠️  Invalid task list ID in result: {task_list_id}")
                             return {
@@ -1465,8 +1475,18 @@ class ToolManager:
                     
                     # Handle Google Tasks API errors specifically
                     error_lower = error_msg.lower()
+                    # Handle "Insufficient authentication scopes" error (403)
+                    if "insufficient authentication scopes" in error_lower or "insufficient permission" in error_lower or ("403" in error_msg and "tasks.googleapis.com" in error_msg):
+                        logger.warning(f"   ⚠️  Insufficient authentication scopes for Google Tasks")
+                        return {
+                            "error": "Il token OAuth non ha i permessi necessari per utilizzare Google Tasks. È necessario riautenticarsi con gli scope corretti per Google Tasks.",
+                            "oauth_scope_error": True,
+                            "suggestion": "Vai nella pagina Integrazioni e clicca su 'Authorize OAuth' per il server Google Workspace MCP. Assicurati di concedere i permessi per Google Tasks durante l'autenticazione.",
+                            "tool": actual_tool_name,
+                            "re_authentication_required": True
+                        }
                     # Handle "Invalid task list ID" error
-                    if "invalid task list id" in error_lower or "invalid task list" in error_lower:
+                    elif "invalid task list id" in error_lower or "invalid task list" in error_lower:
                         task_list_id = parameters.get("task_list_id") or parameters.get("tasklist_id")
                         logger.warning(f"   ⚠️  Invalid task list ID: {task_list_id}")
                         return {
