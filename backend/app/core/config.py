@@ -65,8 +65,8 @@ class Settings(BaseSettings):
 
     # Gemini Configuration (for cloud deployment)
     gemini_api_key: Optional[str] = None  # Google AI Studio API key
-    gemini_model: str = "gemini-2.5-flash"  # Main model for chat (gemini-2.5-flash is fast and available)
-    gemini_alternative_model: Optional[str] = "gemini-2.5-pro"  # Alternative model to try if flash has issues (can be set to None to disable)
+    gemini_model: str = "gemini-2.5-flash"  # Main model for chat (gemini-2.5-flash is fast and available, no function call limits)
+    gemini_alternative_model: Optional[str] = None  # Alternative model disabled - using Flash to avoid function call limits
     gemini_background_model: Optional[str] = None  # Background model (if None, uses gemini_model)
     gemini_planner_model: Optional[str] = None  # Planner model (if None, uses gemini_model)
 
