@@ -137,23 +137,48 @@ async def test_mcp_tool():
             print("   (Potrebbe essere normale per OAuth 2.1 servers)")
         print()
         
-        # 6. Test call_tool (mcp_list_calendars)
-        print("6. Test call_tool('list_calendars')...")
+        # 6. Verifica tool Gmail disponibili
+        print("6. Verifica tool Gmail disponibili...")
+        gmail_tools = []
         try:
-            result = await client.call_tool("list_calendars", {})
+            tools = await client.list_tools()
+            gmail_tools = [t for t in tools if 'gmail' in t.get('name', '').lower()]
+            print(f"✅ Trovati {len(gmail_tools)} tool Gmail:")
+            for tool in gmail_tools:
+                tool_name = tool.get('name', 'Unknown')
+                print(f"      - {tool_name}")
+                if 'batch' in tool_name.lower():
+                    print(f"        ⭐ Tool batch trovato!")
+                    if 'inputSchema' in tool:
+                        schema = tool['inputSchema']
+                        if 'properties' in schema:
+                            print(f"        Parametri: {list(schema['properties'].keys())}")
+        except Exception as e:
+            print(f"⚠️  Errore nel list_tools: {e}")
+        print()
+        
+        # 7. Test call_tool (mcp_get_gmail_messages_content_batch)
+        print("7. Test call_tool('get_gmail_messages_content_batch')...")
+        message_ids = ["19a93674987a96f7", "199e7cb12c09945f", "199c0b0a8c2f12f9"]
+        print(f"   Message IDs: {message_ids}")
+        try:
+            # Prova prima senza il prefisso mcp_
+            result = await client.call_tool("get_gmail_messages_content_batch", {"message_ids": message_ids})
             print(f"✅ call_tool() riuscito!")
             print(f"   Result type: {type(result)}")
             if isinstance(result, dict):
                 print(f"   Result keys: {list(result.keys())}")
                 if "content" in result:
-                    content_preview = str(result["content"])[:200]
+                    content_preview = str(result["content"])[:500]
                     print(f"   Content preview: {content_preview}")
                 if "isError" in result:
-                    print(f"   Is Error: {result.get('isError')}")
+                    print(f"   ⚠️  Is Error: {result.get('isError')}")
+                    if "content" in result:
+                        print(f"   Error message: {result.get('content')}")
                 if "error" in result:
-                    print(f"   Error: {result.get('error')}")
+                    print(f"   ❌ Error: {result.get('error')}")
             else:
-                print(f"   Result: {str(result)[:200]}")
+                print(f"   Result: {str(result)[:500]}")
         except Exception as e:
             print(f"❌ call_tool() fallito: {e}")
             import traceback

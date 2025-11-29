@@ -124,7 +124,9 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
       if (!currentToken && refreshToken) {
         try {
           console.log('[AgentActivity] No token available, attempting refresh...')
-          currentToken = await refreshToken()
+          await refreshToken()
+          // After refresh, get token from localStorage (refreshToken updates it)
+          currentToken = localStorage.getItem('access_token')
         } catch (error) {
           console.error('[AgentActivity] Failed to refresh token:', error)
           // Will try to connect without token (will fail with 401, but that's expected)
