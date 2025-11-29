@@ -636,7 +636,17 @@ class MemoryManager:
     ) -> List[str]:
         """Retrieve relevant file content for a session based on query"""
         import logging
+        import re
         logger = logging.getLogger(__name__)
+        
+        # Check if query contains a file ID (UUID format)
+        # Pattern: UUID format (8-4-4-4-12 hex digits)
+        uuid_pattern = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+        file_id_match = re.search(uuid_pattern, query, re.IGNORECASE)
+        requested_file_id = None
+        if file_id_match:
+            requested_file_id = file_id_match.group(0)
+            logger.info(f"Detected file ID in query: {requested_file_id}")
         
         # Check if query is a generic file request (summary, analyze, etc.)
         # These queries should retrieve ALL files, not use semantic search
@@ -660,6 +670,51 @@ class MemoryManager:
             # Get tenant-specific collection
             effective_tenant_id = tenant_id or self.tenant_id
             collection = self._get_collection("file_embeddings", effective_tenant_id)
+            
+            # If a specific file ID was requested, try to retrieve it directly
+            if requested_file_id and db is not None:
+                logger.info(f"Attempting to retrieve file by ID: {requested_file_id}")
+                try:
+                    # First verify the file exists in the database and belongs to this session
+                    from sqlalchemy import select
+                    from app.models.database import File as FileModel
+                    
+                    file_result = await db.execute(
+                        select(FileModel).where(
+                            FileModel.id == UUID(requested_file_id),
+                            FileModel.session_id == session_id,
+                            FileModel.tenant_id == effective_tenant_id
+                        )
+                    )
+                    file_record = file_result.scalar_one_or_none()
+                    
+                    if file_record:
+                        logger.info(f"File {requested_file_id} found in database, retrieving from ChromaDB")
+                        # Try to get the file content from ChromaDB by file_id in metadata
+                        try:
+                            file_embeddings = collection.get(
+                                where={"file_id": requested_file_id}
+                            )
+                            
+                            if file_embeddings.get("documents"):
+                                # Found the file in ChromaDB
+                                doc = file_embeddings["documents"][0]
+                                logger.info(f"✅ Retrieved file {requested_file_id} from ChromaDB, content length: {len(doc)} chars")
+                                # Truncate if too long
+                                if len(doc) > 15000:
+                                    doc = doc[:15000] + f"\n\n[Content truncated - original was {len(doc)} characters. This is a large file, focusing on the beginning.]"
+                                return [doc]
+                            else:
+                                logger.warning(f"File {requested_file_id} exists in database but not found in ChromaDB embeddings")
+                        except Exception as chroma_error:
+                            logger.warning(f"Error retrieving file {requested_file_id} from ChromaDB: {chroma_error}")
+                    else:
+                        logger.info(f"File {requested_file_id} not found in database for session {session_id}")
+                except ValueError as uuid_error:
+                    logger.warning(f"Invalid UUID format in query: {requested_file_id}, error: {uuid_error}")
+                except Exception as e:
+                    logger.warning(f"Error checking file ID {requested_file_id}: {e}")
+                    # Continue with normal retrieval flow
             
             # Handle case where collection creation failed (e.g., ChromaDB KeyError)
             if collection is None:
