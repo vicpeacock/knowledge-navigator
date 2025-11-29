@@ -248,15 +248,33 @@ export function AgentActivityProvider({ sessionId, children }: { sessionId: stri
     eventSourceRef.current = source
   }, [ingestBatch, reset, sessionId, token, refreshToken])
   
-  // Reconnect when token changes
+  // Reconnect when token changes (always reconnect to use new token)
   useEffect(() => {
-    if (token && eventSourceRef.current && eventSourceRef.current.readyState === EventSource.CLOSED) {
-      console.log('[AgentActivity] Token updated, reconnecting SSE stream...')
+    if (token && sessionId) {
+      // Always reconnect when token changes to ensure we use the new token
+      // Close existing connection first if it exists
+      if (eventSourceRef.current) {
+        console.log('[AgentActivity] Token updated, closing existing SSE connection...')
+        eventSourceRef.current.onopen = null
+        eventSourceRef.current.onerror = null
+        eventSourceRef.current.onmessage = null
+        eventSourceRef.current.close()
+        eventSourceRef.current = null
+      }
+      
+      // Clear any pending reconnect timer
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+      
+      // Reconnect with new token
+      console.log('[AgentActivity] Token updated, reconnecting SSE stream with new token...')
       connectStream().catch((err) => {
         console.error('[AgentActivity] Error reconnecting after token update:', err)
       })
     }
-  }, [token, connectStream])
+  }, [token, sessionId, connectStream])
 
   useEffect(() => {
     isUnmountedRef.current = false
