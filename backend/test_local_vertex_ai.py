@@ -93,6 +93,8 @@ def test_chat(token, session_id):
     print("\n5️⃣ Test Chat (messaggio semplice)...")
     try:
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        
+        # Prima richiesta - potrebbe avere day_transition_pending
         response = requests.post(
             f"{BACKEND_URL}/api/sessions/{session_id}/chat",
             headers=headers,
@@ -106,6 +108,28 @@ def test_chat(token, session_id):
             },
             timeout=60  # Chat può richiedere tempo
         )
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Se c'è day_transition_pending, procedi con la nuova sessione
+            if data.get("day_transition_pending"):
+                new_session_id = data.get("new_session_id")
+                print(f"⚠️  Day transition detected, using new session: {new_session_id}")
+                session_id = new_session_id
+                # Riprova con proceed_with_new_day=True
+                response = requests.post(
+                    f"{BACKEND_URL}/api/sessions/{session_id}/chat",
+                    headers=headers,
+                    json={
+                        "message": "Ciao, come stai? Rispondi brevemente.",
+                        "session_id": session_id,
+                        "use_memory": True,
+                        "force_web_search": False,
+                        "proceed_with_new_day": True,
+                        "stay_on_previous_day": False
+                    },
+                    timeout=60
+                )
         if response.status_code == 200:
             data = response.json()
             response_text = data.get("response", "")
