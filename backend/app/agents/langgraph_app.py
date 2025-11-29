@@ -1767,11 +1767,37 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
             if tool_results:
                 logger.info(f"Generating final response after {len(tool_results)} tool execution(s)")
                 try:
+                    # Limit tool results to avoid Vertex AI function call limits
+                    # Vertex AI has limits on the number of function calls per request
+                    from app.core.config import settings
+                    max_tool_results = settings.max_tool_results_per_response
+                    
+                    if len(tool_results) > max_tool_results:
+                        logger.warning(f"⚠️  Limiting tool results from {len(tool_results)} to {max_tool_results} to avoid Vertex AI function call limits")
+                        # Prioritize successful results, then errors
+                        successful_results = [tr for tr in tool_results if isinstance(tr.get('result'), dict) and not tr.get('result', {}).get('error')]
+                        error_results = [tr for tr in tool_results if isinstance(tr.get('result'), dict) and tr.get('result', {}).get('error')]
+                        other_results = [tr for tr in tool_results if tr not in successful_results and tr not in error_results]
+                        
+                        # Take up to max_tool_results, prioritizing successful ones
+                        limited_results = successful_results[:max_tool_results]
+                        remaining_slots = max_tool_results - len(limited_results)
+                        if remaining_slots > 0:
+                            limited_results.extend(error_results[:remaining_slots])
+                        remaining_slots = max_tool_results - len(limited_results)
+                        if remaining_slots > 0:
+                            limited_results.extend(other_results[:remaining_slots])
+                        
+                        tool_results_to_use = limited_results
+                        logger.info(f"   Using {len(tool_results_to_use)} tool results (limited from {len(tool_results)})")
+                    else:
+                        tool_results_to_use = tool_results
+                    
                     # Format tool results for function_response
                     # Gemini expects function_response.response to be a dict (struct), not a JSON string
                     import json
                     function_responses = []
-                    for tr in tool_results:
+                    for tr in tool_results_to_use:
                         tool_name = tr.get('tool', 'unknown')
                         tool_result = tr.get('result', {})
                         # Convert result to dict for function_response
@@ -1783,6 +1809,16 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                         function_responses.append({
                             "name": tool_name,
                             "response": result_dict  # Pass as dict, not JSON string
+                        })
+                    
+                    # If we limited tool results, add a note about remaining results
+                    if len(tool_results) > max_tool_results:
+                        remaining_count = len(tool_results) - len(tool_results_to_use)
+                        function_responses.append({
+                            "name": "system_note",
+                            "response": {
+                                "note": f"Nota: Sono stati eseguiti {len(tool_results)} tool in totale, ma solo i primi {max_tool_results} risultati sono stati inclusi nella risposta per limiti tecnici. Tutti i tool sono stati eseguiti correttamente."
+                            }
                         })
                     
                     # Log tool results for debugging
@@ -1810,8 +1846,11 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                     
                     # Add model response with function_call (from the previous Gemini call)
                     # We need to reconstruct the function_call from tool_calls
+                    # Limit tool_calls to match the limited tool_results (to avoid Vertex AI function call limits)
+                    limited_tool_calls = tool_calls[:len(function_responses)] if len(tool_calls) > len(function_responses) else tool_calls
+                    
                     function_call_parts = []
-                    for tc in tool_calls:
+                    for tc in limited_tool_calls:
                         tool_name = tc.get("name")
                         tool_params = tc.get("parameters", {})
                         # Gemini function_call format
@@ -1827,7 +1866,7 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
                         "parts": function_call_parts if function_call_parts else [""]
                     })
                     
-                    # Add function_response for each tool result
+                    # Add function_response for each tool result (already limited above)
                     for fr in function_responses:
                         synthesis_context.append({
                             "role": "function",
@@ -1923,8 +1962,39 @@ async def tool_loop_node(state: LangGraphChatState) -> LangGraphChatState:
         # IMPORTANT: Always generate a response after tool execution, even if response_text already exists
         if tool_results and not response_text:
             logger.debug(f"🔍 Tool results found: {len(tool_results)}. Generating final response...")
+            
+            # Limit tool results to avoid Vertex AI function call limits
+            from app.core.config import settings
+            max_tool_results = settings.max_tool_results_per_response
+            
+            if len(tool_results) > max_tool_results:
+                logger.warning(f"⚠️  Limiting tool results from {len(tool_results)} to {max_tool_results} to avoid Vertex AI function call limits")
+                # Prioritize successful results, then errors
+                successful_results = [tr for tr in tool_results if isinstance(tr.get('result'), dict) and not tr.get('result', {}).get('error')]
+                error_results = [tr for tr in tool_results if isinstance(tr.get('result'), dict) and tr.get('result', {}).get('error')]
+                other_results = [tr for tr in tool_results if tr not in successful_results and tr not in error_results]
+                
+                # Take up to max_tool_results, prioritizing successful ones
+                limited_results = successful_results[:max_tool_results]
+                remaining_slots = max_tool_results - len(limited_results)
+                if remaining_slots > 0:
+                    limited_results.extend(error_results[:remaining_slots])
+                remaining_slots = max_tool_results - len(limited_results)
+                if remaining_slots > 0:
+                    limited_results.extend(other_results[:remaining_slots])
+                
+                tool_results_to_use = limited_results
+                logger.info(f"   Using {len(tool_results_to_use)} tool results (limited from {len(tool_results)})")
+            else:
+                tool_results_to_use = tool_results
+            
             # Format tool results with clear context
-            tool_results_text = _format_tool_results_for_llm(tool_results)
+            tool_results_text = _format_tool_results_for_llm(tool_results_to_use)
+            
+            # Add note if results were limited
+            if len(tool_results) > max_tool_results:
+                remaining_count = len(tool_results) - len(tool_results_to_use)
+                tool_results_text += f"\n\n[Nota: Sono stati eseguiti {len(tool_results)} tool in totale, ma solo i primi {max_tool_results} risultati sono stati inclusi nella risposta per limiti tecnici. Tutti i tool sono stati eseguiti correttamente.]"
             
             logger.debug(f"🔍 Tool results text length: {len(tool_results_text)}")
             

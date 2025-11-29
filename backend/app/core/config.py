@@ -150,6 +150,9 @@ class Settings(BaseSettings):
     integrity_check_exhaustive: bool = False  # Se True, controlla tutte (più lento)
     integrity_min_importance: float = 0.7  # Importanza minima delle memorie da controllare (filtra memorie poco importanti)
     
+    # Tool calling limits (for Vertex AI compatibility)
+    max_tool_results_per_response: int = 5  # Maximum number of tool results to pass to LLM when generating final response (Vertex AI has limits on function calls)
+    
     # Feature flags
     use_langgraph_prototype: bool = True  # Enable LangGraph by default for proper agent telemetry
     
