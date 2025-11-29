@@ -23,11 +23,9 @@ services:
       - "8001:8000"
     volumes:
       - chromadb_data:/chroma/chroma
-      - ./docker/chromadb/entrypoint.sh:/docker-entrypoint-override.sh:ro
     environment:
       - IS_PERSISTENT=TRUE
       - PERSIST_DIRECTORY=/chroma/chroma
-    entrypoint: ["/bin/sh", "/docker-entrypoint-override.sh"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 10s
