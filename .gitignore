@@ -30,14 +30,40 @@ yarn-error.log*
 *.env
 *.env.local
 *.env*.local
+*.env.bak
 **/.env
 **/.env.*
+**/.env.bak
 backend/.env
 frontend/.env
-*.key
-*.pem
+
+# Credentials and Secrets - CRITICAL: Never commit these!
+**/credentials/
+**/credentials/**
 *credentials*
 *secrets*
+**/*credentials*.json
+**/*secret*.json
+**/*service-account*.json
+**/*service_account*.json
+**/*-key*.json
+**/*-keys*.json
+
+# Keys and Certificates
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+*.jks
+*.keystore
+
+# Backup files that might contain secrets
+*.bak
+*.backup
+*~.env
+*~.json
 
 # Documentation files with secrets - Keep locally but don't commit
 SECURITY_NOTICE.md
