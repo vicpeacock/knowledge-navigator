@@ -394,25 +394,66 @@ class VertexAIClient:
                 config["system_instruction"] = system_prompt
             
             # Add tool usage instructions if tools are available
+            # Use actual tool descriptions from MCP instead of hardcoded generic instructions
             if tools and len(tools) > 0:
                 tool_names = [tool.get("name", "unknown") for tool in tools if isinstance(tool, dict)]
                 if tool_names:
-                    tool_instruction = f"""
+                    # Build instructions from actual tool descriptions
+                    tool_descriptions = []
+                    for tool in tools:
+                        if isinstance(tool, dict):
+                            tool_name = tool.get("name", "unknown")
+                            tool_description = tool.get("description", "")
+                            if tool_description:
+                                # Use the actual description from MCP server
+                                tool_descriptions.append(f"- {tool_name}: {tool_description}")
+                            else:
+                                # Fallback if no description available
+                                tool_descriptions.append(f"- {tool_name}")
+                    
+                    # Build instruction text
+                    if tool_descriptions:
+                        # Show first 15 tools with descriptions, then summarize if more
+                        shown_tools = tool_descriptions[:15]
+                        remaining_count = len(tool_descriptions) - len(shown_tools)
+                        
+                        tool_instruction = f"""
+IMPORTANTE - Uso dei Tool:
+Hai accesso ai seguenti tool ({len(tool_names)} totali):
+
+{chr(10).join(shown_tools)}
+"""
+                        if remaining_count > 0:
+                            tool_instruction += f"\n... e altri {remaining_count} tool disponibili.\n"
+                        
+                        tool_instruction += """
+IMPORTANTE: Quando l'utente chiede informazioni o azioni, usa SEMPRE i tool appropriati basandoti sulle loro descrizioni sopra.
+NON rispondere con informazioni generiche o ipotetiche. Usa SEMPRE i tool per ottenere informazioni reali e aggiornate.
+Ogni tool ha una descrizione specifica che indica quando e come usarlo - segui quelle descrizioni.
+"""
+                    else:
+                        # Fallback if no descriptions available
+                        tool_instruction = f"""
 IMPORTANTE - Uso dei Tool:
 Hai accesso ai seguenti tool: {', '.join(tool_names[:10])}{'...' if len(tool_names) > 10 else ''}
 
-Quando l'utente chiede informazioni o azioni che richiedono questi tool, DEVI chiamarli:
-- Per controllare il calendario → usa mcp_get_events o mcp_list_calendars
-- Per leggere email → usa mcp_search_gmail_messages o mcp_get_gmail_message_content
-- Per cercare informazioni → usa customsearch_search
-
+Quando l'utente chiede informazioni o azioni che richiedono questi tool, DEVI chiamarli.
 NON rispondere con informazioni generiche o ipotetiche. Usa SEMPRE i tool appropriati per ottenere informazioni reali e aggiornate.
 """
+                    
                     current_system = config.get("system_instruction", "")
                     if current_system:
                         config["system_instruction"] = current_system + tool_instruction
                     else:
                         config["system_instruction"] = tool_instruction
+                    
+                    # Also use tools_description if provided (may contain additional context)
+                    if tools_description:
+                        current_system = config.get("system_instruction", "")
+                        if current_system:
+                            config["system_instruction"] = current_system + "\n\n" + tools_description
+                        else:
+                            config["system_instruction"] = tools_description
 
             
             # Add time/location context if provided (like GeminiClient)
