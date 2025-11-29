@@ -119,7 +119,8 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/drive.file",
         "https://www.googleapis.com/auth/documents.readonly",
         "https://www.googleapis.com/auth/spreadsheets.readonly",
-        "https://www.googleapis.com/auth/tasks.readonly",
+        "https://www.googleapis.com/auth/tasks.readonly",  # Read-only access to tasks
+        "https://www.googleapis.com/auth/tasks",  # Full access to create, update, and delete tasks
     ]
 
     # Security
