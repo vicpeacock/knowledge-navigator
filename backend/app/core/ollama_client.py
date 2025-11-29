@@ -164,8 +164,14 @@ Respond naturally and directly based on the data obtained from tools. Use clear,
                     memory_context += f"{i}. {mem}\n\n"
             
             memory_context += "\n=== End of Context Information ===\n"
-            memory_context += "IMPORTANT: When the user asks about files or documents, use the information provided above.\n"
-            memory_context += "You can see and read the file contents shown above. Reference specific details from the files when answering.\n"
+            memory_context += "CRITICAL INSTRUCTIONS:\n"
+            memory_context += "- The file contents shown above are ALREADY AVAILABLE to you. You can read them directly.\n"
+            memory_context += "- When the user asks about files or documents, use the information provided above.\n"
+            memory_context += "- DO NOT try to use tools (like drive_get_file or mcp_get_drive_file_content) to read files that are already shown above.\n"
+            memory_context += "- If file content is shown above, it means the file was uploaded to this session and is already accessible.\n"
+            memory_context += "- You can see and read the file contents shown above. Reference specific details from the files when answering.\n"
+            memory_context += "- If the user asks to summarize, analyze, or explain a file, use the file content shown above directly.\n"
+            memory_context += "- Only use file-related tools if the user explicitly asks to access files from Google Drive that are NOT shown in the context above.\n"
             enhanced_system += memory_context
         
         # Add tools description if provided
