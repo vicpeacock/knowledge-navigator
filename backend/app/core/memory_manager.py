@@ -859,9 +859,10 @@ class MemoryManager:
                                                     embeddings=[embedding],
                                                     documents=[text_for_embedding],
                                                     metadatas=[{
-                                                        "session_id": session_id_str,
+                                                        "user_id": user_id_str,  # Files are user-scoped, not session-scoped
                                                         "file_id": str(file_id),
                                                         "filename": filename,
+                                                        "session_id": session_id_str if session_id else None,  # Optional: for backward compatibility
                                                     }],
                                                 )
                                                 logger.info(f"✅ Created embedding for file {filename} (ID: {file_id})")
@@ -870,7 +871,10 @@ class MemoryManager:
                                         else:
                                             logger.warning(f"⚠️  No text extracted from file {filename}")
                                     else:
-                                        logger.warning(f"⚠️  File not found on filesystem: {filepath} (may have been deleted or is on different instance)")
+                                        logger.error(f"❌ File not found on filesystem: {filepath}")
+                                        logger.error(f"   This is expected on Cloud Run (ephemeral filesystem).")
+                                        logger.error(f"   File metadata exists in database but file content was lost when container restarted.")
+                                        logger.error(f"   Solution: User needs to re-upload the file. File ID: {file_id}")
                                 except Exception as file_error:
                                     logger.warning(f"⚠️  Error retrieving content from file {filename}: {file_error}")
                             
@@ -878,7 +882,13 @@ class MemoryManager:
                                 logger.info(f"✅ Retrieved {len(retrieved_contents)} file contents directly from filesystem")
                                 return retrieved_contents
                             else:
-                                logger.warning(f"⚠️  Could not retrieve any file content from filesystem. Files may need to be re-uploaded.")
+                                logger.error(f"❌ Could not retrieve any file content from filesystem.")
+                                logger.error(f"   Found {len(db_files)} files in database, but:")
+                                logger.error(f"   - Files not found on filesystem (Cloud Run ephemeral storage)")
+                                logger.error(f"   - No embeddings in ChromaDB")
+                                logger.error(f"   → Files need to be re-uploaded. This is expected on Cloud Run when container restarts.")
+                                # Return empty list - the LLM will inform the user they need to re-upload
+                                return []
                         else:
                             logger.info(f"ℹ️  No files in database for user {user_id_str} either")
                     except Exception as db_check_error:
