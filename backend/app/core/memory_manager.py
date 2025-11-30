@@ -830,51 +830,72 @@ class MemoryManager:
                             
                             for file_id, filename, filepath, mime_type in db_files[:n_results]:
                                 try:
-                                    file_path = Path(filepath)
-                                    if file_path.exists():
-                                        logger.info(f"📄 File exists on filesystem: {filename}, attempting to extract content...")
-                                        # Extract text from file
-                                        file_data = file_processor.extract_text(str(file_path), mime_type)
+                                    # Check if filepath is Cloud Storage (gs://...) or filesystem
+                                    from app.services.cloud_storage_service import is_cloud_storage_path, download_file_from_cloud_storage
+                                    
+                                    file_content_bytes = None
+                                    
+                                    if is_cloud_storage_path(filepath):
+                                        # Download from Cloud Storage
+                                        logger.info(f"☁️  File is in Cloud Storage: {filepath}, downloading...")
+                                        file_content_bytes = await download_file_from_cloud_storage(filepath)
                                         
-                                        if file_data.get("text"):
-                                            text_content = file_data["text"]
-                                            # Truncate if too long
-                                            if len(text_content) > 15000:
-                                                text_content = text_content[:15000] + f"\n\n[Content truncated - original was {len(text_content)} characters. This is a large file, focusing on the beginning.]"
-                                            retrieved_contents.append(text_content)
-                                            logger.info(f"✅ Retrieved content from file {filename}, length: {len(text_content)} chars")
-                                            
-                                            # Try to create embedding now (async, don't wait)
-                                            try:
-                                                embedding = self.embedding_service.generate_embedding(text_content)
-                                                embedding_id = f"file_{file_id}"
-                                                
-                                                # Truncate text for ChromaDB
-                                                text_for_embedding = text_content
-                                                if len(text_for_embedding) > 20000:
-                                                    text_for_embedding = text_for_embedding[:20000] + "... [truncated]"
-                                                
-                                                collection.add(
-                                                    ids=[embedding_id],
-                                                    embeddings=[embedding],
-                                                    documents=[text_for_embedding],
-                                                    metadatas=[{
-                                                        "user_id": user_id_str,  # Files are user-scoped, not session-scoped
-                                                        "file_id": str(file_id),
-                                                        "filename": filename,
-                                                        "session_id": session_id_str if session_id else None,  # Optional: for backward compatibility
-                                                    }],
-                                                )
-                                                logger.info(f"✅ Created embedding for file {filename} (ID: {file_id})")
-                                            except Exception as embed_error:
-                                                logger.warning(f"⚠️  Could not create embedding for file {filename}: {embed_error}")
+                                        if file_content_bytes:
+                                            logger.info(f"✅ Downloaded file from Cloud Storage: {filename} ({len(file_content_bytes)} bytes)")
+                                            # Extract text from bytes
+                                            file_data = FileProcessor.extract_text_from_bytes(file_content_bytes, mime_type, filename)
                                         else:
-                                            logger.warning(f"⚠️  No text extracted from file {filename}")
+                                            logger.error(f"❌ Failed to download file from Cloud Storage: {filepath}")
+                                            continue
                                     else:
-                                        logger.error(f"❌ File not found on filesystem: {filepath}")
-                                        logger.error(f"   This is expected on Cloud Run (ephemeral filesystem).")
-                                        logger.error(f"   File metadata exists in database but file content was lost when container restarted.")
-                                        logger.error(f"   Solution: User needs to re-upload the file. File ID: {file_id}")
+                                        # Try filesystem (local development)
+                                        file_path = Path(filepath)
+                                        if file_path.exists():
+                                            logger.info(f"📄 File exists on filesystem: {filename}, attempting to extract content...")
+                                            # Extract text from file
+                                            file_data = file_processor.extract_text(str(file_path), mime_type)
+                                        else:
+                                            logger.error(f"❌ File not found on filesystem: {filepath}")
+                                            logger.error(f"   This is expected on Cloud Run (ephemeral filesystem) if Cloud Storage is not configured.")
+                                            logger.error(f"   File metadata exists in database but file content was lost.")
+                                            logger.error(f"   Solution: User needs to re-upload the file. File ID: {file_id}")
+                                            continue
+                                    
+                                    # Process extracted text (common for both Cloud Storage and filesystem)
+                                    if file_data.get("text"):
+                                        text_content = file_data["text"]
+                                        # Truncate if too long
+                                        if len(text_content) > 15000:
+                                            text_content = text_content[:15000] + f"\n\n[Content truncated - original was {len(text_content)} characters. This is a large file, focusing on the beginning.]"
+                                        retrieved_contents.append(text_content)
+                                        logger.info(f"✅ Retrieved content from file {filename}, length: {len(text_content)} chars")
+                                        
+                                        # Try to create embedding now (async, don't wait)
+                                        try:
+                                            embedding = self.embedding_service.generate_embedding(text_content)
+                                            embedding_id = f"file_{file_id}"
+                                            
+                                            # Truncate text for ChromaDB
+                                            text_for_embedding = text_content
+                                            if len(text_for_embedding) > 20000:
+                                                text_for_embedding = text_for_embedding[:20000] + "... [truncated]"
+                                            
+                                            collection.add(
+                                                ids=[embedding_id],
+                                                embeddings=[embedding],
+                                                documents=[text_for_embedding],
+                                                metadatas=[{
+                                                    "user_id": user_id_str,  # Files are user-scoped, not session-scoped
+                                                    "file_id": str(file_id),
+                                                    "filename": filename,
+                                                    "session_id": session_id_str if session_id else None,  # Optional: for backward compatibility
+                                                }],
+                                            )
+                                            logger.info(f"✅ Created embedding for file {filename} (ID: {file_id})")
+                                        except Exception as embed_error:
+                                            logger.warning(f"⚠️  Could not create embedding for file {filename}: {embed_error}")
+                                    else:
+                                        logger.warning(f"⚠️  No text extracted from file {filename}")
                                 except Exception as file_error:
                                     logger.warning(f"⚠️  Error retrieving content from file {filename}: {file_error}")
                             

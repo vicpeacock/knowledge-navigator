@@ -134,6 +134,10 @@ class Settings(BaseSettings):
     # File Storage
     upload_dir: Path = Path("./uploads")
     max_file_size: int = 10485760  # 10MB
+    
+    # Cloud Storage (for persistent file storage on Cloud Run)
+    use_cloud_storage: bool = False  # Set to True to use Cloud Storage instead of filesystem
+    cloud_storage_bucket_name: Optional[str] = None  # GCS bucket name (e.g., "knowledge-navigator-files")
 
     # Memory Settings
     short_term_memory_ttl: int = 3600  # 1 hour

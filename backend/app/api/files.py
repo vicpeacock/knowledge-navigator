@@ -12,6 +12,11 @@ from app.models.schemas import File as FileSchema
 from app.core.config import settings
 from app.services.file_processor import FileProcessor
 from app.services.embedding_service import EmbeddingService
+from app.services.cloud_storage_service import (
+    upload_file_to_cloud_storage,
+    is_cloud_storage_path,
+    delete_file_from_cloud_storage,
+)
 from app.core.dependencies import get_memory_manager
 from app.core.memory_manager import MemoryManager
 from app.core.tenant_context import get_tenant_id
@@ -56,29 +61,65 @@ async def upload_file(
             detail=f"File too large. Max size: {settings.max_file_size} bytes",
         )
     
-    # Save file in user-specific directory (not session-specific)
-    user_dir = settings.upload_dir / "users" / str(current_user.id)
-    user_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Generate unique filename to avoid conflicts
+    # Generate unique file ID for the file record
     import uuid as uuid_lib
-    file_extension = Path(file.filename).suffix
-    unique_filename = f"{uuid_lib.uuid4()}{file_extension}"
-    filepath = user_dir / unique_filename
+    file_id = uuid_lib.uuid4()
     
-    with open(filepath, "wb") as f:
-        f.write(file_content)
-    
-    # Process file
-    file_data = file_processor.extract_text(str(filepath), file.content_type)
+    # Save file: use Cloud Storage only if enabled (Cloud Run), otherwise use filesystem (local)
+    if settings.use_cloud_storage:
+        # Upload to Cloud Storage (Cloud Run only)
+        logger.info(f"☁️  Using Cloud Storage for file upload (Cloud Run deployment)")
+        gcs_path = await upload_file_to_cloud_storage(
+            file_content=file_content,
+            user_id=current_user.id,
+            file_id=file_id,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
+        
+        if gcs_path:
+            # Successfully uploaded to Cloud Storage
+            filepath = gcs_path
+            logger.info(f"✅ File uploaded to Cloud Storage: {gcs_path}")
+            
+            # Extract text from bytes (FileProcessor supports bytes extraction)
+            file_data = file_processor.extract_text_from_bytes(file_content, file.content_type, file.filename)
+        else:
+            # Cloud Storage upload failed, fallback to filesystem with warning
+            logger.error("❌ Cloud Storage upload failed, falling back to filesystem (files will be lost on container restart)")
+            user_dir = settings.upload_dir / "users" / str(current_user.id)
+            user_dir.mkdir(parents=True, exist_ok=True)
+            file_extension = Path(file.filename).suffix
+            unique_filename = f"{file_id}{file_extension}"
+            filepath = user_dir / unique_filename
+            
+            with open(filepath, "wb") as f:
+                f.write(file_content)
+            
+            file_data = file_processor.extract_text(str(filepath), file.content_type)
+    else:
+        # Use filesystem (local development - default)
+        logger.info(f"💾 Using local filesystem for file upload (local development)")
+        user_dir = settings.upload_dir / "users" / str(current_user.id)
+        user_dir.mkdir(parents=True, exist_ok=True)
+        file_extension = Path(file.filename).suffix
+        unique_filename = f"{file_id}{file_extension}"
+        filepath = user_dir / unique_filename
+        
+        with open(filepath, "wb") as f:
+            f.write(file_content)
+        
+        # Process file
+        file_data = file_processor.extract_text(str(filepath), file.content_type)
     
     # Create file record - file belongs to user, not session
     file_record = FileModel(
+        id=file_id,  # Use the generated file_id
         user_id=current_user.id,  # File belongs to user
         session_id=session_id,  # Optional: session where uploaded
         tenant_id=tenant_id,
         filename=file.filename,  # Keep original filename
-        filepath=str(filepath),
+        filepath=str(filepath),  # Will be GCS path (gs://...) if Cloud Storage enabled
         mime_type=file.content_type,
         metadata=file_data["metadata"],
     )
@@ -372,9 +413,26 @@ async def delete_file(
         logger.error(f"Error deleting file embedding from ChromaDB: {e}", exc_info=True)
         # Continue with file deletion even if ChromaDB deletion fails
     
-    # Delete physical file
-    if Path(file.filepath).exists():
-        Path(file.filepath).unlink()
+    # Delete physical file from storage (Cloud Storage or filesystem)
+    try:
+        if is_cloud_storage_path(file.filepath):
+            # Delete from Cloud Storage
+            logger.info(f"☁️  Deleting file from Cloud Storage: {file.filepath}")
+            deleted = await delete_file_from_cloud_storage(file.filepath)
+            if deleted:
+                logger.info(f"✅ Deleted file from Cloud Storage: {file.filepath}")
+            else:
+                logger.warning(f"⚠️  Failed to delete file from Cloud Storage (may not exist): {file.filepath}")
+        else:
+            # Delete from filesystem (local development)
+            file_path = Path(file.filepath)
+            if file_path.exists():
+                file_path.unlink()
+                logger.info(f"💾 Deleted physical file from filesystem: {file.filepath}")
+            else:
+                logger.warning(f"⚠️  Physical file not found (may have been already deleted): {file.filepath}")
+    except Exception as e:
+        logger.warning(f"⚠️  Error deleting physical file {file.filepath}: {e}")
     
     # Delete from database
     await db.delete(file)
