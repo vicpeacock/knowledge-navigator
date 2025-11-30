@@ -66,46 +66,44 @@ def add_logo_to_card(card_image_path, logo_path, output_path, logo_position='top
 if __name__ == "__main__":
     base_dir = Path(__file__).parent.parent
     
-    # Paths
-    card_image = base_dir / "kaggle-card-image.png"
+    # Paths - usa le card images con ratio 2:1
+    card_images = [
+        ("kaggle-card-image-2400x1200.png", "kaggle-card-image-2400x1200-with-logo.png"),
+        ("kaggle-card-image-1200x600.png", "kaggle-card-image-1200x600-with-logo.png"),
+    ]
+    
     logo_horizontal = base_dir / "assets" / "logos" / "logo-horizontal.png"
-    output_with_logo = base_dir / "kaggle-card-image-with-logo.png"
     
-    # Verifica che i file esistano
-    if not card_image.exists():
-        print(f"❌ Card image non trovata: {card_image}")
-        exit(1)
-    
+    # Verifica che il logo esista
     if not logo_horizontal.exists():
         print(f"❌ Logo non trovato: {logo_horizontal}")
         exit(1)
     
-    print("🎨 Aggiunta logo alla card image Kaggle...")
-    print(f"   Card image: {card_image}")
+    print("🎨 Aggiunta logo alle card images Kaggle (ratio 2:1)...")
     print(f"   Logo: {logo_horizontal}")
     print()
     
-    # Aggiungi logo in alto a sinistra (posizione standard per branding)
-    add_logo_to_card(
-        card_image_path=str(card_image),
-        logo_path=str(logo_horizontal),
-        output_path=str(output_with_logo),
-        logo_position='top-left',
-        logo_scale=0.25  # Logo 25% della larghezza della card
-    )
+    for card_image_name, output_name in card_images:
+        card_image = base_dir / card_image_name
+        
+        if not card_image.exists():
+            print(f"⚠️  Card image non trovata: {card_image_name}, saltata...")
+            continue
+        
+        print(f"   Processing: {card_image_name}")
+        
+        # Aggiungi logo in alto a sinistra (posizione standard per branding)
+        add_logo_to_card(
+            card_image_path=str(card_image),
+            logo_path=str(logo_horizontal),
+            output_path=str(base_dir / output_name),
+            logo_position='top-left',
+            logo_scale=0.20  # Logo 20% della larghezza della card per ratio 2:1
+        )
+        
+        print()
     
-    # Crea anche versione con logo in alto a destra (alternativa)
-    output_with_logo_right = base_dir / "kaggle-card-image-with-logo-right.png"
-    add_logo_to_card(
-        card_image_path=str(card_image),
-        logo_path=str(logo_horizontal),
-        output_path=str(output_with_logo_right),
-        logo_position='top-right',
-        logo_scale=0.25
-    )
-    
-    print()
     print("✅ Processo completato!")
-    print(f"   - Versione logo sinistra: {output_with_logo.name}")
-    print(f"   - Versione logo destra: {output_with_logo_right.name}")
+    for _, output_name in card_images:
+        print(f"   ✅ {output_name}")
 
