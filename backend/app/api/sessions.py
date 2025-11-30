@@ -1181,16 +1181,22 @@ async def chat(
         # This helps the LLM understand that files exist but weren't found in ChromaDB
         if latest_file:
             warning_message = (
-                f"[IMPORTANT: File Upload Status]\n"
-                f"A file was uploaded by this user (ID: {latest_file.id}, Name: {latest_file.filename}), "
-                f"but its content could not be retrieved from memory. "
-                f"This is an uploaded file (NOT a Google Drive file), and it may need to be re-uploaded "
-                f"if the embeddings were not saved correctly. "
-                f"DO NOT try to access this file via Google Drive tools - it is an uploaded file, not a Drive file.\n"
-                f"Note: Files are user-scoped and available across all sessions.\n"
+                f"[IMPORTANT: File Upload Status - Content Not Available]\n"
+                f"The user has uploaded a file: '{latest_file.filename}' (ID: {latest_file.id}, uploaded on {latest_file.uploaded_at.strftime('%Y-%m-%d %H:%M:%S')}).\n\n"
+                f"However, the file content is currently not available in memory. This can happen on Cloud Run when:\n"
+                f"1. The container restarts (ephemeral filesystem loses uploaded files)\n"
+                f"2. The file embeddings were not saved to ChromaDB Cloud\n"
+                f"3. The file was uploaded to a different container instance\n\n"
+                f"SOLUTION: The user needs to RE-UPLOAD the file for the system to access its content.\n\n"
+                f"IMPORTANT:\n"
+                f"- This is an UPLOADED file (NOT a Google Drive file)\n"
+                f"- DO NOT try to access this file via Google Drive tools (mcp_get_drive_file_content, etc.)\n"
+                f"- The file metadata exists in the database, but the actual content is not available\n"
+                f"- Files are user-scoped and should be available across sessions, but require re-upload if content was lost\n\n"
+                f"Please inform the user politely that the file content is not currently available and they need to re-upload it.\n"
             )
             retrieved_memory.append(warning_message)
-            logger.warning(f"Added warning about missing file content for file {latest_file.id}")
+            logger.warning(f"Added warning about missing file content for file {latest_file.id} - user needs to re-upload")
     
     # Check if user explicitly requests a search - if so, don't use memory to force fresh search
     search_keywords = ["cerca", "search", "ricerca", "google scholar", "cerca su", "trova", "find", "lookup"]
