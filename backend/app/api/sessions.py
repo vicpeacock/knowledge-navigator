@@ -431,39 +431,21 @@ async def archive_session(
     session.archived_at = datetime.now(timezone.utc)
     await db.commit()
     
-    # Index session content semantically in long-term memory
+    # Index session content semantically in long-term memory using the new method
+    logger = logging.getLogger(__name__)
     try:
-        # Get all messages from the session
-        messages_result = await db.execute(
-            select(MessageModel)
-            .where(MessageModel.session_id == session_id)
-            .order_by(MessageModel.timestamp)
-        )
-        messages = messages_result.scalars().all()
-        
-        # Create a summary of the session
-        session_content = f"Session: {session.title or session.name}\n"
-        if session.description:
-            session_content += f"Description: {session.description}\n"
-        session_content += "\nConversation:\n"
-        
-        for msg in messages:
-            session_content += f"{msg.role}: {msg.content}\n"
-        
-        # Store in long-term memory with high importance
-        await memory.add_long_term_memory(
-            db,
-            content=session_content,
-            learned_from_sessions=[session_id],
+        indexed = await memory.index_session_content(
+            session_id=session_id,
+            db=db,
+            tenant_id=tenant_id,
             importance_score=0.8,  # High importance for archived sessions
-            tenant_id=session.tenant_id,
         )
-        
-        logger = logging.getLogger(__name__)
-        logger.info(f"Session {session_id} archived and indexed in long-term memory")
+        if indexed:
+            logger.info(f"✅ Session {session_id} archived and indexed in long-term memory")
+        else:
+            logger.warning(f"⚠️  Session {session_id} archived but indexing returned False (might be duplicate)")
     except Exception as e:
-        logger = logging.getLogger(__name__)
-        logger.error(f"Error indexing archived session: {e}", exc_info=True)
+        logger.error(f"❌ Error indexing archived session {session_id}: {e}", exc_info=True)
         # Don't fail the archive operation if indexing fails
     
     await db.refresh(session)
@@ -1113,11 +1095,55 @@ async def chat(
     )
     previous_messages = messages_result.scalars().all()
     
-    # Build context - ensure we're using plain dicts, not SQLAlchemy objects
+    # Build context from current session - ensure we're using plain dicts, not SQLAlchemy objects
     all_messages_dict = [
-        {"role": str(msg.role), "content": str(msg.content)}
+        {"role": str(msg.role), "content": f"[SESSION:{session_id}] {str(msg.content)}"}
         for msg in previous_messages
     ]
+    
+    # Also include messages from other active sessions of the same user
+    # This allows access to information from other active sessions without RAG
+    other_active_sessions_result = await db.execute(
+        select(SessionModel)
+        .where(
+            SessionModel.tenant_id == tenant_id,
+            SessionModel.user_id == current_user.id,
+            SessionModel.status == "active",
+            SessionModel.id != session_id  # Exclude current session
+        )
+        .order_by(SessionModel.created_at.desc())
+        .limit(5)  # Limit to 5 most recent active sessions to avoid context overflow
+    )
+    other_active_sessions = other_active_sessions_result.scalars().all()
+    
+    if other_active_sessions:
+        logger.info(f"📋 Including context from {len(other_active_sessions)} other active sessions")
+        for other_session in other_active_sessions:
+            other_messages_result = await db.execute(
+                select(MessageModel)
+                .where(
+                    MessageModel.session_id == other_session.id,
+                    MessageModel.tenant_id == tenant_id
+                )
+                .order_by(MessageModel.timestamp)
+            )
+            other_messages = other_messages_result.scalars().all()
+            
+            if other_messages:
+                # Add header for this session's context
+                session_title = other_session.title or other_session.name
+                session_header = f"\n[CONTEXT FROM ACTIVE SESSION: {session_title} (ID: {other_session.id})]\n"
+                all_messages_dict.append({
+                    "role": "system",
+                    "content": session_header
+                })
+                
+                # Add messages from this session with session-id tag
+                for msg in other_messages:
+                    all_messages_dict.append({
+                        "role": str(msg.role),
+                        "content": f"[SESSION:{other_session.id}] {str(msg.content)}"
+                    })
     
     # Use conversation summarizer to optimize context if needed
     from app.services.conversation_summarizer import ConversationSummarizer
@@ -1223,12 +1249,39 @@ async def chat(
         memory_used["medium_term"] = medium_mem
         retrieved_memory.extend(medium_mem)
         
-        # Long-term memory
-        long_mem = await memory.retrieve_long_term_memory(
-            request.message, n_results=3, tenant_id=tenant_id
+        # Long-term memory (from archived sessions)
+        # Use include_metadata=True to get session information
+        long_mem_raw = await memory.retrieve_long_term_memory(
+            request.message, n_results=3, tenant_id=tenant_id, include_metadata=True
         )
-        memory_used["long_term"] = long_mem
-        retrieved_memory.extend(long_mem)
+        memory_used["long_term"] = long_mem_raw
+        
+        # Format retrieved memories with session metadata
+        formatted_long_mem = []
+        for mem_item in long_mem_raw:
+            if isinstance(mem_item, dict):
+                # New format with metadata
+                content = mem_item.get("content", "")
+                metadata = mem_item.get("metadata", {})
+                session_id = metadata.get("session_id")
+                session_title = metadata.get("session_title")
+                session_date = metadata.get("session_date")
+                session_status = metadata.get("session_status")
+                
+                # Format with session info if available
+                if session_id and session_title:
+                    formatted = f"[Session: {session_title}"
+                    if session_date:
+                        formatted += f" | {session_date}"
+                    formatted += f" | ID: {session_id}]\n{content}"
+                else:
+                    formatted = content
+                formatted_long_mem.append(formatted)
+            else:
+                # Legacy format (string) - keep as is for backward compatibility
+                formatted_long_mem.append(mem_item)
+        
+        retrieved_memory.extend(formatted_long_mem)
     elif is_explicit_search_request:
         logger.info("🔍 Explicit search request detected - skipping memory retrieval to force fresh search")
         # Still get short-term memory for context, but skip medium/long-term that might contain old search results

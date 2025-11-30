@@ -10,7 +10,7 @@ if not hasattr(np, "uint"):
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -568,8 +568,25 @@ class MemoryManager:
         n_results: int = 5,
         min_importance: float = None,
         tenant_id: Optional[UUID] = None,
-    ) -> List[str]:
-        """Retrieve relevant long-term memory (for specific tenant)"""
+        include_metadata: bool = False,
+    ) -> Union[List[str], List[Dict[str, Any]]]:
+        """
+        Retrieve relevant long-term memory (for specific tenant).
+        
+        Args:
+            query: Query string for semantic search
+            n_results: Number of results to return
+            min_importance: Minimum importance score filter
+            tenant_id: Optional tenant ID (defaults to self.tenant_id)
+            include_metadata: If True, returns List[Dict] with content and metadata. 
+                            If False (default), returns List[str] for backward compatibility.
+        
+        Returns:
+            List[str] if include_metadata=False (default)
+            List[Dict[str, Any]] if include_metadata=True, where each dict contains:
+                - "content": str - The memory content
+                - "metadata": dict - Metadata including session_id, title, date, status, learned_from_sessions
+        """
         import asyncio
         import logging
         logger = logging.getLogger(__name__)
@@ -603,10 +620,65 @@ class MemoryManager:
                     query_embeddings=[query_embedding],
                     n_results=n_results,
                     where=where if where else None,
+                    include=["documents", "metadatas", "ids"] if include_metadata else ["documents"],
                 )
             )
             
-            return results.get("documents", [[]])[0] if results else []
+            if not results:
+                return []
+            
+            documents = results.get("documents", [[]])[0] or []
+            
+            # Backward compatibility: return List[str] if metadata not requested
+            if not include_metadata:
+                return documents
+            
+            # Return List[Dict] with metadata
+            metadatas = results.get("metadatas", [[]])[0] or []
+            ids = results.get("ids", [[]])[0] or []
+            
+            # Extract session info from document content if available (format: [SESSION:...])
+            result_list = []
+            for idx, doc in enumerate(documents):
+                metadata = metadatas[idx] if idx < len(metadatas) else {}
+                doc_id = ids[idx] if idx < len(ids) else None
+                
+                # Try to extract session info from document content
+                session_id = None
+                session_title = None
+                session_date = None
+                session_status = None
+                
+                if doc.startswith("[SESSION:"):
+                    # Parse format: [SESSION:{id}|TITLE:{title}|DATE:{date}|STATUS:{status}]
+                    import re
+                    match = re.match(r'\[SESSION:([^|]+)\|TITLE:([^|]+)\|DATE:([^|]+)\|STATUS:([^\]]+)\]', doc)
+                    if match:
+                        session_id, session_title, session_date, session_status = match.groups()
+                
+                # Get learned_from_sessions from metadata or extract from content
+                learned_from_sessions = []
+                if "learned_from" in metadata:
+                    learned_from_str = metadata.get("learned_from", "")
+                    if learned_from_str:
+                        learned_from_sessions = [s.strip() for s in learned_from_str.split(",") if s.strip()]
+                
+                result_dict = {
+                    "content": doc,
+                    "metadata": {
+                        "session_id": session_id,
+                        "session_title": session_title,
+                        "session_date": session_date,
+                        "session_status": session_status,
+                        "learned_from_sessions": learned_from_sessions,
+                        "importance_score": metadata.get("importance_score"),
+                        "embedding_id": doc_id,
+                    }
+                }
+                result_list.append(result_dict)
+            
+            return result_list
+            
         except Exception as e:
             error_str = str(e).lower()
             # ChromaDB HNSW index errors are often recoverable - log as warning
@@ -616,6 +688,105 @@ class MemoryManager:
             else:
                 logger.error(f"Error in retrieve_long_term_memory: {e}", exc_info=True)
             return []
+
+    async def index_session_content(
+        self,
+        session_id: UUID,
+        db: AsyncSession,
+        tenant_id: Optional[UUID] = None,
+        importance_score: float = 0.8,
+    ) -> bool:
+        """
+        Index a session's content (all messages) into Long Term Memory.
+        
+        Args:
+            session_id: UUID of the session to index
+            db: Database session
+            tenant_id: Optional tenant ID (defaults to self.tenant_id)
+            importance_score: Importance score for the indexed content (default: 0.8)
+            
+        Returns:
+            bool: True if indexing was successful, False otherwise
+        """
+        from sqlalchemy import select
+        from app.models.database import Session as SessionModel, Message as MessageModel
+        from datetime import datetime, timezone
+        
+        logger.info(f"📝 Indexing session {session_id} into Long Term Memory...")
+        
+        try:
+            # Get session with tenant filtering
+            effective_tenant_id = tenant_id or self.tenant_id
+            result = await db.execute(
+                select(SessionModel).where(
+                    SessionModel.id == session_id,
+                    SessionModel.tenant_id == effective_tenant_id
+                )
+            )
+            session = result.scalar_one_or_none()
+            
+            if not session:
+                logger.warning(f"⚠️  Session {session_id} not found for tenant {effective_tenant_id}")
+                return False
+            
+            # Get all messages for this session
+            messages_result = await db.execute(
+                select(MessageModel)
+                .where(
+                    MessageModel.session_id == session_id,
+                    MessageModel.tenant_id == effective_tenant_id
+                )
+                .order_by(MessageModel.timestamp)
+            )
+            messages = messages_result.scalars().all()
+            
+            if not messages:
+                logger.info(f"⚠️  No messages found in session {session_id}, skipping indexing")
+                return False
+            
+            # Format session content with metadata
+            session_title = session.title or session.name
+            session_date = session.created_at.strftime("%Y-%m-%d") if session.created_at else "unknown"
+            session_status = session.status
+            
+            # Build formatted content
+            formatted_content = f"""[SESSION:{session_id}|TITLE:{session_title}|DATE:{session_date}|STATUS:{session_status}]
+Session Title: {session_title}
+Created: {session.created_at.isoformat() if session.created_at else 'unknown'}
+Status: {session_status}
+
+Messages:
+"""
+            for msg in messages:
+                role_label = "User" if msg.role == "user" else "Assistant"
+                timestamp = msg.timestamp.strftime("%Y-%m-%d %H:%M:%S") if msg.timestamp else "unknown"
+                formatted_content += f"{timestamp} - {role_label}: {msg.content}\n"
+            
+            # Index in Long Term Memory
+            indexed, memory_id = await self.add_long_term_memory(
+                content=formatted_content,
+                learned_from_sessions=[session_id],
+                importance_score=importance_score,
+                db=db,
+                tenant_id=effective_tenant_id,
+            )
+            
+            if indexed:
+                # Update session.last_indexed_at
+                session.last_indexed_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.info(f"✅ Session {session_id} indexed successfully (memory_id: {memory_id})")
+                return True
+            else:
+                logger.warning(f"⚠️  Failed to index session {session_id} (might be duplicate)")
+                # Still update last_indexed_at even if duplicate (to avoid retrying)
+                session.last_indexed_at = datetime.now(timezone.utc)
+                await db.commit()
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error indexing session {session_id}: {e}", exc_info=True)
+            return False
 
     async def should_store_in_long_term(
         self,

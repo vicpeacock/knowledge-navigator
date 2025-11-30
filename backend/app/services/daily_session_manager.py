@@ -147,7 +147,7 @@ class DailySessionManager:
         
         logger.info(f"Found active session {yesterday_session.id} for user {user_id} on {yesterday_date}, archiving...")
         
-        # Generate summary before archiving
+        # Generate summary before archiving (optional - can be kept for daily summaries)
         if self.memory_manager and self.ollama_client:
             try:
                 await self._generate_daily_summary(yesterday_session, user)
@@ -158,8 +158,25 @@ class DailySessionManager:
         yesterday_session.status = "archived"
         yesterday_session.archived_at = datetime.now()
         await self.db.commit()
-        await self.db.refresh(yesterday_session)
         
+        # Index session content in long-term memory
+        if self.memory_manager:
+            try:
+                indexed = await self.memory_manager.index_session_content(
+                    session_id=yesterday_session.id,
+                    db=self.db,
+                    tenant_id=tenant_id,
+                    importance_score=0.8,  # High importance for archived sessions
+                )
+                if indexed:
+                    logger.info(f"✅ Archived session {yesterday_session.id} indexed in long-term memory")
+                else:
+                    logger.warning(f"⚠️  Archived session {yesterday_session.id} indexing returned False")
+            except Exception as e:
+                logger.error(f"❌ Error indexing archived session {yesterday_session.id}: {e}", exc_info=True)
+                # Don't fail archiving if indexing fails
+        
+        await self.db.refresh(yesterday_session)
         logger.info(f"Archived session {yesterday_session.id} for user {user_id}")
         return yesterday_session
     

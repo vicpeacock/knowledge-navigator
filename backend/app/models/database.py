@@ -105,6 +105,7 @@ class Session(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     archived_at = Column(DateTime(timezone=True), nullable=True)  # When the session was archived
+    last_indexed_at = Column(DateTime(timezone=True), nullable=True)  # When the session content was last indexed in Long Term Memory
     session_metadata = Column("metadata", JSONB, default={})
 
     # Relationships
@@ -117,6 +118,8 @@ class Session(Base):
     # Index for performance
     __table_args__ = (
         Index('ix_sessions_user_id', 'user_id'),
+        Index('ix_sessions_last_indexed_at', 'last_indexed_at'),
+        Index('ix_sessions_user_last_indexed', 'user_id', 'last_indexed_at'),
     )
 
 
