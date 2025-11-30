@@ -8,7 +8,7 @@ echo "=========================================="
 echo ""
 
 # Informazioni progetto (già note)
-PROJECT_REF="zdyuqekimdpsmnelzvri"
+PROJECT_REF="${SUPABASE_PROJECT_ID:-[PROJECT_ID]}"
 DB_HOST="db.${PROJECT_REF}.supabase.co"
 DB_PORT="5432"
 DB_USER="postgres"
