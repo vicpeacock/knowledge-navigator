@@ -27,19 +27,19 @@
 
 **Come ottenerla**:
 
-1. Vai su: https://app.supabase.com/project/zdyuqekimdpsmnelzvri/settings/database
+1. Vai su: https://app.supabase.com/project/[PROJECT_ID]/settings/database
 2. Scrolla fino a **"Connection string"**
 3. Seleziona tab **"URI"**
-4. Copia la connection string (formato: `postgresql://postgres:[PASSWORD]@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres`)
+4. Copia la connection string (formato: `postgresql://postgres:[PASSWORD]@db.[PROJECT_ID].supabase.co:5432/postgres`)
 
 **Modifica per asyncpg**:
 - Sostituisci `postgresql://` con `postgresql+asyncpg://`
-- Esempio: `postgresql+asyncpg://postgres:YOUR_PASSWORD@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres`
+- Esempio: `postgresql+asyncpg://postgres:YOUR_PASSWORD@db.[PROJECT_ID].supabase.co:5432/postgres`
 
 **Aggiorna `.env.cloud-run`**:
 ```bash
 # Sostituisci [PASSWORD] con la password reale
-DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD@db.[PROJECT_ID].supabase.co:5432/postgres
 POSTGRES_PASSWORD=YOUR_PASSWORD
 ```
 

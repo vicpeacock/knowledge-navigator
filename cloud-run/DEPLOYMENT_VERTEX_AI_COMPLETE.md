@@ -37,7 +37,7 @@ Vertex AI utilizza **Application Default Credentials (ADC)** di Cloud Run, che v
 - ✅ FastAPI application
 - ✅ Database migrations (eseguite automaticamente)
 - ✅ **PostgreSQL**: Supabase (servizio esterno) - ✅ Connected
-  - URL: `db.zdyuqekimdpsmnelzvri.supabase.co:5432`
+  - URL: `db.[PROJECT_ID].supabase.co:5432`
   - Database: `postgres`
   - **NON** usa Cloud SQL o database locale
 - ✅ **ChromaDB**: ChromaDB Cloud (trychroma.com) - ✅ Connected
@@ -160,7 +160,7 @@ gcloud run services describe knowledge-navigator-backend \
 
 ### PostgreSQL (Supabase)
 - **NON** usa Cloud SQL o database locale
-- Connessione a Supabase: `db.zdyuqekimdpsmnelzvri.supabase.co`
+- Connessione a Supabase: `db.[PROJECT_ID].supabase.co`
 - Database gestito da Supabase (servizio esterno)
 - Connection string configurata in `.env.cloud-run` come `DATABASE_URL`
 

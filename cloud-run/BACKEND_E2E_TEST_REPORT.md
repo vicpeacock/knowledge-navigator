@@ -116,7 +116,7 @@
 **Status**: ✅ **PASS**
 
 - **Connection**: PostgreSQL connection successful
-- **Host**: `db.zdyuqekimdpsmnelzvri.supabase.co:5432`
+- **Host**: `db.[PROJECT_ID].supabase.co:5432`
 - **Database**: `postgres`
 - **Type**: External service (Supabase)
 
@@ -169,7 +169,7 @@
 
 ### Database (Supabase)
 - ✅ Connessione PostgreSQL funzionante
-- ✅ Host: `db.zdyuqekimdpsmnelzvri.supabase.co`
+- ✅ Host: `db.[PROJECT_ID].supabase.co`
 - ✅ Database: `postgres`
 
 ### ChromaDB Cloud

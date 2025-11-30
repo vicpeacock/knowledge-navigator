@@ -2,18 +2,18 @@
 
 ## 📋 Informazioni Progetto
 
-- **Project URL**: https://zdyuqekimdpsmnelzvri.supabase.co
-- **Project Reference**: `zdyuqekimdpsmnelzvri`
+- **Project URL**: https://[PROJECT_ID].supabase.co
+- **Project Reference**: `[PROJECT_ID]`
 
 ## 🔑 Connection String Database
 
 Per ottenere la connection string del database PostgreSQL:
 
 1. **Vai su Supabase Dashboard**
-   - Link: https://app.supabase.com/project/zdyuqekimdpsmnelzvri
+   - Link: https://app.supabase.com/project/[PROJECT_ID]
 
 2. **Vai su Settings → Database**
-   - Link diretto: https://app.supabase.com/project/zdyuqekimdpsmnelzvri/settings/database
+   - Link diretto: https://app.supabase.com/project/[PROJECT_ID]/settings/database
 
 3. **Trova "Connection string"**
    - Scrolla fino a "Connection string"
@@ -22,13 +22,13 @@ Per ottenere la connection string del database PostgreSQL:
 
 4. **Formato atteso**:
    ```
-   postgresql://postgres:[PASSWORD]@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+   postgresql://postgres:[PASSWORD]@db.[PROJECT_ID].supabase.co:5432/postgres
    ```
 
 5. **Modifica per asyncpg**:
    Sostituisci `postgresql://` con `postgresql+asyncpg://`
    ```
-   postgresql+asyncpg://postgres:[PASSWORD]@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+   postgresql+asyncpg://postgres:[PASSWORD]@db.[PROJECT_ID].supabase.co:5432/postgres
    ```
 
 ## 🔐 Password Database
@@ -54,7 +54,7 @@ Se non la ricordi:
 # Mac: brew install postgresql
 
 # Test connection
-psql "postgresql://postgres:PASSWORD@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres"
+psql "postgresql://postgres:PASSWORD@db.[PROJECT_ID].supabase.co:5432/postgres"
 ```
 
 ---

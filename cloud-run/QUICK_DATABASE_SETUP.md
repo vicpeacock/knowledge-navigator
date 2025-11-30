@@ -7,7 +7,7 @@ Se non trovi la connection string nell'interfaccia, usa questo metodo:
 ### Step 1: Ottieni o Resetta la Password
 
 1. **Vai al Dashboard Supabase**
-   - Link: https://app.supabase.com/project/zdyuqekimdpsmnelzvri
+   - Link: https://app.supabase.com/project/[PROJECT_ID]
 
 2. **Vai su Settings** (icona ingranaggio in basso a sinistra o in alto a destra)
 
@@ -61,22 +61,22 @@ Se preferisci costruirla manualmente:
 
 **Formato**:
 ```
-postgresql+asyncpg://postgres:LA_TUA_PASSWORD@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+postgresql+asyncpg://postgres:LA_TUA_PASSWORD@db.[PROJECT_ID].supabase.co:5432/postgres
 ```
 
 **Componenti**:
 - `postgresql+asyncpg://` - Protocollo (aggiunto `+asyncpg` per il nostro backend)
 - `postgres` - Username
 - `LA_TUA_PASSWORD` - Password del database
-- `db.zdyuqekimdpsmnelzvri.supabase.co` - Host
+- `db.[PROJECT_ID].supabase.co` - Host
 - `5432` - Port
 - `postgres` - Database name
 
 **Aggiorna `.env.cloud-run`**:
 ```bash
-DATABASE_URL=postgresql+asyncpg://postgres:LA_TUA_PASSWORD@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+DATABASE_URL=postgresql+asyncpg://postgres:LA_TUA_PASSWORD@db.[PROJECT_ID].supabase.co:5432/postgres
 POSTGRES_PASSWORD=LA_TUA_PASSWORD
-POSTGRES_HOST=db.zdyuqekimdpsmnelzvri.supabase.co
+POSTGRES_HOST=db.[PROJECT_ID].supabase.co
 ```
 
 ## ✅ Checklist

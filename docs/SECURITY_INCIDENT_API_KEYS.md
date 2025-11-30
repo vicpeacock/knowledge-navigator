@@ -12,8 +12,10 @@ GitGuardian ha rilevato vari pattern che sembrano segreti nel repository GitHub.
 
 Le seguenti API keys sono state esposte:
 
-1. `AIzaSyAvoib369-BgS-t9EUKvgMMZ3Jhlf-_TLU` - Google Gemini API Key
-2. `AIzaSyDMU8TWEHJTLHrCy7-OFE8MSfyLmXQTA3Q` - Google Gemini API Key
+1. `AIzaSy...` - Google Gemini API Key (ruotata)
+2. `AIzaSy...` - Google Gemini API Key (ruotata)
+
+**NOTA**: Tutte le chiavi API esposte sono state ruotate e disabilitate.
 
 ## Azioni Immediate
 

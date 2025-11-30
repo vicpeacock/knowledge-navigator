@@ -3,7 +3,7 @@
 ## Metodo 1: Dashboard Settings → Database
 
 1. **Vai al Dashboard del tuo progetto**
-   - Link: https://app.supabase.com/project/zdyuqekimdpsmnelzvri
+   - Link: https://app.supabase.com/project/[PROJECT_ID]
 
 2. **Vai su Settings** (icona ingranaggio in basso a sinistra)
 
@@ -20,7 +20,7 @@
 ## Metodo 2: Project Settings → Database
 
 1. **Vai al progetto**
-   - Link: https://app.supabase.com/project/zdyuqekimdpsmnelzvri
+   - Link: https://app.supabase.com/project/[PROJECT_ID]
 
 2. **Clicca su "Project Settings"** (icona ingranaggio in alto a destra)
 
@@ -33,7 +33,7 @@
 ## Metodo 3: Database → Connection Info
 
 1. **Vai al Database**
-   - Link: https://app.supabase.com/project/zdyuqekimdpsmnelzvri/editor
+   - Link: https://app.supabase.com/project/[PROJECT_ID]/editor
 
 2. **Cerca un pulsante o link "Connection Info"** o **"Settings"**
 
@@ -45,7 +45,7 @@ Se non trovi la connection string, puoi costruirla manualmente:
 
 **Formato**:
 ```
-postgresql://postgres:[PASSWORD]@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+postgresql://postgres:[PASSWORD]@db.[PROJECT_ID].supabase.co:5432/postgres
 ```
 
 **Dove trovare la password**:
@@ -58,7 +58,7 @@ postgresql://postgres:[PASSWORD]@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgr
    - **SALVALA!** (non potrai più vederla)
 
 **Informazioni che hai già**:
-- Host: `db.zdyuqekimdpsmnelzvri.supabase.co`
+- Host: `db.[PROJECT_ID].supabase.co`
 - Port: `5432`
 - User: `postgres`
 - Database: `postgres`
@@ -80,7 +80,7 @@ Se hai Supabase CLI installato:
 supabase login
 
 # Link progetto
-supabase link --project-ref zdyuqekimdpsmnelzvri
+supabase link --project-ref [PROJECT_ID]
 
 # Ottieni connection string
 supabase db connection-string
@@ -95,7 +95,7 @@ postgresql://postgres.xxxxx:[PASSWORD]@aws-0-eu-central-1.pooler.supabase.com:65
 
 O questo formato (direct connection):
 ```
-postgresql://postgres:[PASSWORD]@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+postgresql://postgres:[PASSWORD]@db.[PROJECT_ID].supabase.co:5432/postgres
 ```
 
 ## Se Non Trovi la Password
@@ -112,17 +112,17 @@ Una volta che hai la connection string, modificala così:
 
 **Da**:
 ```
-postgresql://postgres:PASSWORD@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+postgresql://postgres:PASSWORD@db.[PROJECT_ID].supabase.co:5432/postgres
 ```
 
 **A** (aggiungi `+asyncpg`):
 ```
-postgresql+asyncpg://postgres:PASSWORD@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+postgresql+asyncpg://postgres:PASSWORD@db.[PROJECT_ID].supabase.co:5432/postgres
 ```
 
 E aggiorna `.env.cloud-run`:
 ```bash
-DATABASE_URL=postgresql+asyncpg://postgres:LA_TUA_PASSWORD@db.zdyuqekimdpsmnelzvri.supabase.co:5432/postgres
+DATABASE_URL=postgresql+asyncpg://postgres:LA_TUA_PASSWORD@db.[PROJECT_ID].supabase.co:5432/postgres
 POSTGRES_PASSWORD=LA_TUA_PASSWORD
 ```
 
