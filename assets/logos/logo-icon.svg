@@ -1,0 +1,35 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="compassGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#60a5fa;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#93c5fd;stop-opacity:0.6" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Cerchi concentrici per effetto profondità -->
+  <circle cx="256" cy="256" r="205" fill="none" stroke="#2563eb" stroke-width="8" opacity="0.3"/>
+  <circle cx="256" cy="256" r="164" fill="none" stroke="#2563eb" stroke-width="6" opacity="0.5"/>
+  <circle cx="256" cy="256" r="123" fill="none" stroke="#2563eb" stroke-width="4" opacity="0.7"/>
+  <circle cx="256" cy="256" r="82" fill="none" stroke="#60a5fa" stroke-width="3" opacity="0.8"/>
+  
+  <!-- Linea orizzontale (E-W) -->
+  <line x1="81" y1="256" x2="431" y2="256" stroke="#2563eb" stroke-width="4" opacity="0.7"/>
+  
+  <!-- Linea verticale (N-S) -->
+  <line x1="256" y1="81" x2="256" y2="431" stroke="#2563eb" stroke-width="4" opacity="0.7"/>
+  
+  <!-- Freccia Nord (Navigator) -->
+  <polygon points="256,51 231,102 241,122 256,102 271,122 281,102" 
+           fill="#60a5fa" opacity="0.8"/>
+  
+  <!-- Cerchio interno decorativo -->
+  <circle cx="256" cy="256" r="62" fill="none" stroke="#93c5fd" stroke-width="2" opacity="0.6"/>
+  
+  <!-- Punto centrale -->
+  <circle cx="256" cy="256" r="8" fill="#2563eb"/>
+  
+  <!-- Cerchio esterno principale -->
+  <circle cx="256" cy="256" r="205" fill="none" stroke="url(#compassGradient)" stroke-width="6"/>
+</svg>
+
