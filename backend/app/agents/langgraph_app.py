@@ -751,15 +751,31 @@ async def analyze_message_for_plan(
         "- Simple greetings\n"
         "- General conversation questions that don't require external data\n"
         "- User statements that don't require actions\n\n"
+        "HUMAN IN THE LOOP - When to use 'wait_user' action:\n"
+        "Use action='wait_user' when you need user confirmation or input before proceeding. This creates a pause in execution.\n"
+        "Use wait_user for:\n"
+        "- Destructive actions (delete, remove, archive, modify important data)\n"
+        "- Actions that affect multiple items without explicit user request\n"
+        "- Actions requiring explicit confirmation (e.g., sending emails, creating calendar events with specific parameters)\n"
+        "- When you need additional information that isn't clear from the request\n"
+        "- Sensitive operations that should have user approval\n\n"
+        "Example wait_user step:\n"
+        "{{\n"
+        "  \"description\": \"Trovate 15 email spam. Vuoi che le elimini tutte?\",\n"
+        "  \"action\": \"wait_user\",\n"
+        "  \"tool\": null,\n"
+        "  \"inputs\": {{}}\n"
+        "}}\n"
+        "When the user responds with confirmation (ok, sì, procedi, etc.), execution continues with the next step.\n\n"
         "Respond with JSON:\n"
         "{{\n"
         "  \"needs_plan\": true|false,\n"
         "  \"reason\": \"explain why a plan is or isn't needed\",\n"
         "  \"steps\": [\n"
         "     {{\n"
-        "        \"description\": \"step description\",\n"
+        "        \"description\": \"step description (for wait_user, this is the question/prompt for the user)\",\n"
         "        \"action\": \"tool|respond|wait_user\",\n"
-        "        \"tool\": \"tool_name_or_null\",\n"
+        "        \"tool\": \"tool_name_or_null (null for wait_user and respond)\",\n"
         "        \"inputs\": {{ ... }}\n"
         "     }}\n"
         "  ]\n"
@@ -783,7 +799,14 @@ async def analyze_message_for_plan(
         "Do not create a plan (needs_plan=false) for:\n"
         "- Simple conversations without need for external data\n"
         "- Greetings or statements that don't require actions\n\n"
-        "If you create a plan, include all necessary steps with appropriate tools."
+        "HUMAN IN THE LOOP - Use 'wait_user' action when:\n"
+        "- The action is destructive (delete, remove, archive, modify important data)\n"
+        "- The action affects multiple items and user confirmation would be beneficial\n"
+        "- You need explicit user approval for sensitive operations\n"
+        "- Additional information is required to proceed correctly\n"
+        "When using wait_user, set action='wait_user', tool=null, and put the question/prompt in 'description'.\n"
+        "The user will respond with confirmation (ok, sì, procedi, etc.) and execution will continue.\n\n"
+        "If you create a plan, include all necessary steps with appropriate tools and wait_user confirmations when needed."
     )
     
     # Replace SEARCH_TOOL placeholder with actual tool name
@@ -824,6 +847,15 @@ async def analyze_message_for_plan(
         else:
             content = str(response)
             logger.warning(f"   Unexpected response type: {type(response)}, content: {content[:100]}")
+        
+        # Check if response indicates safety filter blocking
+        if content and ("bloccata dai filtri" in content.lower() or 
+                       "blocked by safety" in content.lower() or
+                       "safety filters" in content.lower()):
+            logger.warning(f"⚠️  Planner response was blocked by safety filters despite disable_safety_filters=True. Content: {content[:200]}")
+            # Return fallback response - planner will work without explicit plan
+            logger.info("📋 Planner returning fallback due to safety filter block")
+            return {"needs_plan": False, "reason": "safety_filter_block", "steps": []}
         
         parsed = safe_json_loads(content)
         if isinstance(parsed, dict):

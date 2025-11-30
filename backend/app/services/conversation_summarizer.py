@@ -166,6 +166,11 @@ Riassunto (massimo 500 parole, mantieni tutti i dettagli importanti):"""
                 tenant_id = session_result.scalar_one_or_none()
             
             # Store in medium-term memory (will handle tenant_id retrieval if None)
+            # Skip if session_id is None (shouldn't happen, but handle gracefully)
+            if session_id is None:
+                logger.warning(f"⚠️  Cannot store summary: session_id is None")
+                return summary
+            
             await self.memory_manager.add_medium_term_memory(
                 db=db,
                 session_id=session_id,

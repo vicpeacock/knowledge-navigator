@@ -1332,6 +1332,14 @@ async def chat(
         keep_recent=settings.context_keep_recent_messages,
     )
     
+    # Validate session_id before saving message
+    if session_id is None:
+        logger.error(f"❌ CRITICAL: session_id is None when trying to save user message! User: {current_user.email}, tenant: {tenant_id}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error: Session ID is missing. Please try again or refresh the page."
+        )
+    
     # Save user message
     user_message = MessageModel(
         session_id=session_id,
