@@ -1127,20 +1127,25 @@ async def chat(
     retrieved_memory = []
     memory_used = {"short_term": False, "medium_term": [], "long_term": [], "files": []}
     
-    # Get the most recently uploaded file information from database
+    # Get the most recently uploaded file information from database (user-scoped now)
     from app.models.database import File as FileModel
     latest_file_result = await db.execute(
         select(FileModel)
-        .where(FileModel.session_id == session_id)
+        .where(FileModel.user_id == current_user.id)  # Files are user-scoped, not session-scoped
         .order_by(FileModel.uploaded_at.desc())
         .limit(1)
     )
     latest_file = latest_file_result.scalar_one_or_none()
     
-    # Always retrieve file content for the session (files are session-specific context)
+    # Always retrieve file content for the user (files are user-scoped, not session-scoped)
     # Pass db to filter out embeddings for deleted files
     file_content = await memory.retrieve_file_content(
-        session_id, request.message, n_results=5, db=db, tenant_id=tenant_id
+        user_id=current_user.id,  # Files are user-scoped now
+        query=request.message, 
+        n_results=5, 
+        db=db, 
+        tenant_id=tenant_id,
+        session_id=session_id  # Optional: for backward compatibility and context
     )
     memory_used["files"] = file_content
     
@@ -1149,11 +1154,12 @@ async def chat(
     if latest_file:
         file_context_info.append(
             f"[IMPORTANT: File Information]\n"
-            f"The most recently uploaded file in this session is:\n"
+            f"The most recently uploaded file for this user is:\n"
             f"- Filename: {latest_file.filename}\n"
             f"- Uploaded at: {latest_file.uploaded_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"- File ID: {latest_file.id}\n"
             f"When the user asks about 'the last file', 'the most recent file', 'the latest file', or 'ultimo file', they are referring to this file: {latest_file.filename}\n"
+            f"Note: Files are user-scoped and available across all sessions.\n"
         )
     
     # Add file content to retrieved memory with clear labeling
@@ -1169,18 +1175,19 @@ async def chat(
             else:
                 logger.warning(f"File content {i+1} is empty or None")
     else:
-        logger.warning(f"No file content retrieved for session {session_id}")
+        logger.warning(f"No file content retrieved for user {current_user.email}")
         
         # If no file content but there are files in database, add warning to context
         # This helps the LLM understand that files exist but weren't found in ChromaDB
         if latest_file:
             warning_message = (
                 f"[IMPORTANT: File Upload Status]\n"
-                f"A file was uploaded to this session (ID: {latest_file.id}, Name: {latest_file.filename}), "
+                f"A file was uploaded by this user (ID: {latest_file.id}, Name: {latest_file.filename}), "
                 f"but its content could not be retrieved from memory. "
                 f"This is an uploaded file (NOT a Google Drive file), and it may need to be re-uploaded "
                 f"if the embeddings were not saved correctly. "
                 f"DO NOT try to access this file via Google Drive tools - it is an uploaded file, not a Drive file.\n"
+                f"Note: Files are user-scoped and available across all sessions.\n"
             )
             retrieved_memory.append(warning_message)
             logger.warning(f"Added warning about missing file content for file {latest_file.id}")
@@ -2364,10 +2371,13 @@ async def get_session_memory(
             "learned_from_sessions": mem.learned_from_sessions or [],
         })
     
-    # Count files
+    # Count files (files are now user-scoped, so count all user files, not just session files)
     from app.models.database import File as FileModel
     file_count_result = await db.execute(
-        select(FileModel).where(FileModel.session_id == session_id)
+        select(FileModel).where(
+            FileModel.user_id == current_user.id,
+            FileModel.tenant_id == tenant_id
+        )
     )
     files_count = len(file_count_result.scalars().all())
     

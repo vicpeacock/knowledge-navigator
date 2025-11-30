@@ -63,13 +63,15 @@ class FileBase(BaseModel):
 
 
 class FileCreate(FileBase):
-    session_id: UUID
+    user_id: UUID  # File belongs to user
+    session_id: Optional[UUID] = None  # Optional: session where uploaded
     filepath: str
 
 
 class File(FileBase):
     id: UUID
-    session_id: UUID
+    user_id: UUID  # File belongs to user
+    session_id: Optional[UUID] = None  # Optional: session where uploaded
     filepath: str
     uploaded_at: datetime
 

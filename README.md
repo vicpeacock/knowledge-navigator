@@ -98,6 +98,7 @@ cd cloud-run
 - **Google Workspace**: Calendar (read events, natural language queries), Gmail (read, send, archive), Tasks (create, list, update)
 - **Built-in Tools**: Web search (Google Custom Search API), file upload/analysis
 - **Custom Tools**: User-defined tools via MCP Gateway
+- **File Management**: User-scoped file storage (files persist across sessions, can be deleted)
 
 ### 📊 Full Observability
 - **Tracing**: OpenTelemetry with distributed tracing across frontend and backend

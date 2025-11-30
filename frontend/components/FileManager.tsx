@@ -7,7 +7,7 @@ import { Trash2, FileIcon, X } from 'lucide-react'
 import { format } from 'date-fns'
 
 interface FileManagerProps {
-  sessionId: string
+  sessionId?: string  // Optional: for backward compatibility
   isOpen: boolean
   onClose: () => void
   onFileUploaded?: () => void
@@ -19,17 +19,17 @@ export default function FileManager({ sessionId, isOpen, onClose, onFileUploaded
   const [deleting, setDeleting] = useState<string | null>(null)
 
   useEffect(() => {
-    if (isOpen && sessionId) {
-      console.log('[FileManager] Loading files for session:', sessionId)
+    if (isOpen) {
+      console.log('[FileManager] Loading user files')
       loadFiles()
     }
-  }, [isOpen, sessionId])
+  }, [isOpen])
 
   const loadFiles = async () => {
     setLoading(true)
     try {
-      console.log('[FileManager] Calling filesApi.list for session:', sessionId)
-      const response = await filesApi.list(sessionId)
+      console.log('[FileManager] Calling filesApi.list (user-scoped)')
+      const response = await filesApi.list()  // Files are now user-scoped
       console.log('[FileManager] Files loaded:', response.data)
       setFiles(response.data || [])
     } catch (error: any) {

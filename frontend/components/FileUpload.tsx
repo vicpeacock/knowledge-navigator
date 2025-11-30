@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { filesApi } from '@/lib/api'
 
 interface FileUploadProps {
-  sessionId: string
+  sessionId?: string  // Optional: for backward compatibility
   onUploaded?: () => void
 }
 
@@ -17,7 +17,8 @@ export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
 
     setUploading(true)
     try {
-      await filesApi.upload(sessionId, file)
+      // Files are now user-scoped, sessionId is optional
+      await filesApi.upload(file, sessionId)
       alert('File caricato con successo!')
       if (onUploaded) {
         onUploaded()

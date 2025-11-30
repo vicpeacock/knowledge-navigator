@@ -21,7 +21,8 @@ export interface Message {
 
 export interface File {
   id: string
-  session_id: string
+  user_id: string  // File belongs to user, not session
+  session_id?: string  // Optional: session where uploaded (for backward compatibility)
   filename: string
   filepath: string
   mime_type?: string

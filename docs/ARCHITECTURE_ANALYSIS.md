@@ -495,7 +495,10 @@ LLM Tool Call Request
 - `integrations` - OAuth integrations (tenant_id, user_id, type, credentials)
 
 **Files:**
-- `files` - Uploaded files (session_id, tenant_id, filepath, metadata)
+- `files` - Uploaded files (user_id, tenant_id, session_id nullable, filepath, metadata)
+  - Files are **user-scoped** (belong to user, not session)
+  - Available across all user sessions
+  - Can be deleted by user
 
 **Notifications:**
 - `notifications` - Notifiche utente (user_id, tenant_id, type, payload)
@@ -533,6 +536,7 @@ LLM Tool Call Request
 - Sessioni filtrate per `user_id`
 - Integrazioni isolate per utente
 - Memory user-scoped
+- Files user-scoped (available across all sessions)
 
 ### OAuth2 Integrations
 

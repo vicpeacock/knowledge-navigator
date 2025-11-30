@@ -286,20 +286,24 @@ export const notificationsApi = {
     api.post('/api/notifications/batch/delete', notificationIds, { timeout: 30000 }), // 30 seconds timeout
 }
 
-// Files API
+// Files API - Files are now user-scoped (not session-scoped)
 export const filesApi = {
-  upload: (sessionId: string, file: File) => {
+  upload: (file: File, sessionId?: string) => {
     const formData = new FormData()
     formData.append('file', file)
-    return api.post(`/api/files/upload/${sessionId}`, formData, {
+    // sessionId is optional (for backward compatibility)
+    const url = sessionId 
+      ? `/api/files/upload?session_id=${sessionId}`
+      : '/api/files/upload'
+    return api.post(url, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  list: (sessionId: string) => api.get(`/api/files/session/${sessionId}`, { timeout: 30000 }), // 30 seconds
+  list: () => api.get(`/api/files/`, { timeout: 30000 }), // List all user files
   get: (fileId: string) => api.get(`/api/files/id/${fileId}`),
   delete: (fileId: string) => api.delete(`/api/files/id/${fileId}`),
-  search: (sessionId: string, query: string, nResults: number = 5) =>
-    api.post(`/api/files/${sessionId}/search`, { query, n_results: nResults }),
+  search: (query: string, nResults: number = 5) =>
+    api.post(`/api/files/search`, { query, n_results: nResults }),
 }
 
 // Memory API

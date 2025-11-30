@@ -628,13 +628,14 @@ class MemoryManager:
     # File Embeddings
     async def retrieve_file_content(
         self,
-        session_id: UUID,
+        user_id: UUID,  # Changed: files are now user-scoped, not session-scoped
         query: str,
         n_results: int = 5,
         db: Optional[AsyncSession] = None,
         tenant_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,  # Optional: for backward compatibility and context
     ) -> List[str]:
-        """Retrieve relevant file content for a session based on query"""
+        """Retrieve relevant file content for a user based on query"""
         import logging
         import re
         logger = logging.getLogger(__name__)
@@ -664,7 +665,7 @@ class MemoryManager:
         is_generic_file_request = any(keyword in query_lower for keyword in generic_file_keywords)
         
         if is_generic_file_request:
-            logger.info(f"Detected generic file request: '{query}'. Will retrieve all files for session instead of semantic search.")
+            logger.info(f"Detected generic file request: '{query}'. Will retrieve all files for user instead of semantic search.")
         
         try:
             # Get tenant-specific collection
@@ -682,7 +683,7 @@ class MemoryManager:
                     file_result = await db.execute(
                         select(FileModel).where(
                             FileModel.id == UUID(requested_file_id),
-                            FileModel.session_id == session_id,
+                            FileModel.user_id == user_id,  # Files are user-scoped now
                             FileModel.tenant_id == effective_tenant_id
                         )
                     )
@@ -712,12 +713,13 @@ class MemoryManager:
                             # If still not found, try getting all files and filtering manually
                             if not file_embeddings or not file_embeddings.get("documents"):
                                 logger.info(f"Direct query failed, trying manual filter for file_id {requested_file_id}")
-                                all_session_files = collection.get(
-                                    where={"session_id": session_id_str}
+                                user_id_str = str(user_id)
+                                all_user_files = collection.get(
+                                    where={"user_id": user_id_str}
                                 )
-                                all_ids = all_session_files.get("ids", [])
-                                all_docs = all_session_files.get("documents", [])
-                                all_metas = all_session_files.get("metadatas", [])
+                                all_ids = all_user_files.get("ids", [])
+                                all_docs = all_user_files.get("documents", [])
+                                all_metas = all_user_files.get("metadatas", [])
                                 
                                 for i, meta in enumerate(all_metas):
                                     file_id = None
@@ -744,7 +746,7 @@ class MemoryManager:
                         except Exception as chroma_error:
                             logger.error(f"Error retrieving file {requested_file_id} from ChromaDB: {chroma_error}", exc_info=True)
                     else:
-                        logger.info(f"File {requested_file_id} not found in database for session {session_id}")
+                        logger.info(f"File {requested_file_id} not found in database for user {user_id}")
                 except ValueError as uuid_error:
                     logger.warning(f"Invalid UUID format in query: {requested_file_id}, error: {uuid_error}")
                 except Exception as e:
@@ -756,15 +758,16 @@ class MemoryManager:
                 logger.warning(f"⚠️  Could not get/create file_embeddings collection for tenant {effective_tenant_id}, returning empty results")
                 return []
             
-            # First, check if there are any files for this session
-            session_id_str = str(session_id)
-            logger.info(f"🔍 Retrieving files for session {session_id_str}, tenant: {effective_tenant_id}, collection: {collection.name if hasattr(collection, 'name') else 'unknown'}")
+            # First, check if there are any files for this user
+            user_id_str = str(user_id)
+            logger.info(f"🔍 Retrieving files for user {user_id_str}, tenant: {effective_tenant_id}, collection: {collection.name if hasattr(collection, 'name') else 'unknown'}")
             
             try:
+                # Query by user_id (files are now user-scoped)
                 all_files = collection.get(
-                    where={"session_id": session_id_str},
+                    where={"user_id": user_id_str},
                 )
-                logger.info(f"✅ ChromaDB query successful: found {len(all_files.get('ids', []))} embeddings for session {session_id_str}")
+                logger.info(f"✅ ChromaDB query successful: found {len(all_files.get('ids', []))} embeddings for user {user_id_str}")
             except Exception as get_error:
                 logger.error(f"❌ Error querying ChromaDB collection: {get_error}", exc_info=True)
                 # Try without where clause to see if collection has any data
@@ -780,10 +783,10 @@ class MemoryManager:
                     filtered_docs = []
                     filtered_metas = []
                     for i, meta in enumerate(all_metas):
-                        meta_session_id = None
+                        meta_user_id = None
                         if isinstance(meta, dict):
-                            meta_session_id = meta.get("session_id")
-                        if meta_session_id == session_id_str:
+                            meta_user_id = meta.get("user_id")
+                        if meta_user_id == user_id_str:
                             filtered_ids.append(all_ids[i])
                             filtered_docs.append(all_docs[i])
                             filtered_metas.append(meta)
@@ -792,14 +795,14 @@ class MemoryManager:
                         "documents": filtered_docs,
                         "metadatas": filtered_metas,
                     }
-                    logger.info(f"✅ Manual filter successful: found {len(filtered_ids)} embeddings for session {session_id_str}")
+                    logger.info(f"✅ Manual filter successful: found {len(filtered_ids)} embeddings for user {user_id_str}")
                 except Exception as fallback_error:
                     logger.error(f"❌ Fallback query also failed: {fallback_error}", exc_info=True)
                     return []
             
             if not all_files.get("ids"):
-                logger.warning(f"⚠️  No files found in ChromaDB for session {session_id_str} (tenant: {effective_tenant_id})")
-                # Check if there are any files in the database for this session
+                logger.warning(f"⚠️  No files found in ChromaDB for user {user_id_str} (tenant: {effective_tenant_id})")
+                # Check if there are any files in the database for this user
                 if db is not None:
                     try:
                         from sqlalchemy import select
@@ -808,10 +811,10 @@ class MemoryManager:
                         from app.services.file_processor import FileProcessor
                         from app.core.config import settings
                         
-                        # Get file records with filepath
+                        # Get file records with filepath (user-scoped now)
                         db_file_result = await db.execute(
                             select(FileModel.id, FileModel.filename, FileModel.filepath, FileModel.mime_type).where(
-                                FileModel.session_id == session_id,
+                                FileModel.user_id == user_id,  # Files are user-scoped
                                 FileModel.tenant_id == effective_tenant_id
                             ).order_by(FileModel.uploaded_at.desc())
                         )
@@ -877,7 +880,7 @@ class MemoryManager:
                             else:
                                 logger.warning(f"⚠️  Could not retrieve any file content from filesystem. Files may need to be re-uploaded.")
                         else:
-                            logger.info(f"ℹ️  No files in database for session {session_id_str} either")
+                            logger.info(f"ℹ️  No files in database for user {user_id_str} either")
                     except Exception as db_check_error:
                         logger.error(f"❌ Error checking database files: {db_check_error}", exc_info=True)
                 return []
@@ -886,18 +889,18 @@ class MemoryManager:
             valid_file_ids = None
             file_upload_times = {}  # Initialize here so it's available in outer scope
             if db is not None:
-                logger.info(f"Database provided, will filter deleted files for session {session_id_str}")
+                logger.info(f"Database provided, will filter deleted files for user {user_id_str}")
                 try:
                     from sqlalchemy import select
                     from app.models.database import File as FileModel
                     
-                    # Get all existing file IDs for this session from database
+                    # Get all existing file IDs for this user from database
                     from sqlalchemy.ext.asyncio import AsyncSession
                     
-                    # Get file IDs with upload times for ordering
+                    # Get file IDs with upload times for ordering (user-scoped now)
                     file_result = await db.execute(
                         select(FileModel.id, FileModel.uploaded_at)
-                        .where(FileModel.session_id == session_id)
+                        .where(FileModel.user_id == user_id)  # Files are user-scoped
                         .order_by(FileModel.uploaded_at.desc())  # Most recent first
                     )
                     file_records = file_result.all()
@@ -907,7 +910,7 @@ class MemoryManager:
                     # Create a map of file_id -> upload_time for prioritization
                     file_upload_times = {str(fid): uploaded_at for fid, uploaded_at in file_records}
                     
-                    logger.info(f"Found {len(existing_file_ids)} valid file IDs in database for session {session_id_str}: {existing_file_ids}")
+                    logger.info(f"Found {len(existing_file_ids)} valid file IDs in database for user {user_id_str}: {existing_file_ids}")
                     
                     # Filter embeddings to only include existing files
                     metadata_list = all_files.get("metadatas", [])
@@ -950,23 +953,23 @@ class MemoryManager:
                     logger.warning(f"Could not filter deleted files: {e}, proceeding with all embeddings")
             
             if not all_files.get("ids"):
-                logger.warning(f"No valid files found in ChromaDB for session {session_id_str}")
+                logger.warning(f"No valid files found in ChromaDB for user {user_id_str}")
                 return []
             
-            # Strategy: Get ALL files for the session, sort by upload time (most recent first)
+            # Strategy: Get ALL files for the user, sort by upload time (most recent first)
             # This ensures the most recent file is ALWAYS returned first, regardless of semantic relevance
             # Also use this strategy for generic file requests (summary, analyze, etc.)
             if (valid_file_ids and file_upload_times) or is_generic_file_request:
-                # Get ALL files for this session from ChromaDB (not using semantic search)
+                # Get ALL files for this user from ChromaDB (not using semantic search)
                 # This ensures we have the most recent file even if it's not semantically relevant
-                all_session_files = collection.get(
-                    where={"session_id": session_id_str}
+                all_user_files = collection.get(
+                    where={"user_id": user_id_str}  # Files are user-scoped now
                 )
                 
                 # Filter to only valid files and sort by upload time
-                all_ids = all_session_files.get("ids", [])
-                all_docs = all_session_files.get("documents", [])
-                all_metas = all_session_files.get("metadatas", [])
+                all_ids = all_user_files.get("ids", [])
+                all_docs = all_user_files.get("documents", [])
+                all_metas = all_user_files.get("metadatas", [])
                 
                 # Create list of (doc, file_id, upload_time) tuples
                 file_items = []
@@ -1035,12 +1038,12 @@ class MemoryManager:
             query_embedding = self.embedding_service.generate_embedding(query)
             
             # Query with semantic search (with filtered file_ids if available)
-            where_clause = {"session_id": session_id_str}
+            where_clause = {"user_id": user_id_str}  # Files are user-scoped now
             if valid_file_ids:
                 # Note: ChromaDB where clause doesn't support IN directly, so we'll filter after
-                where_clause = {"session_id": session_id_str}
+                where_clause = {"user_id": user_id_str}  # Files are user-scoped now
             
-            # Query ALL files for this session to ensure we don't miss the most recent one
+            # Query ALL files for this user to ensure we don't miss the most recent one
             # We'll filter and sort by upload time after
             query_n_results = len(all_files.get("ids", []))  # Get ALL files to ensure we have the most recent
             

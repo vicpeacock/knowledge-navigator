@@ -111,7 +111,7 @@ class Session(Base):
     tenant = relationship("Tenant", backref="sessions")
     user = relationship("User", backref="sessions")
     messages = relationship("Message", back_populates="session", cascade="all, delete-orphan")
-    files = relationship("File", back_populates="session", cascade="all, delete-orphan")
+    files = relationship("File", back_populates="session")  # Files are user-scoped, no cascade deletion
     memory_medium = relationship("MemoryMedium", back_populates="session", cascade="all, delete-orphan")
     
     # Index for performance
@@ -141,7 +141,8 @@ class File(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)  # File belongs to user, not session
+    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=True)  # Optional: session where file was uploaded (for backward compatibility)
     filename = Column(String(255), nullable=False)
     filepath = Column(String(500), nullable=False)
     mime_type = Column(String(100))
@@ -150,6 +151,7 @@ class File(Base):
 
     # Relationships
     tenant = relationship("Tenant", backref="files")
+    user = relationship("User", backref="files")
     session = relationship("Session", back_populates="files")
 
 

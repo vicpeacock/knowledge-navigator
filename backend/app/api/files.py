@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
-from typing import List
+from typing import List, Optional
 import shutil
 from pathlib import Path
 
@@ -22,26 +22,31 @@ file_processor = FileProcessor()
 embedding_service = EmbeddingService()
 
 
-@router.post("/upload/{session_id}", response_model=FileSchema, status_code=201)
+@router.post("/upload", response_model=FileSchema, status_code=201)
 async def upload_file(
-    session_id: UUID,
     file: UploadFile = File(...),
+    session_id: Optional[UUID] = None,  # Optional: session where uploaded (for backward compatibility)
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user = Depends(get_current_user),
 ):
-    """Upload and process a file for a session (for current tenant)"""
-    # Verify session exists and belongs to tenant
-    result = await db.execute(
-        select(SessionModel).where(
-            SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
-        )
-    )
-    session = result.scalar_one_or_none()
+    """Upload and process a file for the current user (for current tenant)"""
+    import logging
+    logger = logging.getLogger(__name__)
     
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    # If session_id provided, verify it belongs to user (optional, for backward compatibility)
+    if session_id:
+        result = await db.execute(
+            select(SessionModel).where(
+                SessionModel.id == session_id,
+                SessionModel.tenant_id == tenant_id,
+                SessionModel.user_id == current_user.id
+            )
+        )
+        session = result.scalar_one_or_none()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
     
     # Check file size
     file_content = await file.read()
@@ -51,22 +56,28 @@ async def upload_file(
             detail=f"File too large. Max size: {settings.max_file_size} bytes",
         )
     
-    # Save file
-    session_dir = settings.upload_dir / str(session_id)
-    session_dir.mkdir(parents=True, exist_ok=True)
+    # Save file in user-specific directory (not session-specific)
+    user_dir = settings.upload_dir / "users" / str(current_user.id)
+    user_dir.mkdir(parents=True, exist_ok=True)
     
-    filepath = session_dir / file.filename
+    # Generate unique filename to avoid conflicts
+    import uuid as uuid_lib
+    file_extension = Path(file.filename).suffix
+    unique_filename = f"{uuid_lib.uuid4()}{file_extension}"
+    filepath = user_dir / unique_filename
+    
     with open(filepath, "wb") as f:
         f.write(file_content)
     
     # Process file
     file_data = file_processor.extract_text(str(filepath), file.content_type)
     
-    # Create file record
+    # Create file record - file belongs to user, not session
     file_record = FileModel(
-        session_id=session_id,
+        user_id=current_user.id,  # File belongs to user
+        session_id=session_id,  # Optional: session where uploaded
         tenant_id=tenant_id,
-        filename=file.filename,
+        filename=file.filename,  # Keep original filename
         filepath=str(filepath),
         mime_type=file.content_type,
         metadata=file_data["metadata"],
@@ -94,73 +105,62 @@ async def upload_file(
                 documents=[text_content],
                 metadatas=[
                     {
-                        "session_id": str(session_id),
+                        "user_id": str(current_user.id),  # Store user_id instead of session_id
                         "file_id": str(file_record.id),
                         "filename": file.filename,
+                        "session_id": str(session_id) if session_id else None,  # Optional: keep for backward compatibility
                     }
                 ],
             )
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"File embedding stored: {file.filename}, session: {session_id}, text length: {len(file_data['text'])}")
+            logger.info(f"File embedding stored: {file.filename}, user: {current_user.id}, text length: {len(file_data['text'])}")
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error storing file embedding: {e}")
+            logger.error(f"Error storing file embedding: {e}", exc_info=True)
             # Continue even if embedding fails
     else:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.warning(f"No text extracted from file: {file.filename}")
     
-    return file_record
+    return FileSchema(
+        id=file_record.id,
+        user_id=file_record.user_id,
+        session_id=file_record.session_id,
+        filename=file_record.filename,
+        filepath=file_record.filepath,
+        mime_type=file_record.mime_type,
+        uploaded_at=file_record.uploaded_at,
+        metadata=file_record.session_metadata or {},
+    )
 
 
-@router.get("/session/{session_id}", response_model=List[FileSchema])
-async def get_session_files(
-    session_id: UUID,
+@router.get("/", response_model=List[FileSchema])
+async def get_user_files(
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
     current_user = Depends(get_current_user),
 ):
-    """Get all files for a session (for current tenant and user)"""
+    """Get all files for the current user (for current tenant)"""
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"📁 Getting files for session {session_id} (user: {current_user.email})")
-    
-    # Verify session belongs to tenant AND user
-    session_result = await db.execute(
-        select(SessionModel).where(
-            SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id,
-            SessionModel.user_id == current_user.id
-        )
-    )
-    session = session_result.scalar_one_or_none()
-    if not session:
-        logger.warning(f"   Session {session_id} not found for user {current_user.email}")
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    logger.info(f"   Session found, retrieving files...")
+    logger.info(f"📁 Getting files for user {current_user.email}")
     
     try:
         result = await db.execute(
             select(FileModel)
             .where(
-                FileModel.session_id == session_id,
+                FileModel.user_id == current_user.id,
                 FileModel.tenant_id == tenant_id
             )
             .order_by(FileModel.uploaded_at.desc())
         )
         files = result.scalars().all()
-        logger.info(f"   Found {len(files)} files for session {session_id}")
+        logger.info(f"   Found {len(files)} files for user {current_user.email}")
     except Exception as e:
         logger.error(f"   Error querying files: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error retrieving files: {str(e)}")
-    # Map session_metadata to metadata for response
+    
     return [
         FileSchema(
             id=f.id,
+            user_id=f.user_id,
             session_id=f.session_id,
             filename=f.filename,
             filepath=f.filepath,
@@ -172,17 +172,35 @@ async def get_session_files(
     ]
 
 
+@router.get("/session/{session_id}", response_model=List[FileSchema])
+async def get_session_files(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    current_user = Depends(get_current_user),
+):
+    """Get all files for a session (for current tenant and user) - DEPRECATED: returns user files"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning(f"⚠️  get_session_files called - deprecated endpoint, using user files instead")
+    
+    # For backward compatibility, return user files (files are now user-scoped)
+    return await get_user_files(db=db, tenant_id=tenant_id, current_user=current_user)
+
+
 @router.get("/id/{file_id}", response_model=FileSchema)
 async def get_file(
     file_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user = Depends(get_current_user),
 ):
-    """Get a file by ID (for current tenant)"""
+    """Get a file by ID (for current tenant and user)"""
     result = await db.execute(
         select(FileModel).where(
             FileModel.id == file_id,
-            FileModel.tenant_id == tenant_id
+            FileModel.tenant_id == tenant_id,
+            FileModel.user_id == current_user.id  # Verify ownership
         )
     )
     file = result.scalar_one_or_none()
@@ -193,6 +211,7 @@ async def get_file(
     # Map session_metadata to metadata for response
     return FileSchema(
         id=file.id,
+        user_id=file.user_id,
         session_id=file.session_id,
         filename=file.filename,
         filepath=file.filepath,
@@ -208,12 +227,14 @@ async def delete_file(
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user = Depends(get_current_user),
 ):
-    """Delete a file (for current tenant)"""
+    """Delete a file (for current tenant and user - ownership required)"""
     result = await db.execute(
         select(FileModel).where(
             FileModel.id == file_id,
-            FileModel.tenant_id == tenant_id
+            FileModel.tenant_id == tenant_id,
+            FileModel.user_id == current_user.id  # Verify ownership
         )
     )
     file = result.scalar_one_or_none()
@@ -305,8 +326,28 @@ async def delete_file(
                 except Exception as e2:
                     logger.debug(f"Could not delete by file_id metadata {file_id}: {e1}, {e2}")
         
-        # Strategy 4: Delete by session_id and file_id combination
+        # Strategy 4: Delete by user_id and file_id combination (preferred method now)
         if not deleted_from_chroma:
+            try:
+                # ChromaDB where clause with multiple conditions
+                file_collection.delete(
+                    where={"$and": [{"user_id": {"$eq": str(file.user_id)}}, {"file_id": {"$eq": str(file_id)}}]}
+                )
+                logger.info(f"Deleted file embeddings by user_id and file_id ($and): {file.user_id}, {file_id}")
+                deleted_from_chroma = True
+            except Exception as e1:
+                # Try with simple equality
+                try:
+                    file_collection.delete(
+                        where={"user_id": str(file.user_id), "file_id": str(file_id)}
+                    )
+                    logger.info(f"Deleted file embeddings by user_id and file_id (simple): {file.user_id}, {file_id}")
+                    deleted_from_chroma = True
+                except Exception as e2:
+                    logger.debug(f"Could not delete by user_id and file_id: {e1}, {e2}")
+        
+        # Strategy 5: Delete by session_id and file_id combination (backward compatibility)
+        if not deleted_from_chroma and file.session_id:
             try:
                 # ChromaDB where clause with multiple conditions
                 file_collection.delete(
@@ -416,26 +457,16 @@ async def cleanup_orphan_embeddings(
         raise HTTPException(status_code=500, detail=f"Error cleaning up orphaned embeddings: {str(e)}")
 
 
-@router.post("/{session_id}/search")
+@router.post("/search")
 async def search_files(
-    session_id: UUID,
     query: str,
     n_results: int = 5,
     db: AsyncSession = Depends(get_db),
     memory: MemoryManager = Depends(get_memory_manager),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user = Depends(get_current_user),
 ):
-    """Search files in a session using semantic search (for current tenant)"""
-    # Verify session belongs to tenant
-    session_result = await db.execute(
-        select(SessionModel).where(
-            SessionModel.id == session_id,
-            SessionModel.tenant_id == tenant_id
-        )
-    )
-    if not session_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Session not found")
-    
+    """Search user files using semantic search (for current tenant and user)"""
     # Get tenant-specific collection
     file_collection = memory._get_collection("file_embeddings", tenant_id)
     
@@ -444,7 +475,7 @@ async def search_files(
     results = file_collection.query(
         query_embeddings=[query_embedding],
         n_results=n_results,
-        where={"session_id": str(session_id)},
+        where={"user_id": str(current_user.id)},  # Files are user-scoped now
     )
     
     file_ids = [
