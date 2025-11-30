@@ -74,10 +74,16 @@ def init_clients():
     if _planner_client is None:
         try:
             if settings.llm_provider == "gemini":
-                from app.core.gemini_client import GeminiClient
                 planner_model = settings.gemini_planner_model or settings.gemini_model
-                logger.info(f"Initializing Gemini client (planner): model={planner_model}")
-                _planner_client = GeminiClient(model=planner_model)
+                # Check if Vertex AI is enabled (same logic as main client)
+                if settings.gemini_use_vertex_ai:
+                    from app.core.vertex_ai_client import VertexAIClient
+                    logger.info(f"Initializing Vertex AI client (planner): model={planner_model}, project={settings.google_cloud_project_id}")
+                    _planner_client = VertexAIClient(model=planner_model)
+                else:
+                    from app.core.gemini_client import GeminiClient
+                    logger.info(f"Initializing Gemini client (planner): model={planner_model}")
+                    _planner_client = GeminiClient(model=planner_model)
             else:
                 # Use planner URL if set, otherwise fallback to main Ollama URL (NOT background LLM)
                 # Planner should use main LLM (Ollama) as default, not background LLM (which might be llama.cpp)

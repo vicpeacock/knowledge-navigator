@@ -909,8 +909,11 @@ class ToolManager:
                 .where(Integration.tenant_id == tenant_id)
             )
             from sqlalchemy import or_
+            # Prefer user-specific integration, but allow service integration as fallback
             if user_id is not None:
+                # Order by user_id IS NOT NULL DESC to prefer user integrations over service ones
                 query = query.where(or_(Integration.user_id == user_id, Integration.user_id.is_(None)))
+                query = query.order_by(Integration.user_id.isnot(None).desc())  # User integrations first
 
             result = await db.execute(query.limit(1))
             integration = result.scalar_one_or_none()

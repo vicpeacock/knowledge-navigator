@@ -801,10 +801,12 @@ async def analyze_message_for_plan(
         logger.info(f"   Prompt length: {len(analysis_prompt + user_request_section)}")
         logger.info(f"   Context messages: {len(session_context[-3:]) if session_context else 0}")
         
+        # Disable safety filters for planner - it generates structured JSON plans, not user-facing content
         response = await client.generate(
             prompt=analysis_prompt + f"\n\nRichiesta utente:\n{request.message}",
             context=session_context[-3:] if session_context else None,
             system=system_prompt,
+            disable_safety_filters=True,  # Planner generates structured JSON, not user content
         )
         
         logger.info(f"✅ Planner response received: type={type(response)}")

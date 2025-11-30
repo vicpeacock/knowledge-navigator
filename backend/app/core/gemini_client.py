@@ -7,6 +7,7 @@ All methods maintain the same signature and return format as OllamaClient for se
 import logging
 from typing import List, Dict, Optional, Any
 from app.core.config import settings
+from app.core.system_prompts import get_base_self_awareness_prompt
 import json
 import time
 
@@ -67,6 +68,7 @@ class GeminiClient:
         context: Optional[List[Dict[str, str]]] = None,
         system: Optional[str] = None,
         stream: bool = False,
+        disable_safety_filters: bool = False,  # Allow disabling safety filters for structured outputs like plans
     ) -> Dict[str, Any]:
         """
         Generate a response from Gemini (compatible with OllamaClient.generate)
@@ -133,7 +135,8 @@ class GeminiClient:
                     # Use the same logic as generate_with_context() - try SafetySetting objects first
                     HarmCategory = genai_types.HarmCategory
                     HarmBlockThreshold = genai_types.HarmBlockThreshold
-                    threshold_to_use = HarmBlockThreshold.BLOCK_ONLY_HIGH
+                    # Use BLOCK_NONE if safety filters are disabled (for structured outputs like plans)
+                    threshold_to_use = HarmBlockThreshold.BLOCK_NONE if disable_safety_filters else HarmBlockThreshold.BLOCK_ONLY_HIGH
                     
                     # Try to use SafetySetting objects (preferred method, same as generate_with_context)
                     SafetySetting = None
@@ -398,10 +401,15 @@ When the user asks a question, use the appropriate tool to find the answer. Resp
         
         enhanced_system = system_prompt or base_system_prompt
         
+        # Add self-awareness prompt
+        self_awareness_prompt = get_base_self_awareness_prompt()
+        
         # Add time/location context if provided
         time_context = getattr(self, '_time_context', None)
         if time_context:
-            enhanced_system = time_context + "\n\n" + enhanced_system
+            enhanced_system = self_awareness_prompt + "\n\n" + time_context + "\n\n" + enhanced_system
+        else:
+            enhanced_system = self_awareness_prompt + "\n\n" + enhanced_system
         
         if retrieved_memory:
             # Format memory context - neutral, factual language (no imperatives)

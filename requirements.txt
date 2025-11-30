@@ -48,6 +48,9 @@ google-cloud-aiplatform>=1.38.0  # Vertex AI client library (alternativa)
 # MCP (Model Context Protocol) - Official library
 mcp>=1.20.0
 
+# File watching for auto-reindexing internal knowledge
+watchdog>=3.0.0
+
 # Calendar integrations
 google-api-python-client==2.108.0
 google-auth-httplib2==0.1.1

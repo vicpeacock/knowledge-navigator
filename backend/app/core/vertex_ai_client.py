@@ -7,6 +7,7 @@ Vertex AI may have different safety policies and could resolve blocking issues.
 import logging
 from typing import List, Dict, Optional, Any
 from app.core.config import settings
+from app.core.system_prompts import get_base_self_awareness_prompt
 import json
 import time
 
@@ -236,6 +237,7 @@ class VertexAIClient:
         context: Optional[List[Dict[str, str]]] = None,
         system: Optional[str] = None,
         stream: bool = False,
+        disable_safety_filters: bool = False,  # Allow disabling safety filters for structured outputs like plans
     ) -> Dict[str, Any]:
         """Generate a response from Vertex AI (compatible with GeminiClient.generate)
         """
@@ -259,8 +261,8 @@ class VertexAIClient:
             # Simple prompt without context
             contents = prompt
         
-        # Create safety settings
-        safety_settings = self._create_safety_settings(block_none=False)
+        # Create safety settings - use BLOCK_NONE if safety filters are disabled (for structured outputs like plans)
+        safety_settings = self._create_safety_settings(block_none=disable_safety_filters)
         
         # Prepare config
         config = {}
@@ -542,15 +544,25 @@ NON rispondere con informazioni generiche o ipotetiche. Usa SEMPRE i tool approp
                 else:
                     config["system_instruction"] = memory_context
             
+            # Add self-awareness prompt
+            self_awareness_prompt = get_base_self_awareness_prompt()
+            
             # Add time/location context if provided (like GeminiClient)
             time_context = getattr(self, '_time_context', None)
             if time_context:
-                # Combine time_context with system_instruction
+                # Combine self-awareness, time_context, and system_instruction
                 current_system = config.get("system_instruction", "")
                 if current_system:
-                    config["system_instruction"] = time_context + "\n\n" + current_system
+                    config["system_instruction"] = self_awareness_prompt + "\n\n" + time_context + "\n\n" + current_system
                 else:
-                    config["system_instruction"] = time_context
+                    config["system_instruction"] = self_awareness_prompt + "\n\n" + time_context
+            else:
+                # Add self-awareness prompt even if no time_context
+                current_system = config.get("system_instruction", "")
+                if current_system:
+                    config["system_instruction"] = self_awareness_prompt + "\n\n" + current_system
+                else:
+                    config["system_instruction"] = self_awareness_prompt
             
             safety_settings = self._create_safety_settings(block_none=disable_safety_filters)
             config["safety_settings"] = safety_settings

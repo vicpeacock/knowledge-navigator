@@ -982,6 +982,7 @@ export default function ChatInterface({ sessionId, readOnly = false }: ChatInter
                           {message.metadata.memory_used.medium_term.length > 0 ? 'MT' : ''}{' '}
                           {message.metadata.memory_used.long_term.length > 0 ? 'LT' : ''}{' '}
                           {message.metadata.memory_used.files?.length > 0 ? `Files(${message.metadata.memory_used.files.length})` : ''}
+                          {message.metadata.memory_used.internal_knowledge ? `IK(${message.metadata.memory_used.internal_knowledge})` : ''}
                           {' '}
                         </>
                       )}

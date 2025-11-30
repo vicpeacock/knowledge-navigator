@@ -1,6 +1,7 @@
 import httpx
 from typing import List, Dict, Optional, Any
 from app.core.config import settings
+from app.core.system_prompts import get_base_self_awareness_prompt
 import json
 
 
@@ -143,10 +144,15 @@ Respond naturally and directly based on the data obtained from tools. Use clear,
         
         enhanced_system = system_prompt or base_system_prompt
         
+        # Add self-awareness prompt
+        self_awareness_prompt = get_base_self_awareness_prompt()
+        
         # Add time/location context if provided
         time_context = getattr(self, '_time_context', None)
         if time_context:
-            enhanced_system = time_context + "\n\n" + enhanced_system
+            enhanced_system = self_awareness_prompt + "\n\n" + time_context + "\n\n" + enhanced_system
+        else:
+            enhanced_system = self_awareness_prompt + "\n\n" + enhanced_system
         
         if retrieved_memory:
             # Format memory context more clearly

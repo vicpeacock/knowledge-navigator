@@ -1249,6 +1249,26 @@ async def chat(
         memory_used["medium_term"] = medium_mem
         retrieved_memory.extend(medium_mem)
         
+        # Always retrieve internal knowledge (lightweight, LLM will decide if relevant)
+        # This allows the LLM to intelligently determine if the query is meta-level
+        # or user-task related, rather than using rigid keyword matching
+        internal_knowledge = await memory.retrieve_internal_knowledge(
+            query=request.message,
+            n_results=2,  # Lightweight retrieval - only top 2 results
+            tenant_id=None,  # Will use shared collection
+        )
+        if internal_knowledge:
+            # Format internal knowledge for context
+            # LLM will use this only if relevant to the query
+            formatted_internal = []
+            for item in internal_knowledge:
+                doc_name = item["metadata"].get("document", "unknown")
+                content = item["content"]
+                formatted_internal.append(f"[Documentazione Interna: {doc_name}]\n{content}")
+            retrieved_memory.extend(formatted_internal)
+            memory_used["internal_knowledge"] = len(internal_knowledge)
+            logger.info(f"🔍 Retrieved {len(internal_knowledge)} internal knowledge chunks (LLM will decide relevance)")
+        
         # Long-term memory (from archived sessions)
         # Use include_metadata=True to get session information
         long_mem_raw = await memory.retrieve_long_term_memory(

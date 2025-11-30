@@ -1308,6 +1308,7 @@ async def debug_mcp_connection(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant_id: UUID = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
     """Debug endpoint to see raw MCP responses (for current tenant)"""
     import logging

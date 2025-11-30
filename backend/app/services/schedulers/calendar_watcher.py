@@ -105,11 +105,40 @@ class CalendarWatcher:
         
         # Setup calendar service per questa integrazione
         try:
+            # Validate encryption key
+            if not settings.credentials_encryption_key:
+                logger.error(
+                    f"Missing credentials_encryption_key in settings for integration {integration.id}"
+                )
+                return events_created
+            
+            # Validate credentials exist
+            if not integration.credentials_encrypted:
+                logger.error(
+                    f"No encrypted credentials found for integration {integration.id}. "
+                    f"User needs to reconnect Calendar integration."
+                )
+                return events_created
+            
             # Decrypt credentials
-            credentials = _decrypt_credentials(
-                integration.credentials_encrypted,
-                settings.credentials_encryption_key
-            )
+            try:
+                credentials = _decrypt_credentials(
+                    integration.credentials_encrypted,
+                    settings.credentials_encryption_key
+                )
+            except Exception as decrypt_error:
+                # More detailed error logging
+                error_type = type(decrypt_error).__name__
+                error_msg = str(decrypt_error)
+                logger.error(
+                    f"Error decrypting credentials for integration {integration.id}: "
+                    f"{error_type}: {error_msg}. "
+                    f"Key length: {len(settings.credentials_encryption_key) if settings.credentials_encryption_key else 0}, "
+                    f"Credentials length: {len(integration.credentials_encrypted) if integration.credentials_encrypted else 0}. "
+                    f"User needs to reconnect Calendar integration.",
+                    exc_info=True
+                )
+                return events_created
             
             # Setup Google Calendar service
             await self.calendar_service.setup_google(
@@ -122,10 +151,14 @@ class CalendarWatcher:
             if "decrypting credentials" in error_msg.lower():
                 logger.error(
                     f"Error decrypting credentials for integration {integration.id}: {error_msg}. "
-                    f"User needs to reconnect Calendar integration."
+                    f"User needs to reconnect Calendar integration.",
+                    exc_info=True
                 )
             else:
-                logger.error(f"Error setting up Calendar for integration {integration.id}: {error_msg}")
+                logger.error(
+                    f"Error setting up Calendar for integration {integration.id}: {error_msg}",
+                    exc_info=True
+                )
             return events_created
         except IntegrationAuthError as e:
             logger.warning(f"Integration {integration.id} auth failed: {e}")

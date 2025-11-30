@@ -12,6 +12,7 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from uuid import UUID
@@ -63,8 +64,20 @@ class MemoryManager:
         
         # In-memory short-term storage
         self.short_term_memory: Dict[UUID, Dict[str, Any]] = {}
-    def _get_collection_name(self, base_name: str, tenant_id: Optional[UUID] = None) -> str:
-        """Generate tenant-specific collection name"""
+    def _get_collection_name(self, base_name: str, tenant_id: Optional[UUID] = None, shared: bool = False) -> str:
+        """
+        Generate collection name.
+        
+        Args:
+            base_name: Base name of the collection
+            tenant_id: Optional tenant ID (defaults to self.tenant_id)
+            shared: If True, always use shared tenant (00000000-0000-0000-0000-000000000000)
+                    Used for system-wide collections like internal_knowledge
+        """
+        # For shared collections (like internal_knowledge), always use default tenant
+        if shared:
+            return f"{base_name}_00000000_0000_0000_0000_000000000000"
+        
         effective_tenant_id = tenant_id or self.tenant_id
         if effective_tenant_id:
             return f"{base_name}_{str(effective_tenant_id).replace('-', '_')}"
@@ -72,9 +85,16 @@ class MemoryManager:
             return f"{base_name}_00000000_0000_0000_0000_000000000000"
 
     
-    def _get_collection(self, base_name: str, tenant_id: Optional[UUID] = None):
-        """Get or create tenant-specific collection"""
-        collection_name = self._get_collection_name(base_name, tenant_id)
+    def _get_collection(self, base_name: str, tenant_id: Optional[UUID] = None, shared: bool = False):
+        """
+        Get or create collection.
+        
+        Args:
+            base_name: Base name of the collection
+            tenant_id: Optional tenant ID (defaults to self.tenant_id)
+            shared: If True, use shared collection (for system-wide data like internal_knowledge)
+        """
+        collection_name = self._get_collection_name(base_name, tenant_id, shared=shared)
         
         # Check cache first
         if collection_name in self._collections_cache:
@@ -620,7 +640,7 @@ class MemoryManager:
                     query_embeddings=[query_embedding],
                     n_results=n_results,
                     where=where if where else None,
-                    include=["documents", "metadatas", "ids"] if include_metadata else ["documents"],
+                    include=["documents", "metadatas"] if include_metadata else ["documents"],
                 )
             )
             
@@ -635,13 +655,11 @@ class MemoryManager:
             
             # Return List[Dict] with metadata
             metadatas = results.get("metadatas", [[]])[0] or []
-            ids = results.get("ids", [[]])[0] or []
             
             # Extract session info from document content if available (format: [SESSION:...])
             result_list = []
             for idx, doc in enumerate(documents):
                 metadata = metadatas[idx] if idx < len(metadatas) else {}
-                doc_id = ids[idx] if idx < len(ids) else None
                 
                 # Try to extract session info from document content
                 session_id = None
@@ -672,7 +690,6 @@ class MemoryManager:
                         "session_status": session_status,
                         "learned_from_sessions": learned_from_sessions,
                         "importance_score": metadata.get("importance_score"),
-                        "embedding_id": doc_id,
                     }
                 }
                 result_list.append(result_dict)
@@ -688,6 +705,219 @@ class MemoryManager:
             else:
                 logger.error(f"Error in retrieve_long_term_memory: {e}", exc_info=True)
             return []
+
+    @property
+    def internal_knowledge_collection(self):
+        """Get shared internal knowledge collection (same for all tenants)"""
+        return self._get_collection("internal_knowledge", shared=True)
+
+    async def retrieve_internal_knowledge(
+        self,
+        query: str,
+        n_results: int = 5,
+        tenant_id: Optional[UUID] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve internal knowledge documents (for self-awareness RAG).
+        
+        Args:
+            query: Query string for semantic search
+            n_results: Number of results to return
+            tenant_id: Optional tenant ID (defaults to self.tenant_id)
+        
+        Returns:
+            List[Dict[str, Any]] with content and metadata, where each dict contains:
+                - "content": str - The document chunk content
+                - "metadata": dict - Metadata including document name, chunk_index, type
+        """
+        import asyncio
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Run embedding generation in thread pool
+            loop = asyncio.get_event_loop()
+            query_embedding = await loop.run_in_executor(
+                None,
+                self.embedding_service.generate_embedding,
+                query
+            )
+            
+            # Internal knowledge is shared across all tenants - always use shared collection
+            collection = self._get_collection("internal_knowledge", shared=True)
+            
+            if collection is None:
+                logger.warning(f"⚠️  Could not get/create shared internal_knowledge collection")
+                return []
+            
+            # Query with filter for internal_knowledge type
+            where = {"type": {"$eq": "internal_knowledge"}}
+            
+            results = await loop.run_in_executor(
+                None,
+                lambda: collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=n_results,
+                    where=where,
+                    include=["documents", "metadatas"],
+                )
+            )
+            
+            if not results:
+                return []
+            
+            documents = results.get("documents", [[]])[0] or []
+            metadatas = results.get("metadatas", [[]])[0] or []
+            
+            result_list = []
+            for idx, doc in enumerate(documents):
+                metadata = metadatas[idx] if idx < len(metadatas) else {}
+                
+                result_dict = {
+                    "content": doc,
+                    "metadata": {
+                        "document": metadata.get("document", "unknown"),
+                        "chunk_index": metadata.get("chunk_index"),
+                        "type": metadata.get("type", "internal_knowledge"),
+                        "importance_score": metadata.get("importance_score"),
+                    }
+                }
+                result_list.append(result_dict)
+            
+            return result_list
+            
+        except Exception as e:
+            logger.error(f"Error in retrieve_internal_knowledge: {e}", exc_info=True)
+            return []
+
+    async def reindex_internal_document(
+        self,
+        filename: str,
+        tenant_id: Optional[UUID] = None,
+    ) -> tuple[int, int]:
+        """
+        Re-index a single internal knowledge document.
+        
+        This method:
+        1. Deletes all existing chunks for the document
+        2. Re-indexes the entire document from file
+        
+        Args:
+            filename: Name of the INTERNAL_*.md file (e.g., "INTERNAL_MEMORY_SYSTEM.md")
+            tenant_id: Optional tenant ID (defaults to self.tenant_id)
+        
+        Returns:
+            Tuple[int, int]: (chunks_indexed, chunks_deleted)
+        """
+        import asyncio
+        import logging
+        from datetime import datetime
+        logger = logging.getLogger(__name__)
+        
+        # Internal knowledge is shared across all tenants
+        collection = self._get_collection("internal_knowledge", shared=True)
+        
+        if collection is None:
+            logger.error(f"❌ Could not get shared internal_knowledge collection")
+            return (0, 0)
+        
+        try:
+            # Step 1: Delete existing chunks for this document
+            logger.info(f"🗑️  Deleting existing chunks for {filename}...")
+            
+            # Query to find all chunks for this document
+            loop = asyncio.get_event_loop()
+            # collection.get() returns ids by default, no need to specify in include
+            existing_results = await loop.run_in_executor(
+                None,
+                lambda: collection.get(
+                    where={"document": {"$eq": filename}, "type": {"$eq": "internal_knowledge"}},
+                )
+            )
+            
+            existing_ids = existing_results.get("ids", []) if existing_results else []
+            chunks_deleted = len(existing_ids)
+            
+            if existing_ids:
+                await loop.run_in_executor(
+                    None,
+                    lambda: collection.delete(ids=existing_ids)
+                )
+                logger.info(f"✅ Deleted {chunks_deleted} existing chunks")
+            
+            # Step 2: Read and re-index the document
+            docs_dir = Path(__file__).parent.parent.parent / "docs"
+            filepath = docs_dir / filename
+            
+            if not filepath.exists():
+                logger.error(f"❌ File not found: {filepath}")
+                return (0, chunks_deleted)
+            
+            content = filepath.read_text(encoding="utf-8")
+            
+            if not content.strip():
+                logger.warning(f"⚠️  {filename} is empty")
+                return (0, chunks_deleted)
+            
+            # Chunk the document (same logic as index_internal_knowledge.py)
+            CHUNK_SIZE = 1000
+            CHUNK_OVERLAP = 200
+            
+            chunks = []
+            start = 0
+            while start < len(content):
+                end = start + CHUNK_SIZE
+                chunk = content[start:end]
+                
+                if end < len(content):
+                    last_period = chunk.rfind('.')
+                    last_newline = chunk.rfind('\n')
+                    break_point = max(last_period, last_newline)
+                    
+                    if break_point > CHUNK_SIZE * 0.5:
+                        chunk = chunk[:break_point + 1]
+                        end = start + break_point + 1
+                
+                chunks.append(chunk.strip())
+                start = end - CHUNK_OVERLAP
+            
+            logger.info(f"📝 Re-indexing {len(chunks)} chunks...")
+            
+            # Index each chunk
+            chunks_indexed = 0
+            for i, chunk in enumerate(chunks):
+                if not chunk.strip():
+                    continue
+                
+                chunk_content = f"[Document: {filename}]\n\n{chunk}"
+                embedding = self.embedding_service.generate_embedding(chunk_content)
+                embedding_id = f"internal_{filename}_{i}_{datetime.now().isoformat()}"
+                
+                await loop.run_in_executor(
+                    None,
+                    lambda: collection.add(
+                        ids=[embedding_id],
+                        embeddings=[embedding],
+                        documents=[chunk_content],
+                        metadatas=[
+                            {
+                                "type": "internal_knowledge",
+                                "document": filename,
+                                "chunk_index": i,
+                                "importance_score": "1.0",
+                            }
+                        ],
+                    )
+                )
+                
+                chunks_indexed += 1
+            
+            logger.info(f"✅ Re-indexed {chunks_indexed} chunks for {filename}")
+            return (chunks_indexed, chunks_deleted)
+            
+        except Exception as e:
+            logger.error(f"Error reindexing {filename}: {e}", exc_info=True)
+            return (0, 0)
 
     async def index_session_content(
         self,
@@ -708,10 +938,12 @@ class MemoryManager:
         Returns:
             bool: True if indexing was successful, False otherwise
         """
+        import logging
         from sqlalchemy import select
         from app.models.database import Session as SessionModel, Message as MessageModel
         from datetime import datetime, timezone
         
+        logger = logging.getLogger(__name__)
         logger.info(f"📝 Indexing session {session_id} into Long Term Memory...")
         
         try:

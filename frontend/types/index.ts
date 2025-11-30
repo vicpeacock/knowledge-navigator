@@ -62,6 +62,7 @@ export interface ChatResponse {
     medium_term: string[]
     long_term: string[]
     files: string[]
+    internal_knowledge?: number // Number of internal knowledge chunks retrieved (for meta queries)
   }
   tools_used: string[]
   tool_details?: ToolExecutionDetail[]
