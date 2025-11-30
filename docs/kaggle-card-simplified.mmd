@@ -1,0 +1,27 @@
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#2563eb', 'primaryTextColor':'#ffffff', 'primaryBorderColor':'#1e40af', 'lineColor':'#3b82f6', 'secondaryColor':'#60a5fa', 'tertiaryColor':'#93c5fd', 'fontSize':'16px'}}}%%
+graph LR
+    User[👤 User] --> Frontend[🌐 Next.js<br/>Frontend]
+    Frontend --> Backend[⚙️ FastAPI<br/>Backend]
+    
+    Backend --> LangGraph[🔄 LangGraph<br/>Multi-Agent]
+    LangGraph --> Agents[🤖 Agents<br/>Main, Knowledge, Planner]
+    
+    Agents --> Memory[💾 3-Tier Memory<br/>Short, Medium, Long]
+    Memory --> ChromaDB[🔍 ChromaDB<br/>Vector Search]
+    
+    Agents --> Tools[🛠️ Tools<br/>MCP, Google, Web]
+    
+    Backend --> VertexAI[🤖 Vertex AI<br/>Gemini Flash]
+    Backend --> PostgreSQL[(🗄️ PostgreSQL)]
+    
+    style User fill:#3b82f6,stroke:#1e40af,color:#fff,font-size:18px
+    style Frontend fill:#60a5fa,stroke:#3b82f6,color:#fff,font-size:18px
+    style Backend fill:#2563eb,stroke:#1e40af,color:#fff,font-size:18px
+    style LangGraph fill:#10b981,stroke:#059669,color:#fff,font-size:18px
+    style Agents fill:#8b5cf6,stroke:#7c3aed,color:#fff,font-size:18px
+    style Memory fill:#f59e0b,stroke:#d97706,color:#fff,font-size:18px
+    style ChromaDB fill:#f59e0b,stroke:#d97706,color:#fff,font-size:18px
+    style Tools fill:#ec4899,stroke:#db2777,color:#fff,font-size:18px
+    style VertexAI fill:#ef4444,stroke:#dc2626,color:#fff,font-size:18px
+    style PostgreSQL fill:#14b8a6,stroke:#0d9488,color:#fff,font-size:18px
+

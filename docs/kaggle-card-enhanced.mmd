@@ -1,0 +1,55 @@
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#2563eb', 'primaryTextColor':'#ffffff', 'primaryBorderColor':'#1e40af', 'lineColor':'#3b82f6', 'secondaryColor':'#60a5fa', 'tertiaryColor':'#93c5fd', 'fontSize':'18px', 'fontFamily':'Arial, sans-serif'}}}%%
+graph TB
+    subgraph "Knowledge Navigator"
+        direction TB
+        User[👤 User] --> Frontend[🌐 Next.js Frontend]
+        Frontend -->|REST API| Backend[⚙️ FastAPI Backend]
+        
+        Backend --> LangGraph[🔄 LangGraph Orchestrator]
+        
+        LangGraph --> MainAgent[🤖 Main Agent]
+        LangGraph --> KnowledgeAgent[📚 Knowledge Agent]
+        LangGraph --> PlannerAgent[📋 Planner Agent]
+        
+        KnowledgeAgent --> Memory[💾 Multi-Tier Memory System]
+        Memory -->|Short-Term| ShortMem[💭 Session Context]
+        Memory -->|Medium-Term| MediumMem[📝 30-day Context]
+        Memory -->|Long-Term| LongMem[💾 Persistent Knowledge]
+        
+        LongMem --> ChromaDB[(🔍 ChromaDB<br/>Vector Database)]
+        
+        MainAgent --> Tools[🛠️ Tool Integration]
+        Tools --> MCP[MCP Tools]
+        Tools --> Google[Google Workspace]
+        Tools --> Web[Web Search]
+        
+        Backend --> VertexAI[🤖 Vertex AI<br/>Gemini 2.5 Flash]
+        Backend --> PostgreSQL[(🗄️ PostgreSQL<br/>Supabase)]
+        
+        Backend --> Observability[📊 Observability]
+        Observability --> Tracing[OpenTelemetry]
+        Observability --> Metrics[Prometheus]
+    end
+    
+    style User fill:#3b82f6,stroke:#1e40af,color:#fff
+    style Frontend fill:#60a5fa,stroke:#3b82f6,color:#fff
+    style Backend fill:#2563eb,stroke:#1e40af,color:#fff
+    style LangGraph fill:#10b981,stroke:#059669,color:#fff
+    style MainAgent fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style KnowledgeAgent fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style PlannerAgent fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style Memory fill:#f59e0b,stroke:#d97706,color:#fff
+    style ShortMem fill:#fbbf24,stroke:#f59e0b,color:#fff
+    style MediumMem fill:#fbbf24,stroke:#f59e0b,color:#fff
+    style LongMem fill:#fbbf24,stroke:#f59e0b,color:#fff
+    style ChromaDB fill:#14b8a6,stroke:#0d9488,color:#fff
+    style Tools fill:#ec4899,stroke:#db2777,color:#fff
+    style MCP fill:#ec4899,stroke:#db2777,color:#fff
+    style Google fill:#ec4899,stroke:#db2777,color:#fff
+    style Web fill:#ec4899,stroke:#db2777,color:#fff
+    style VertexAI fill:#ef4444,stroke:#dc2626,color:#fff
+    style PostgreSQL fill:#14b8a6,stroke:#0d9488,color:#fff
+    style Observability fill:#6366f1,stroke:#4f46e5,color:#fff
+    style Tracing fill:#818cf8,stroke:#6366f1,color:#fff
+    style Metrics fill:#818cf8,stroke:#6366f1,color:#fff
+
