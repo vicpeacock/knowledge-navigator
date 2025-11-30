@@ -236,8 +236,30 @@ function build_env_vars_string() {
     echo "$ENV_VARS"
 }
 
+function setup_artifact_registry() {
+    # Get PROJECT ID (not number) for Artifact Registry
+    # If GCP_PROJECT_ID is a number, convert it to PROJECT ID
+    if [[ "$GCP_PROJECT_ID" =~ ^[0-9]+$ ]]; then
+        GCP_PROJECT_ID_NAME=$(gcloud projects describe "$GCP_PROJECT_ID" --format="value(projectId)" 2>/dev/null || echo "$GCP_PROJECT_ID")
+        log_info "Converted project number to ID: ${GCP_PROJECT_ID_NAME}"
+    else
+        GCP_PROJECT_ID_NAME="$GCP_PROJECT_ID"
+    fi
+    
+    # Artifact Registry configuration
+    ARTIFACT_REGISTRY_LOCATION="${GCP_REGION:-us-central1}"
+    ARTIFACT_REGISTRY_REPO="knowledge-navigator-docker"
+    ARTIFACT_REGISTRY_URL="${ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${GCP_PROJECT_ID_NAME}/${ARTIFACT_REGISTRY_REPO}"
+    log_info "Using Artifact Registry: ${ARTIFACT_REGISTRY_URL}"
+    export ARTIFACT_REGISTRY_URL
+    export GCP_PROJECT_ID_NAME
+}
+
 function build_backend() {
     log_info "Building backend Docker image..."
+    
+    # Setup Artifact Registry variables
+    setup_artifact_registry
     
     cd "$PROJECT_ROOT"
     
@@ -248,36 +270,87 @@ function build_backend() {
         log_info "Using requirements-cloud.txt for cloud deployment"
     fi
     
+    # Build with timestamp tag first to avoid conflicts
+    TIMESTAMP_TAG=$(date +%Y%m%d-%H%M%S)
+    
     docker build \
         --platform linux/amd64 \
         -f Dockerfile.backend \
         --build-arg REQUIREMENTS_FILE="$REQUIREMENTS_FILE" \
-        -t gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:latest .
-    
-    docker tag gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:latest \
-        gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:$(date +%Y%m%d-%H%M%S)
+        -t ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-backend:${TIMESTAMP_TAG} \
+        -t ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-backend:latest .
     
     log_info "✅ Backend image built"
 }
 
 function push_backend() {
-    log_info "Pushing backend image to Google Container Registry..."
-    docker push gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:latest
-    log_info "✅ Backend image pushed"
+    # Setup Artifact Registry variables
+    setup_artifact_registry
+    
+    log_info "Pushing backend image to Artifact Registry (${ARTIFACT_REGISTRY_URL})..."
+    
+    # Push with timestamp tag first (less likely to have conflicts)
+    TIMESTAMP_TAG=$(docker images ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-backend --format "{{.Tag}}" | grep -E "^[0-9]{8}-[0-9]{6}$" | head -1 || echo "")
+    
+    if [ -z "$TIMESTAMP_TAG" ]; then
+        TIMESTAMP_TAG=$(date +%Y%m%d-%H%M%S)
+    fi
+    
+    log_info "Pushing timestamp tag: ${TIMESTAMP_TAG}"
+    if docker push ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-backend:${TIMESTAMP_TAG}; then
+        log_info "✅ Backend image pushed with timestamp tag"
+        
+        # Now push latest tag
+        log_info "Pushing latest tag..."
+        if docker push ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-backend:latest; then
+            log_info "✅ Backend image pushed successfully (both tags)"
+            return 0
+        else
+            log_warn "Failed to push 'latest' tag, but timestamp tag succeeded. Deployment will use timestamp tag."
+            return 0
+        fi
+    else
+        log_error "Failed to push timestamp tag. Trying latest tag..."
+        # Fallback: try pushing latest directly
+        if docker push ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-backend:latest; then
+            log_info "✅ Backend image pushed successfully (latest tag)"
+            return 0
+        else
+            log_error "Failed to push both tags"
+            return 1
+        fi
+    fi
 }
 
 function deploy_backend() {
     log_info "Deploying backend to Cloud Run..."
     
+    # Setup Artifact Registry variables
+    setup_artifact_registry
+    
     REGION="${GCP_REGION:-us-central1}"
     ENV_VARS=$(build_env_vars_string)
+    
+    # Use timestamp tag if latest push failed, otherwise use latest
+    IMAGE_TAG="latest"
+    TIMESTAMP_TAG=$(docker images ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-backend --format "{{.Tag}}" | grep -E "^[0-9]{8}-[0-9]{6}$" | head -1 || echo "")
+    if [ -n "$TIMESTAMP_TAG" ]; then
+        # Prefer latest, but use timestamp if latest doesn't exist
+        if docker manifest inspect ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-backend:latest >/dev/null 2>&1; then
+            IMAGE_TAG="latest"
+        else
+            IMAGE_TAG="${TIMESTAMP_TAG}"
+            log_info "Using timestamp tag for deployment: ${IMAGE_TAG}"
+        fi
+    fi
     
     log_debug "Environment variables: ${ENV_VARS:0:200}..."
     
     gcloud run deploy knowledge-navigator-backend \
-        --image gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-backend:latest \
+        --image ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-backend:${IMAGE_TAG} \
         --platform managed \
         --region "$REGION" \
+        --project "${GCP_PROJECT_ID_NAME}" \
         --allow-unauthenticated \
         --port 8000 \
         --memory 2Gi \

@@ -263,6 +263,9 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/metrics":
             return await call_next(request)
         
+        # Initialize logger at the beginning of the function
+        logger = logging.getLogger(__name__)
+        
         start_time = time.time()
         method = request.method
         path = request.url.path
@@ -287,7 +290,6 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 if frontend_trace_id:
                     set_trace_attribute("frontend.trace_id", frontend_trace_id)
                     # Log correlation for debugging
-                    logger = logging.getLogger(__name__)
                     logger.debug(f"Frontend trace ID received: {frontend_trace_id}")
                 
                 # Increment request counter

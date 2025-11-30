@@ -18,6 +18,8 @@ ARG REQUIREMENTS_FILE=requirements.txt
 COPY requirements.txt requirements.txt
 COPY ${REQUIREMENTS_FILE} requirements-target.txt
 # Use the target file, which may include -r requirements.txt
+# Set PATH during installation to avoid warnings
+ENV PATH=/root/.local/bin:$PATH
 RUN pip install --no-cache-dir --user -r requirements-target.txt
 
 # Stage finale - immagine runtime minimale
@@ -27,6 +29,7 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
     curl \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copia dipendenze Python dallo stage builder

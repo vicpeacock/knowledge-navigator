@@ -47,12 +47,40 @@ api.interceptors.request.use((config) => {
   }
   
   // Add X-Tenant-ID header if available (for development/testing)
+  // NOTE: Only use tenant_id from localStorage if it's a valid UUID
+  // If tenant_id is invalid or from wrong environment, don't send header (backend will use default)
   const tenantId = typeof window !== 'undefined'
     ? localStorage.getItem('tenant_id') || process.env.NEXT_PUBLIC_TENANT_ID
     : process.env.NEXT_PUBLIC_TENANT_ID
   
+  // Validate tenant_id format (UUID) before using it
+  // This prevents using invalid tenant IDs from previous sessions/environments
   if (tenantId) {
-    config.headers['X-Tenant-ID'] = tenantId
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (uuidRegex.test(tenantId)) {
+      // Only send if it's a valid UUID format
+      // Backend will validate if tenant exists, and fallback to default if not
+      config.headers['X-Tenant-ID'] = tenantId
+    } else {
+      // Invalid tenant_id format - remove it from localStorage silently
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('tenant_id')
+        console.warn('[API] Removed invalid tenant_id from localStorage')
+      }
+    }
+  }
+  
+  // Additional check: if we're on localhost and tenant_id doesn't match expected local tenant
+  // Remove it to avoid conflicts (backend will use default tenant)
+  if (typeof window !== 'undefined' && tenantId && window.location.hostname === 'localhost') {
+    const LOCAL_DEFAULT_TENANT = '0f164fe1-39cb-4fc0-a5b6-e618810d4308'
+    if (tenantId !== LOCAL_DEFAULT_TENANT && tenantId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      // Tenant ID is valid UUID but not the local one - remove it
+      localStorage.removeItem('tenant_id')
+      console.warn('[API] Removed tenant_id from different environment. Backend will use default tenant.')
+      // Remove from config headers if it was set
+      delete config.headers['X-Tenant-ID']
+    }
   }
   
   // Add trace ID for observability (only if not already set)

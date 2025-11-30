@@ -97,6 +97,7 @@ others/uploads/
 # Database
 *.db
 *.sqlite
+*.sql
 
 # Backups (may contain sensitive data)
 backups/
