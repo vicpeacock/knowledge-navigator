@@ -5,14 +5,14 @@
 
 ## Images Created
 
-### 1. `kaggle-card-image.png` (Simplified Version)
+### 1. `assets/kaggle-card-image.png` (Simplified Version)
 - **Dimensions**: 1200x630px ✅
 - **File Size**: ~50KB ✅
 - **Format**: PNG ✅
 - **Content**: Simplified architecture diagram (horizontal layout)
 - **Description**: Clean, minimal architecture showing main components
 
-### 2. `kaggle-card-image-enhanced.png` (Detailed Version)
+### 2. `assets/kaggle-card-image-enhanced.png` (Detailed Version)
 - **Dimensions**: 1200x630px ✅
 - **File Size**: ~67KB ✅
 - **Format**: PNG ✅
@@ -22,8 +22,8 @@
 ## How to Use
 
 1. **Choose the image** that best represents your project:
-   - **Simplified** (`kaggle-card-image.png`): Better for quick understanding, cleaner look
-   - **Enhanced** (`kaggle-card-image-enhanced.png`): More detailed, shows full architecture
+   - **Simplified** (`assets/kaggle-card-image.png`): Better for quick understanding, cleaner look
+   - **Enhanced** (`assets/kaggle-card-image-enhanced.png`): More detailed, shows full architecture
 
 2. **Upload to Kaggle**:
    - Go to your Kaggle submission page
@@ -32,8 +32,8 @@
 
 ## Files Location
 
-- `kaggle-card-image.png` - Root directory
-- `kaggle-card-image-enhanced.png` - Root directory
+- `assets/kaggle-card-image.png` - Assets directory
+- `assets/kaggle-card-image-enhanced.png` - Assets directory
 - `docs/kaggle-card-simplified.mmd` - Source Mermaid diagram (simplified)
 - `docs/kaggle-card-enhanced.mmd` - Source Mermaid diagram (detailed)
 

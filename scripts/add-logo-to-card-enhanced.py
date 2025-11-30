@@ -78,8 +78,8 @@ if __name__ == "__main__":
     
     # Paths - usa le card images con ratio 2:1
     card_images = [
-        ("kaggle-card-image-2400x1200.png", "kaggle-card-image-2400x1200-with-logo.png"),
-        ("kaggle-card-image-1200x600.png", "kaggle-card-image-1200x600-with-logo.png"),
+        ("assets/kaggle-card-image-2400x1200.png", "assets/kaggle-card-image-2400x1200-with-logo.png"),
+        ("assets/kaggle-card-image-1200x600.png", "assets/kaggle-card-image-1200x600-with-logo.png"),
     ]
     
     logo_horizontal = base_dir / "assets" / "logos" / "logo-horizontal.png"

@@ -12,7 +12,7 @@ def create_card_image():
     """Crea card image da Mermaid diagram"""
     
     mermaid_file = Path(__file__).parent.parent / "docs" / "kaggle-card-architecture.mmd"
-    output_file = Path(__file__).parent.parent / "kaggle-card-image.png"
+    output_file = Path(__file__).parent.parent / "assets" / "kaggle-card-image.png"
     
     if not mermaid_file.exists():
         print(f"❌ File Mermaid non trovato: {mermaid_file}")

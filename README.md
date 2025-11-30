@@ -6,7 +6,7 @@ Knowledge Navigator is a production-ready, enterprise-grade multi-agent AI assis
 
 **🏆 Kaggle Submission**: Enterprise Agents Track  
 **🌐 Live Demo**: [Backend](https://knowledge-navigator-backend-osbdwu5a7q-uc.a.run.app) | [Frontend](https://knowledge-navigator-frontend-osbdwu5a7q-uc.a.run.app)  
-**📚 Documentation**: See [KAGGLE_SUBMISSION_WRITEUP.md](./KAGGLE_SUBMISSION_WRITEUP.md) for complete submission details
+**📚 Documentation**: See [KAGGLE_SUBMISSION_WRITEUP.md](./docs/KAGGLE_SUBMISSION_WRITEUP.md) for complete submission details
 
 ## 🎯 Problem Statement
 
@@ -203,7 +203,7 @@ See [docs/ARCHITECTURE_ANALYSIS.md](./docs/ARCHITECTURE_ANALYSIS.md) for detaile
 
 ## 📚 Documentation
 
-- **[KAGGLE_SUBMISSION_WRITEUP.md](./KAGGLE_SUBMISSION_WRITEUP.md)** - Complete Kaggle submission writeup
+- **[KAGGLE_SUBMISSION_WRITEUP.md](./docs/KAGGLE_SUBMISSION_WRITEUP.md)** - Complete Kaggle submission writeup
 - **[docs/ARCHITECTURE_ANALYSIS.md](./docs/ARCHITECTURE_ANALYSIS.md)** - Detailed architecture analysis
 - **[docs/ROADMAP.md](./docs/ROADMAP.md)** - Project roadmap
 - **[cloud-run/DEPLOYMENT_WITHOUT_MCP.md](./cloud-run/DEPLOYMENT_WITHOUT_MCP.md)** - Cloud deployment guide

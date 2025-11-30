@@ -67,10 +67,10 @@ if __name__ == "__main__":
     
     # Card images da correggere
     cards_to_fix = [
-        ("kaggle-card-image-2400x1200.png", 2400, 1200),
-        ("kaggle-card-image-1200x600.png", 1200, 600),
-        ("kaggle-card-image-2400x1200-with-logo.png", 2400, 1200),
-        ("kaggle-card-image-1200x600-with-logo.png", 1200, 600),
+        ("assets/kaggle-card-image-2400x1200.png", 2400, 1200),
+        ("assets/kaggle-card-image-1200x600.png", 1200, 600),
+        ("assets/kaggle-card-image-2400x1200-with-logo.png", 2400, 1200),
+        ("assets/kaggle-card-image-1200x600-with-logo.png", 1200, 600),
     ]
     
     for card_name, width, height in cards_to_fix:

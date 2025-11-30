@@ -7,8 +7,8 @@
 
 ## ✅ Completato
 
-- [x] **Writeup** - `KAGGLE_SUBMISSION_WRITEUP.md` completo (<1500 parole)
-- [x] **Card Image** - Creata `kaggle-card-image.png` e `kaggle-card-image-1200x630.png`
+- [x] **Writeup** - `docs/KAGGLE_SUBMISSION_WRITEUP.md` completo (<1500 parole)
+- [x] **Card Image** - Creata `assets/kaggle-card-image.png` e `assets/kaggle-card-image-1200x630.png`
 - [x] **Repository GitHub** - Pubblico e completo: https://github.com/vicpeacock/knowledge-navigator
 - [x] **Deployment** - Backend e Frontend su Cloud Run, funzionanti
 - [x] **Documentazione** - README aggiornato, architecture documentata
@@ -50,10 +50,10 @@
 
 - [x] **Title**: "Knowledge Navigator: Multi-Agent AI Assistant for Enterprise Knowledge Management"
 - [x] **Subtitle**: "Production-ready multi-agent system with LangGraph, Vertex AI, and Cloud Run"
-- [ ] **Card Image**: Caricare `kaggle-card-image-1200x630.png` o `kaggle-card-image.png`
+- [ ] **Card Image**: Caricare `assets/kaggle-card-image-1200x630.png` o `assets/kaggle-card-image.png`
 - [ ] **YouTube Video URL**: Da aggiungere dopo creazione video
 - [x] **Track**: Enterprise Agents
-- [x] **Project Description**: Copiare da `KAGGLE_SUBMISSION_WRITEUP.md`
+- [x] **Project Description**: Copiare da `docs/KAGGLE_SUBMISSION_WRITEUP.md`
 - [x] **GitHub Link**: https://github.com/vicpeacock/knowledge-navigator
 - [ ] **Deployment URL(s)**: 
   - Backend: https://knowledge-navigator-backend-osbdwu5a7q-uc.a.run.app
@@ -76,7 +76,7 @@
 - [ ] Testare API Docs: https://knowledge-navigator-backend-osbdwu5a7q-uc.a.run.app/docs
 
 ### Card Image
-- [x] Immagine creata (`kaggle-card-image.png`)
+- [x] Immagine creata (`assets/kaggle-card-image.png`)
 - [ ] Verificare leggibilità (testare caricamento su form Kaggle)
 - [ ] Se necessario, usare versione 1200x630
 
