@@ -205,6 +205,11 @@ Riassunto (massimo 500 parole, mantieni tutti i dettagli importanti):"""
         3. Store summaries in medium-term memory
         4. Use summaries + recent messages
         """
+        # Validate session_id at the start
+        if session_id is None:
+            logger.error(f"❌ CRITICAL: get_optimized_context called with session_id=None!")
+            logger.warning("⚠️  Returning all messages without optimization due to missing session_id")
+            return all_messages if all_messages else []
         # Start with recent messages
         recent_messages = all_messages[-keep_recent:] if len(all_messages) > keep_recent else all_messages
         older_messages = all_messages[:-keep_recent] if len(all_messages) > keep_recent else []

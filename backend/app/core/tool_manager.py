@@ -1358,10 +1358,88 @@ class ToolManager:
                 logger.info(f"   ✅ Tool '{actual_tool_name}' found in integration {integration.id}")
                 logger.info(f"   Using MCP client with base_url: {client.base_url}")
                 
+                # SPECIAL HANDLING: For modify_event, if start/end are missing, fetch them from the existing event
+                # Google Calendar API requires start and end times even for partial updates
+                if actual_tool_name == "modify_event" and ("start" not in parameters or "end" not in parameters):
+                    event_id = parameters.get("event_id")
+                    calendar_id = parameters.get("calendar_id", "primary")
+                    if event_id:
+                        logger.info(f"   ⚠️  modify_event called without start/end - fetching existing event {event_id} to get required fields")
+                        try:
+                            # Try to get the event first using get_events (which might return a list) or get_event
+                            get_event_tool_name = None
+                            if "get_event" in tool_names:
+                                get_event_tool_name = "get_event"
+                            elif "get_events" in tool_names:
+                                get_event_tool_name = "get_events"
+                            
+                            if get_event_tool_name:
+                                get_event_result = await asyncio.wait_for(
+                                    client.call_tool(
+                                        tool_name=get_event_tool_name,
+                                        parameters={
+                                            "calendar_id": calendar_id,
+                                            "event_id": event_id,
+                                        }
+                                    ),
+                                    timeout=10.0  # Shorter timeout for this helper call
+                                )
+                                
+                                if not get_event_result.get("isError") and get_event_result.get("content"):
+                                    import json
+                                    event_content = get_event_result.get("content", "")
+                                    # Try to parse as JSON if it's a string
+                                    if isinstance(event_content, str):
+                                        try:
+                                            event_data = json.loads(event_content)
+                                        except json.JSONDecodeError:
+                                            event_data = {"content": event_content}
+                                    else:
+                                        event_data = event_content if isinstance(event_content, dict) else {"content": event_content}
+                                    
+                                    # Extract start and end from event data
+                                    # Event might be in different formats
+                                    event_obj = event_data.get("event") or event_data.get("data") or event_data
+                                    # If it's a list (get_events might return array), take first
+                                    if isinstance(event_obj, list) and len(event_obj) > 0:
+                                        event_obj = event_obj[0]
+                                    if isinstance(event_obj, str):
+                                        try:
+                                            event_obj = json.loads(event_obj)
+                                        except:
+                                            event_obj = {}
+                                    
+                                    start_obj = event_obj.get("start") or {}
+                                    end_obj = event_obj.get("end") or {}
+                                    
+                                    start_time = start_obj.get("dateTime") or start_obj.get("date") or start_obj.get("time")
+                                    end_time = end_obj.get("dateTime") or end_obj.get("date") or end_obj.get("time")
+                                    
+                                    if start_time and "start" not in parameters:
+                                        parameters["start"] = start_time
+                                        logger.info(f"   ✅ Auto-added start time: {start_time}")
+                                    if end_time and "end" not in parameters:
+                                        parameters["end"] = end_time
+                                        logger.info(f"   ✅ Auto-added end time: {end_time}")
+                                    
+                                    if start_time and end_time:
+                                        logger.info(f"   ✅ Successfully retrieved start/end from existing event")
+                                    else:
+                                        logger.warning(f"   ⚠️  Could not extract start/end from event data. Keys: {list(event_obj.keys())[:10] if isinstance(event_obj, dict) else 'not a dict'}")
+                                else:
+                                    logger.warning(f"   ⚠️  Could not retrieve existing event: {get_event_result.get('content', 'No content')[:200]}")
+                            else:
+                                logger.warning(f"   ⚠️  No get_event/get_events tool available to fetch existing event")
+                        except asyncio.TimeoutError:
+                            logger.warning(f"   ⚠️  Timeout fetching existing event for modify_event")
+                        except Exception as fetch_error:
+                            logger.warning(f"   ⚠️  Error fetching existing event for modify_event: {fetch_error}")
+                            # Continue anyway - let the API return the error message
+                
                 try:
                     # Call the MCP tool with timeout to prevent blocking
                     logger.info(f"   Calling tool '{actual_tool_name}' on MCP server")
-                    logger.info(f"   Parameters: {parameters}")
+                    logger.info(f"   Parameters (final): {parameters}")
                     # Log message_ids specifically for Gmail batch tools
                     if "gmail" in actual_tool_name.lower() and "batch" in actual_tool_name.lower():
                         message_ids = parameters.get("message_ids", [])

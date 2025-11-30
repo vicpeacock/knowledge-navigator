@@ -1027,6 +1027,7 @@ async def chat(
     )
     
     # Verify current session exists and belongs to user (needed for both day transition and normal flow)
+    logger.info(f"🔍 Checking session {session_id} for user {current_user.id}, tenant {tenant_id}")
     result = await db.execute(
         select(SessionModel).where(
             SessionModel.id == session_id,
@@ -1035,6 +1036,7 @@ async def chat(
         )
     )
     current_session = result.scalar_one_or_none()
+    logger.info(f"🔍 Current session found: {current_session.id if current_session else 'None'}, day_transition: {day_transition}, new_session: {new_session.id if new_session else 'None'}")
     
     # If day transition occurred, require explicit confirmation via flag
     if day_transition and new_session:
@@ -1043,6 +1045,7 @@ async def chat(
             if current_session:
                 logger.info(f"User chose to stay on previous day session {session_id}, processing message on current session")
                 session = current_session
+                session_id = current_session.id  # Ensure session_id is set correctly
             else:
                 # Current session doesn't exist, fall back to today's session
                 logger.warning(f"Previous day session {session_id} not found, using today's session")
@@ -1076,9 +1079,40 @@ async def chat(
                 user_id=current_user.id,
                 tenant_id=tenant_id,
             )
-            session_id = session.id
+            if session and session.id:
+                session_id = session.id
+            else:
+                logger.error(f"❌ CRITICAL: get_or_create_today_session returned session with None id! User: {current_user.email}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Internal error: Failed to create session. Please try again or refresh the page."
+                )
         else:
             session = current_session
+            session_id = current_session.id  # Ensure session_id is set correctly
+    
+    # Final validation - session_id should NEVER be None at this point
+    if session_id is None:
+        logger.error(f"❌ CRITICAL: session_id is None after session resolution!")
+        logger.error(f"   session object: {session}")
+        logger.error(f"   session.id if session exists: {session.id if session else 'N/A'}")
+        logger.error(f"   current_session: {current_session}")
+        logger.error(f"   current_session.id if exists: {current_session.id if current_session else 'N/A'}")
+        logger.error(f"   day_transition: {day_transition}, new_session: {new_session}")
+        logger.error(f"   new_session.id if exists: {new_session.id if new_session else 'N/A'}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error: Failed to resolve session. Please try again or refresh the page."
+        )
+    
+    if not session:
+        logger.error(f"❌ CRITICAL: session object is None after resolution! session_id={session_id}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error: Failed to resolve session object. Please try again or refresh the page."
+        )
+    
+    logger.info(f"✅ Session resolved: session_id={session_id}, session.status={session.status if session else 'None'}")
     
     # NOTE: Integrity contradiction check is now handled automatically by ConversationLearner
     # when new knowledge is indexed to long-term memory. We don't need to call it here for every message.
@@ -1283,17 +1317,17 @@ async def chat(
                 # New format with metadata
                 content = mem_item.get("content", "")
                 metadata = mem_item.get("metadata", {})
-                session_id = metadata.get("session_id")
+                archived_session_id = metadata.get("session_id")  # Use different variable name to avoid overwriting current session_id
                 session_title = metadata.get("session_title")
                 session_date = metadata.get("session_date")
                 session_status = metadata.get("session_status")
                 
                 # Format with session info if available
-                if session_id and session_title:
+                if archived_session_id and session_title:
                     formatted = f"[Session: {session_title}"
                     if session_date:
                         formatted += f" | {session_date}"
-                    formatted += f" | ID: {session_id}]\n{content}"
+                    formatted += f" | ID: {archived_session_id}]\n{content}"
                 else:
                     formatted = content
                 formatted_long_mem.append(formatted)
@@ -1321,6 +1355,14 @@ async def chat(
     if file_context_info:
         retrieved_memory = file_context_info + retrieved_memory
     
+    # Validate session_id before calling get_optimized_context
+    if session_id is None:
+        logger.error(f"❌ CRITICAL: session_id is None before get_optimized_context! User: {current_user.email}, tenant: {tenant_id}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error: Session ID is missing. Please try again or refresh the page."
+        )
+    
     # Now get optimized context AFTER retrieving memory (to consider it in size calculation)
     session_context = await summarizer.get_optimized_context(
         db=db,
@@ -1332,7 +1374,7 @@ async def chat(
         keep_recent=settings.context_keep_recent_messages,
     )
     
-    # Validate session_id before saving message
+    # Validate session_id again before saving message (in case it was modified by get_optimized_context)
     if session_id is None:
         logger.error(f"❌ CRITICAL: session_id is None when trying to save user message! User: {current_user.email}, tenant: {tenant_id}")
         raise HTTPException(

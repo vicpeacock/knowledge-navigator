@@ -1028,8 +1028,25 @@ async def get_mcp_tools(
         else:
             logger.info(f"Successfully retrieved {len(tools)} tools")
             if tools:
-                logger.info(f"First 5 tool names: {[tool.get('name', 'unknown') if isinstance(tool, dict) else str(tool)[:50] for tool in tools[:5]]}")
+                tool_names = [tool.get('name', 'unknown') if isinstance(tool, dict) else str(tool)[:50] for tool in tools]
+                logger.info(f"First 5 tool names: {tool_names[:5]}")
                 logger.info(f"First tool structure: {json.dumps(tools[0] if tools and isinstance(tools[0], dict) else {}, indent=2)[:500]}")
+                
+                # Update integration metadata with latest tool names (refresh cache)
+                # This ensures that newly available tools (e.g., after OAuth) are visible
+                session_metadata = integration.session_metadata or {}
+                old_tool_names = session_metadata.get("available_tools", [])
+                session_metadata["available_tools"] = tool_names
+                
+                # Log if new tools were discovered
+                new_tools = set(tool_names) - set(old_tool_names)
+                if new_tools:
+                    logger.info(f"🆕 Discovered {len(new_tools)} new tools: {list(new_tools)[:10]}{'...' if len(new_tools) > 10 else ''}")
+                
+                # Update integration metadata in database
+                integration.session_metadata = session_metadata
+                flag_modified(integration, "session_metadata")
+                await db.commit()
             else:
                 logger.warning("Tools list is empty!")
         
