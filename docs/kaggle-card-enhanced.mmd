@@ -1,4 +1,4 @@
-%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#2563eb', 'primaryTextColor':'#ffffff', 'primaryBorderColor':'#1e40af', 'lineColor':'#3b82f6', 'secondaryColor':'#60a5fa', 'tertiaryColor':'#93c5fd', 'fontSize':'18px', 'fontFamily':'Arial, sans-serif'}}}%%
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#2563eb', 'primaryTextColor':'#ffffff', 'primaryBorderColor':'#1e40af', 'lineColor':'#3b82f6', 'secondaryColor':'#60a5fa', 'tertiaryColor':'#93c5fd', 'fontSize':'24px', 'fontFamily':'Arial, sans-serif', 'primaryBorderWidth':'3px'}}}%%
 graph TB
     subgraph "Knowledge Navigator"
         direction TB
@@ -11,20 +11,20 @@ graph TB
         LangGraph --> KnowledgeAgent[📚 Knowledge Agent]
         LangGraph --> PlannerAgent[📋 Planner Agent]
         
-        KnowledgeAgent --> Memory[💾 Multi-Tier Memory System]
-        Memory -->|Short-Term| ShortMem[💭 Session Context]
-        Memory -->|Medium-Term| MediumMem[📝 30-day Context]
-        Memory -->|Long-Term| LongMem[💾 Persistent Knowledge]
+        KnowledgeAgent --> Memory[💾 Multi-Tier Memory]
+        Memory -->|Short| ShortMem[💭 Session Context]
+        Memory -->|Medium| MediumMem[📝 30-day Context]
+        Memory -->|Long| LongMem[💾 Persistent Knowledge]
         
-        LongMem --> ChromaDB[(🔍 ChromaDB<br/>Vector Database)]
+        LongMem --> ChromaDB[(🔍 ChromaDB Vector DB)]
         
         MainAgent --> Tools[🛠️ Tool Integration]
         Tools --> MCP[MCP Tools]
         Tools --> Google[Google Workspace]
         Tools --> Web[Web Search]
         
-        Backend --> VertexAI[🤖 Vertex AI<br/>Gemini 2.5 Flash]
-        Backend --> PostgreSQL[(🗄️ PostgreSQL<br/>Supabase)]
+        Backend --> VertexAI[🤖 Vertex AI Gemini 2.5 Flash]
+        Backend --> PostgreSQL[(🗄️ PostgreSQL Supabase)]
         
         Backend --> Observability[📊 Observability]
         Observability --> Tracing[OpenTelemetry]
