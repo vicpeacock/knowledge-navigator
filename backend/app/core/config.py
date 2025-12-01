@@ -112,7 +112,9 @@ class Settings(BaseSettings):
         "email",   # Required for user email in ID token
         "https://www.googleapis.com/auth/calendar",
         "https://www.googleapis.com/auth/calendar.events",
-        "https://www.googleapis.com/auth/gmail.full",  # Full Gmail access (includes read, send, modify, delete)
+        "https://www.googleapis.com/auth/gmail.readonly",  # Read Gmail messages
+        "https://www.googleapis.com/auth/gmail.send",  # Send emails
+        "https://www.googleapis.com/auth/gmail.modify",  # Modify, archive, and delete emails
         "https://www.googleapis.com/auth/drive.readonly",
         "https://www.googleapis.com/auth/drive.file",
         "https://www.googleapis.com/auth/documents.readonly",
