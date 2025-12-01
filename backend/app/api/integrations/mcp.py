@@ -1032,6 +1032,21 @@ async def get_mcp_tools(
                 logger.info(f"First 5 tool names: {tool_names[:5]}")
                 logger.info(f"First tool structure: {json.dumps(tools[0] if tools and isinstance(tools[0], dict) else {}, indent=2)[:500]}")
                 
+                # Log all Gmail tools for debugging
+                gmail_tools = [name for name in tool_names if 'gmail' in name.lower()]
+                if gmail_tools:
+                    logger.info(f"📧 Found {len(gmail_tools)} Gmail tools: {sorted(gmail_tools)}")
+                    
+                    # Check specifically for delete/archive tools
+                    delete_tools = [name for name in gmail_tools if 'delete' in name.lower()]
+                    archive_tools = [name for name in gmail_tools if 'archive' in name.lower()]
+                    if delete_tools:
+                        logger.info(f"   🗑️  Delete tools found: {delete_tools}")
+                    if archive_tools:
+                        logger.info(f"   📦 Archive tools found: {archive_tools}")
+                    if not delete_tools and not archive_tools:
+                        logger.warning(f"   ⚠️  No delete/archive Gmail tools found! All Gmail tools: {gmail_tools}")
+                
                 # Update integration metadata with latest tool names (refresh cache)
                 # This ensures that newly available tools (e.g., after OAuth) are visible
                 session_metadata = integration.session_metadata or {}
