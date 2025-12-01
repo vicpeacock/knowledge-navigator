@@ -860,6 +860,20 @@ class ToolManager:
                 #     result = await self._execute_send_whatsapp_message(parameters)
                 #     logger.info(f"Tool {tool_name} completed")
                 #     return result
+                elif tool_name == "gmail_delete_message":
+                    result = await self._execute_delete_email(parameters, db, session_id=session_id, current_user=current_user)
+                    logger.info(f"Tool {tool_name} completed, message_id: {parameters.get('message_id', 'unknown')}")
+                    add_trace_event("tool.execution.completed", {"tool": tool_name, "type": "gmail"})
+                    duration = time.time() - start_time
+                    observe_histogram("tool_execution_duration_seconds", duration, labels={"tool": tool_name, "type": "gmail"})
+                    return result
+                elif tool_name == "gmail_archive_message":
+                    result = await self._execute_archive_email_gmail(parameters, db, session_id=session_id, current_user=current_user)
+                    logger.info(f"Tool {tool_name} completed, message_id: {parameters.get('message_id', 'unknown')}")
+                    add_trace_event("tool.execution.completed", {"tool": tool_name, "type": "gmail"})
+                    duration = time.time() - start_time
+                    observe_histogram("tool_execution_duration_seconds", duration, labels={"tool": tool_name, "type": "gmail"})
+                    return result
                 else:
                     logger.error(f"Unknown tool: {tool_name}")
                     add_trace_event("tool.execution.error", {"tool": tool_name, "error": "not_found"})
@@ -2794,6 +2808,163 @@ Link trovati: {', '.join(str(l) for l in links)[:200]}...
         return {
             "error": "Il tool send_whatsapp_message non è più disponibile. L'integrazione WhatsApp verrà reintrodotta con le Business API."
         }
+    
+    async def _execute_delete_email(
+        self,
+        parameters: Dict[str, Any],
+        db: AsyncSession,
+        session_id: Optional[UUID] = None,
+        current_user: Optional["User"] = None,
+    ) -> Dict[str, Any]:
+        """Execute gmail_delete_message tool by adding TRASH label via modify_gmail_message_labels"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            message_id = parameters.get("message_id")
+            if not message_id:
+                return {"error": "message_id is required"}
+            
+            # Map to MCP tool: modify_gmail_message_labels with TRASH label
+            # Try different possible tool names
+            # Note: _execute_mcp_tool removes "mcp_" prefix, so we pass the name without prefix
+            possible_tool_names = [
+                "mcp_modify_gmail_message_labels",  # Will search for "modify_gmail_message_labels"
+                "mcp_gmail_modify_message_labels",   # Will search for "gmail_modify_message_labels"
+            ]
+            
+            # Prepare parameters for modify_gmail_message_labels
+            mcp_parameters = {
+                "message_id": message_id,
+                "add_labels": ["TRASH"],
+            }
+            
+            # Try each possible tool name
+            last_error = None
+            for tool_name in possible_tool_names:
+                try:
+                    logger.info(f"   🗑️  Attempting to delete email {message_id} using tool: {tool_name}")
+                    result = await self._execute_mcp_tool(
+                        tool_name,
+                        mcp_parameters,
+                        db,
+                        session_id,
+                        auto_index=False,
+                        current_user=current_user,
+                    )
+                    
+                    # Check if it was successful
+                    if isinstance(result, dict) and "error" not in result:
+                        logger.info(f"   ✅ Email {message_id} deleted successfully using {tool_name}")
+                        return {
+                            "success": True,
+                            "message": f"Email {message_id} eliminata con successo (spostata nel cestino)",
+                            "message_id": message_id,
+                        }
+                    elif isinstance(result, dict) and "error" in result:
+                        error_msg = result.get("error", "")
+                        # If it's a "tool not found" error, try next tool name
+                        if "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
+                            last_error = error_msg
+                            logger.info(f"   ⚠️  Tool {tool_name} not found, trying next...")
+                            continue
+                        else:
+                            # Other error - return it
+                            return result
+                    else:
+                        return result
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning(f"   ⚠️  Error calling {tool_name}: {e}")
+                    continue
+            
+            # If all tool names failed
+            return {
+                "error": f"Impossibile eliminare l'email: tool modify_gmail_message_labels non trovato o non disponibile. Errore: {last_error}",
+                "message_id": message_id,
+            }
+        except Exception as e:
+            logger.error(f"Error in _execute_delete_email: {e}", exc_info=True)
+            return {"error": f"Errore durante l'eliminazione dell'email: {str(e)}"}
+    
+    async def _execute_archive_email_gmail(
+        self,
+        parameters: Dict[str, Any],
+        db: AsyncSession,
+        session_id: Optional[UUID] = None,
+        current_user: Optional["User"] = None,
+    ) -> Dict[str, Any]:
+        """Execute gmail_archive_message tool by removing INBOX label via modify_gmail_message_labels"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            message_id = parameters.get("message_id")
+            if not message_id:
+                return {"error": "message_id is required"}
+            
+            # Map to MCP tool: modify_gmail_message_labels removing INBOX label
+            # Try different possible tool names
+            # Note: _execute_mcp_tool removes "mcp_" prefix, so we pass the name without prefix
+            possible_tool_names = [
+                "mcp_modify_gmail_message_labels",  # Will search for "modify_gmail_message_labels"
+                "mcp_gmail_modify_message_labels",   # Will search for "gmail_modify_message_labels"
+            ]
+            
+            # Prepare parameters for modify_gmail_message_labels
+            # To archive, we remove the INBOX label
+            mcp_parameters = {
+                "message_id": message_id,
+                "remove_labels": ["INBOX"],
+            }
+            
+            # Try each possible tool name
+            last_error = None
+            for tool_name in possible_tool_names:
+                try:
+                    logger.info(f"   📦 Attempting to archive email {message_id} using tool: {tool_name}")
+                    result = await self._execute_mcp_tool(
+                        tool_name,
+                        mcp_parameters,
+                        db,
+                        session_id,
+                        auto_index=False,
+                        current_user=current_user,
+                    )
+                    
+                    # Check if it was successful
+                    if isinstance(result, dict) and "error" not in result:
+                        logger.info(f"   ✅ Email {message_id} archived successfully using {tool_name}")
+                        return {
+                            "success": True,
+                            "message": f"Email {message_id} archiviata con successo",
+                            "message_id": message_id,
+                        }
+                    elif isinstance(result, dict) and "error" in result:
+                        error_msg = result.get("error", "")
+                        # If it's a "tool not found" error, try next tool name
+                        if "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
+                            last_error = error_msg
+                            logger.info(f"   ⚠️  Tool {tool_name} not found, trying next...")
+                            continue
+                        else:
+                            # Other error - return it
+                            return result
+                    else:
+                        return result
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning(f"   ⚠️  Error calling {tool_name}: {e}")
+                    continue
+            
+            # If all tool names failed
+            return {
+                "error": f"Impossibile archiviare l'email: tool modify_gmail_message_labels non trovato o non disponibile. Errore: {last_error}",
+                "message_id": message_id,
+            }
+        except Exception as e:
+            logger.error(f"Error in _execute_archive_email_gmail: {e}", exc_info=True)
+            return {"error": f"Errore durante l'archiviazione dell'email: {str(e)}"}
 
 
 def _get_known_google_workspace_tools() -> List[Dict[str, Any]]:
