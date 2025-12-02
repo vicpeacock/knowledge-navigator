@@ -45,11 +45,16 @@ function VerifyEmailContent() {
           setUserEmail(response.data.email)
         }
 
-        // If backend provided a password_reset_token, redirect to password setup page
+        // If backend provided a password_reset_token, redirect to password setup page (invited user)
         if (response.data.password_reset_token) {
           const resetToken = response.data.password_reset_token as string
           console.log('Redirecting to password setup with token:', resetToken.substring(0, 20) + '...')
           router.push(`/auth/password-reset/confirm?token=${encodeURIComponent(resetToken)}`)
+        } else {
+          // User already has password (normal registration) - redirect to login after short delay
+          setTimeout(() => {
+            router.push('/auth/login?verified=true')
+          }, 2000) // 2 second delay to show success message
         }
       } catch (error: any) {
         console.error('Email verification error:', error)

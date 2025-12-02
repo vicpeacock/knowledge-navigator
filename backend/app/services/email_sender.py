@@ -115,7 +115,10 @@ class EmailSender:
         Returns:
             True if email sent successfully, False otherwise
         """
-        verification_url = f"{settings.frontend_url}/auth/verify-email?token={verification_token}"
+        # Use FRONTEND_URL env var if available, otherwise use settings.frontend_url
+        import os
+        frontend_url = os.getenv("FRONTEND_URL") or settings.frontend_url or "http://localhost:3003"
+        verification_url = f"{frontend_url}/auth/verify-email?token={verification_token}"
         
         # HTML email body
         html_body = f"""

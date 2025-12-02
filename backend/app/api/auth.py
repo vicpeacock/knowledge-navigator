@@ -135,15 +135,29 @@ async def register(
     
     logger.info(f"User registered: {user.email} (tenant: {effective_tenant_id})")
     
-    # TODO: Send verification email
-    # For now, we'll return the token (in production, send via email)
+    # Send verification email
+    try:
+        from app.services.email_sender import get_email_sender
+        email_sender = get_email_sender()
+        email_sent = await email_sender.send_invitation_email(
+            to_email=user.email,
+            user_name=user.name,
+            verification_token=verification_token,
+            admin_name=None,  # Self-registration, no admin
+        )
+        if email_sent:
+            logger.info(f"Verification email sent to {user.email}")
+        else:
+            logger.warning(f"Failed to send verification email to {user.email} (check SMTP configuration)")
+    except Exception as e:
+        logger.error(f"Error sending verification email to {user.email}: {str(e)}", exc_info=True)
+        # Don't fail registration if email fails - user can request resend
     
     return {
         "user_id": str(user.id),
         "email": user.email,
         "name": user.name,
         "email_verification_required": True,
-        "verification_token": verification_token,  # Remove in production
     }
 
 

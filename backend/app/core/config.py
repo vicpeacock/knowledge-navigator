@@ -213,7 +213,7 @@ class Settings(BaseSettings):
     smtp_from_email: Optional[str] = None  # From email address
     smtp_from_name: Optional[str] = "Knowledge Navigator"  # From name
     
-    # Frontend URL (for email links)
+    # Frontend URL (for email links) - Pydantic Settings reads from env var automatically
     frontend_url: str = "http://localhost:3003"
     base_url: str = "http://localhost:8000"  # Backend base URL for OAuth redirects
     
