@@ -4,15 +4,30 @@ import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { authApi } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 
 export const dynamic = 'force-dynamic'
 
 function VerifyEmailContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { isAuthenticated, logout } = useAuth()
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [message, setMessage] = useState<string>('')
   const [userEmail, setUserEmail] = useState<string | null>(null)
+
+  // Force logout if user is already authenticated (e.g., admin session open)
+  // This ensures that after email verification, user goes to login page instead of dashboard
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log('[VerifyEmail] User is authenticated, logging out to force login page after verification')
+      // Clear tokens directly to avoid redirect from logout function
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('tenant_id')
+      // Don't call logout() here as it redirects, we'll handle redirect after verification
+    }
+  }, [isAuthenticated])
 
   useEffect(() => {
     const verifyEmail = async () => {
@@ -52,6 +67,10 @@ function VerifyEmailContent() {
           router.push(`/auth/password-reset/confirm?token=${encodeURIComponent(resetToken)}`)
         } else {
           // User already has password (normal registration) - redirect to login after short delay
+          // Make sure we're logged out before redirecting
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+          localStorage.removeItem('tenant_id')
           setTimeout(() => {
             router.push('/auth/login?verified=true')
           }, 2000) // 2 second delay to show success message
