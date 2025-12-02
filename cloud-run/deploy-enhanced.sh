@@ -370,12 +370,16 @@ function deploy_backend() {
 function build_frontend() {
     log_info "Building frontend Docker image..."
     
+    # Setup Artifact Registry variables
+    setup_artifact_registry
+    
     cd "$PROJECT_ROOT"
     
     # Get backend URL if available
     REGION="${GCP_REGION:-us-central1}"
     BACKEND_URL=$(gcloud run services describe knowledge-navigator-backend \
         --region "$REGION" \
+        --project "${GCP_PROJECT_ID_NAME}" \
         --format 'value(status.url)' 2>/dev/null || echo "")
     
     if [ -z "$BACKEND_URL" ]; then
@@ -385,30 +389,67 @@ function build_frontend() {
     
     log_info "Using backend URL: $BACKEND_URL"
     
+    TIMESTAMP_TAG=$(date +%Y%m%d-%H%M%S)
+    
     docker build \
         --platform linux/amd64 \
         -f Dockerfile.frontend \
         --build-arg NEXT_PUBLIC_API_URL="$BACKEND_URL" \
-        -t gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-frontend:latest .
-    
-    docker tag gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-frontend:latest \
-        gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-frontend:$(date +%Y%m%d-%H%M%S)
+        -t ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-frontend:${TIMESTAMP_TAG} \
+        -t ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-frontend:latest .
     
     log_info "✅ Frontend image built"
 }
 
 function push_frontend() {
-    log_info "Pushing frontend image to Google Container Registry..."
-    docker push gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-frontend:latest
-    log_info "✅ Frontend image pushed"
+    # Setup Artifact Registry variables
+    setup_artifact_registry
+    
+    log_info "Pushing frontend image to Artifact Registry (${ARTIFACT_REGISTRY_URL})..."
+    
+    # Push with timestamp tag first (less likely to have conflicts)
+    TIMESTAMP_TAG=$(docker images ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-frontend --format "{{.Tag}}" | grep -E "^[0-9]{8}-[0-9]{6}$" | head -1 || echo "")
+    
+    if [ -z "$TIMESTAMP_TAG" ]; then
+        TIMESTAMP_TAG=$(date +%Y%m%d-%H%M%S)
+    fi
+    
+    log_info "Pushing timestamp tag: ${TIMESTAMP_TAG}"
+    if docker push ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-frontend:${TIMESTAMP_TAG}; then
+        log_info "✅ Frontend image pushed with timestamp tag"
+        
+        # Now push latest tag
+        log_info "Pushing latest tag..."
+        if docker push ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-frontend:latest; then
+            log_info "✅ Frontend image pushed successfully (both tags)"
+            return 0
+        else
+            log_warn "Failed to push 'latest' tag, but timestamp tag succeeded. Deployment will use timestamp tag."
+            return 0
+        fi
+    else
+        log_error "Failed to push timestamp tag. Trying latest tag..."
+        # Fallback: try pushing latest directly
+        if docker push ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-frontend:latest; then
+            log_info "✅ Frontend image pushed successfully (latest tag)"
+            return 0
+        else
+            log_error "Failed to push both tags"
+            return 1
+        fi
+    fi
 }
 
 function deploy_frontend() {
     log_info "Deploying frontend to Cloud Run..."
     
+    # Setup Artifact Registry variables
+    setup_artifact_registry
+    
     REGION="${GCP_REGION:-us-central1}"
     BACKEND_URL=$(gcloud run services describe knowledge-navigator-backend \
         --region "$REGION" \
+        --project "${GCP_PROJECT_ID_NAME}" \
         --format 'value(status.url)')
     
     if [ -z "$BACKEND_URL" ]; then
@@ -416,10 +457,24 @@ function deploy_frontend() {
         exit 1
     fi
     
+    # Use timestamp tag if latest push failed, otherwise use latest
+    IMAGE_TAG="latest"
+    TIMESTAMP_TAG=$(docker images ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-frontend --format "{{.Tag}}" | grep -E "^[0-9]{8}-[0-9]{6}$" | head -1 || echo "")
+    if [ -n "$TIMESTAMP_TAG" ]; then
+        # Prefer latest, but use timestamp if latest doesn't exist
+        if docker manifest inspect ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-frontend:latest >/dev/null 2>&1; then
+            IMAGE_TAG="latest"
+        else
+            IMAGE_TAG="${TIMESTAMP_TAG}"
+            log_info "Using timestamp tag for deployment: ${IMAGE_TAG}"
+        fi
+    fi
+    
     gcloud run deploy knowledge-navigator-frontend \
-        --image gcr.io/${GCP_PROJECT_ID}/knowledge-navigator-frontend:latest \
+        --image ${ARTIFACT_REGISTRY_URL}/knowledge-navigator-frontend:${IMAGE_TAG} \
         --platform managed \
         --region "$REGION" \
+        --project "${GCP_PROJECT_ID_NAME}" \
         --allow-unauthenticated \
         --port 3000 \
         --memory 512Mi \
@@ -430,6 +485,7 @@ function deploy_frontend() {
     
     FRONTEND_URL=$(gcloud run services describe knowledge-navigator-frontend \
         --region "$REGION" \
+        --project "${GCP_PROJECT_ID_NAME}" \
         --format 'value(status.url)')
     
     log_info "✅ Frontend deployed: $FRONTEND_URL"
