@@ -35,6 +35,9 @@ async def get_db(tenant_schema: Optional[str] = None) -> AsyncSession:
     If tenant_schema is provided, sets the search_path to that schema.
     This enables schema-per-tenant isolation.
     
+    Note: For RLS support, use get_db_with_tenant() from app.core.db_tenant
+    instead, which automatically sets app.current_tenant_id for RLS policies.
+    
     Args:
         tenant_schema: Optional schema name for tenant isolation
         

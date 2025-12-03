@@ -27,7 +27,7 @@ DEFAULT_TENANT_ID: Optional[UUID] = None
 async def get_tenant_id(
     x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
-    db: AsyncSession = Depends(get_db),
+    db: Optional[AsyncSession] = Depends(get_db, use_cache=False),
 ) -> UUID:
     """
     Extract tenant_id from request headers.
