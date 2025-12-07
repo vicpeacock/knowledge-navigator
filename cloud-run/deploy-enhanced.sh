@@ -353,8 +353,8 @@ function deploy_backend() {
         --project "${GCP_PROJECT_ID_NAME}" \
         --allow-unauthenticated \
         --port 8000 \
-        --memory 2Gi \
-        --cpu 2 \
+        --memory 32Gi \
+        --cpu 8 \
         --timeout 300 \
         --max-instances 10 \
         --set-env-vars "$ENV_VARS"
