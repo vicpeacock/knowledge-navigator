@@ -18,6 +18,10 @@ from app.core.auth import hash_password
 from app.core.tenant_context import get_tenant_id
 from app.core.user_context import require_admin
 from app.core.config import settings
+from app.core.dependencies import get_memory_manager
+from app.core.memory_manager import MemoryManager
+from app.services.embedding_service import EmbeddingService
+from app.db.database import AsyncSessionLocal
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -248,5 +252,189 @@ async def export_full_database(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error exporting database: {str(e)}"
+        )
+
+
+@router.post("/index-internal-knowledge")
+async def index_internal_knowledge(
+    current_user: User = Depends(require_admin),
+):
+    """
+    Index all INTERNAL_*.md documents into ChromaDB for self-awareness RAG.
+    This endpoint reads all INTERNAL_*.md files from docs/ and indexes them
+    into ChromaDB in the internal_knowledge collection.
+    
+    Admin only endpoint.
+    """
+    try:
+        logger.info(f"Admin {current_user.email} requested internal knowledge indexing")
+        
+        from pathlib import Path
+        from datetime import datetime
+        
+        # Find docs directory
+        # Go up from backend/app/api/init.py to find project root
+        project_root = Path(__file__).parent.parent.parent.parent
+        docs_dir = project_root / "docs"
+        
+        if not docs_dir.exists():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"docs/ directory not found at: {docs_dir}"
+            )
+        
+        # Find all INTERNAL_*.md files
+        internal_docs = list(docs_dir.glob("INTERNAL_*.md"))
+        
+        # Filter out documentation files about indexing/verification
+        internal_docs = [
+            doc for doc in internal_docs 
+            if "INDEXING_STATUS" not in doc.name and "VERIFICATION" not in doc.name
+        ]
+        
+        if not internal_docs:
+            return {
+                "message": "No INTERNAL_*.md files found",
+                "docs_dir": str(docs_dir),
+                "indexed": 0,
+                "documents": []
+            }
+        
+        logger.info(f"Found {len(internal_docs)} documents to index:")
+        for doc in internal_docs:
+            logger.info(f"   - {doc.name}")
+        
+        # Initialize MemoryManager
+        # Internal knowledge is shared across all tenants - use default tenant ID
+        default_tenant_id = UUID("00000000-0000-0000-0000-000000000000")
+        embedding_service = EmbeddingService()
+        memory_manager = MemoryManager(
+            embedding_service=embedding_service,
+            tenant_id=default_tenant_id,
+        )
+        
+        # Chunking configuration
+        CHUNK_SIZE = 1000
+        CHUNK_OVERLAP = 200
+        
+        def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+            """Split text into chunks with overlap."""
+            chunks = []
+            start = 0
+            
+            while start < len(text):
+                end = start + chunk_size
+                chunk = text[start:end]
+                
+                if end < len(text):
+                    last_period = chunk.rfind('.')
+                    last_newline = chunk.rfind('\n')
+                    break_point = max(last_period, last_newline)
+                    
+                    if break_point > chunk_size * 0.5:
+                        chunk = chunk[:break_point + 1]
+                        end = start + break_point + 1
+                
+                chunks.append(chunk.strip())
+                start = end - overlap
+            
+            return chunks
+        
+        # Index all documents
+        total_indexed = 0
+        documents_indexed = []
+        errors = []
+        
+        async with AsyncSessionLocal() as db:
+            for doc_path in internal_docs:
+                filename = doc_path.name
+                try:
+                    logger.info(f"📄 Indexing {filename}...")
+                    
+                    # Read document
+                    content = doc_path.read_text(encoding="utf-8")
+                    
+                    if not content.strip():
+                        logger.warning(f"⚠️  {filename} is empty, skipping")
+                        continue
+                    
+                    # Chunk the document
+                    chunks = chunk_text(content)
+                    logger.info(f"   Split into {len(chunks)} chunks")
+                    
+                    # Get collection (shared)
+                    collection = memory_manager._get_collection("internal_knowledge", shared=True)
+                    
+                    if collection is None:
+                        error_msg = f"Could not get internal_knowledge collection"
+                        logger.error(f"❌ {error_msg}")
+                        errors.append({"document": filename, "error": error_msg})
+                        continue
+                    
+                    # Delete existing chunks for this document first (re-index)
+                    try:
+                        existing_results = collection.get(
+                            where={"document": {"$eq": filename}, "type": {"$eq": "internal_knowledge"}},
+                        )
+                        existing_ids = existing_results.get("ids", []) if existing_results else []
+                        if existing_ids:
+                            collection.delete(ids=existing_ids)
+                            logger.info(f"   Deleted {len(existing_ids)} existing chunks")
+                    except Exception as e:
+                        logger.warning(f"   Could not delete existing chunks: {e}")
+                    
+                    # Index each chunk
+                    chunks_indexed = 0
+                    for i, chunk in enumerate(chunks):
+                        if not chunk.strip():
+                            continue
+                        
+                        chunk_content = f"[Document: {filename}]\n\n{chunk}"
+                        embedding = embedding_service.generate_embedding(chunk_content)
+                        embedding_id = f"internal_{filename}_{i}_{datetime.now().isoformat()}"
+                        
+                        collection.add(
+                            ids=[embedding_id],
+                            embeddings=[embedding],
+                            documents=[chunk_content],
+                            metadatas=[
+                                {
+                                    "type": "internal_knowledge",
+                                    "document": filename,
+                                    "chunk_index": i,
+                                    "importance_score": "1.0",
+                                }
+                            ],
+                        )
+                        chunks_indexed += 1
+                    
+                    total_indexed += chunks_indexed
+                    documents_indexed.append({
+                        "filename": filename,
+                        "chunks": chunks_indexed
+                    })
+                    logger.info(f"✅ Indexed {chunks_indexed} chunks from {filename}")
+                    
+                except Exception as e:
+                    error_msg = f"Error indexing {filename}: {str(e)}"
+                    logger.error(f"❌ {error_msg}", exc_info=True)
+                    errors.append({"document": filename, "error": error_msg})
+        
+        logger.info(f"✨ Done! Indexed {total_indexed} chunks total from {len(documents_indexed)} documents")
+        
+        return {
+            "message": f"Successfully indexed {total_indexed} chunks from {len(documents_indexed)} documents",
+            "total_chunks": total_indexed,
+            "documents": documents_indexed,
+            "errors": errors if errors else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error indexing internal knowledge: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error indexing internal knowledge: {str(e)}"
         )
 
