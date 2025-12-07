@@ -20,7 +20,6 @@ from app.core.user_context import require_admin
 from app.core.config import settings
 from app.core.dependencies import get_memory_manager
 from app.core.memory_manager import MemoryManager
-from app.services.embedding_service import EmbeddingService
 from app.db.database import AsyncSessionLocal
 from uuid import UUID
 
@@ -314,11 +313,7 @@ async def index_internal_knowledge(
         # Initialize MemoryManager
         # Internal knowledge is shared across all tenants - use default tenant ID
         default_tenant_id = UUID("00000000-0000-0000-0000-000000000000")
-        embedding_service = EmbeddingService()
-        memory_manager = MemoryManager(
-            embedding_service=embedding_service,
-            tenant_id=default_tenant_id,
-        )
+        memory_manager = MemoryManager(tenant_id=default_tenant_id)
         
         # Chunking configuration
         CHUNK_SIZE = 1000
@@ -397,7 +392,7 @@ async def index_internal_knowledge(
                             continue
                         
                         chunk_content = f"[Document: {filename}]\n\n{chunk}"
-                        embedding = embedding_service.generate_embedding(chunk_content)
+                        embedding = memory_manager.embedding_service.generate_embedding(chunk_content)
                         embedding_id = f"internal_{filename}_{i}_{datetime.now().isoformat()}"
                         
                         collection.add(
