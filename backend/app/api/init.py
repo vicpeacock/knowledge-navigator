@@ -273,9 +273,16 @@ async def index_internal_knowledge(
         from datetime import datetime
         
         # Find docs directory
-        # Go up from backend/app/api/init.py to find project root
-        project_root = Path(__file__).parent.parent.parent.parent
-        docs_dir = project_root / "docs"
+        # In Docker container: /app/docs/ (project root is /app)
+        # In local development: project_root/docs/ (go up from backend/app/api/init.py)
+        # Try Docker path first, then local path
+        docker_docs_dir = Path("/app/docs")
+        if docker_docs_dir.exists():
+            docs_dir = docker_docs_dir
+        else:
+            # Local development path
+            project_root = Path(__file__).parent.parent.parent.parent
+            docs_dir = project_root / "docs"
         
         if not docs_dir.exists():
             raise HTTPException(

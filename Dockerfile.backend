@@ -46,6 +46,8 @@ WORKDIR /app
 COPY backend/ ./backend/
 # Copia anche alembic.ini nella root per accesso diretto
 COPY backend/alembic.ini ./alembic.ini
+# Copia documentazione interna per indicizzazione auto-coscienza
+COPY docs/ ./docs/
 
 # Crea directory necessarie
 RUN mkdir -p logs uploads
